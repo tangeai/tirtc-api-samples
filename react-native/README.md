@@ -19,6 +19,8 @@ npm run ios
 
 For iOS, run `cd ios && pod install` before opening
 `ios/TiRtcExample.xcworkspace`. Configure your own Apple development team when
-running on a device. See the
+running on a device. `Podfile.lock` is generated locally and intentionally
+ignored; the release gate records the resolved lock separately and verifies the
+exact TiRTC CocoaPods versions. See the
 [TiRTC documentation](https://docs.tange.ai/products/tirtc/) for credentials and
 API guidance.
