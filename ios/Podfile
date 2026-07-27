@@ -1,0 +1,15 @@
+source 'https://github.com/CocoaPods/Specs.git'
+
+project 'Example.xcodeproj'
+
+target 'ExampleIOS' do
+  platform :ios, '14.0'
+  use_frameworks!
+  pod 'TiRTC', '2.2.9'
+end
+
+target 'ExampleMacOS' do
+  platform :osx, '11.5'
+  use_frameworks!
+  pod 'TiRTC', '2.2.9'
+end

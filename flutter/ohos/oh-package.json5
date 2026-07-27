@@ -1,0 +1,14 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "tirtc-kit-example",
+  "version": "0.2.0-alpha.1",
+  "description": "TiRTC Flutter example for OHOS",
+  "license": "UNLICENSED",
+  "dependencies": {
+  },
+  "overrides": {
+    "tirtc_flutter": "file:./har/tirtc_flutter.har",
+    "@ohos/flutter_module": "file:./entry",
+    "@ohos/flutter_ohos": "file:./har/flutter.har"
+  }
+}

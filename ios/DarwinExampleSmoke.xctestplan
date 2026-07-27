@@ -1,0 +1,29 @@
+{
+  "configurations": [
+    {
+      "name": "Configuration 1",
+      "options": {
+      }
+    }
+  ],
+  "defaultOptions": {
+    "codeCoverage": false
+  },
+  "testTargets": [
+    {
+      "target": {
+        "containerPath": "container:Example.xcodeproj",
+        "identifier": "66B5A8829C0E9AE001FC0DA6",
+        "name": "ExampleIOSUITests"
+      }
+    },
+    {
+      "target": {
+        "containerPath": "container:Example.xcodeproj",
+        "identifier": "EA3CAEFDDB9912005DDB9C1D",
+        "name": "ExampleMacOSUITests"
+      }
+    }
+  ],
+  "version": 1
+}

@@ -1,0 +1,9 @@
+{
+  "modelVersion": "5.0.0",
+  "name": "entry",
+  "version": "0.2.0",
+  "dependencies": {
+    "tirtc_flutter": "file:../har/tirtc_flutter.har",
+    "@ohos/flutter_ohos": "har/flutter.har",
+  }
+}

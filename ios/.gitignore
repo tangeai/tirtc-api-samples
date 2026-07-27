@@ -1,0 +1,6 @@
+.DS_Store
+/.api-samples-build/
+/DerivedData/
+/Pods/
+/Example.xcworkspace/
+xcuserdata/

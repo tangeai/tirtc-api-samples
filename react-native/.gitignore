@@ -1,0 +1,11 @@
+.DS_Store
+/.api-samples-build/
+/.artifacts/
+/android/.gradle/
+/android/app/build/
+/ios/Pods/
+/ios/TiRtcExample.xcworkspace/
+/node_modules/
+*.jks
+*.keystore
+xcuserdata/

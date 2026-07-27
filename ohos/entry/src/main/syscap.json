@@ -1,0 +1,30 @@
+{
+  "devices": {
+    "general": [
+      "default"
+    ],
+    "custom": [
+      {
+        "default": [
+          "SystemCapability.Ability.AbilityBase",
+          "SystemCapability.Ability.AbilityRuntime.Core",
+          "SystemCapability.Ability.AbilityRuntime.AbilityCore",
+          "SystemCapability.ArkUI.ArkUI.Full",
+          "SystemCapability.ArkUI.ArkUI.Napi",
+          "SystemCapability.ArkUI.ArkUI.Libuv",
+          "SystemCapability.Base",
+          "SystemCapability.BundleManager.BundleFramework",
+          "SystemCapability.Communication.IPC.Core",
+          "SystemCapability.Communication.NetStack",
+          "SystemCapability.Graphic.Graphic2D.NativeBuffer",
+          "SystemCapability.Graphic.Graphic2D.NativeImage",
+          "SystemCapability.Graphic.Graphic2D.NativeWindow",
+          "SystemCapability.HiviewDFX.HiLog",
+          "SystemCapability.Multimedia.Audio.Core",
+          "SystemCapability.Multimedia.Audio.Renderer",
+          "SystemCapability.WindowManager.WindowManager.Core"
+        ]
+      }
+    ]
+  }
+}

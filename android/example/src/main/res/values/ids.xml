@@ -1,0 +1,8 @@
+<resources>
+    <item name="field_app_id" type="id" />
+    <item name="field_endpoint" type="id" />
+    <item name="field_remote_id" type="id" />
+    <item name="field_audio_stream_id" type="id" />
+    <item name="field_video_stream_id" type="id" />
+    <item name="field_token" type="id" />
+</resources>

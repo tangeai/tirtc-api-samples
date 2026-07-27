@@ -1,0 +1,12 @@
+{
+  "string": [
+    {
+      "name": "EntryAbility_label",
+      "value": "Ti RTC"
+    },
+    {
+      "name": "Microphone_permission_reason",
+      "value": "用于客户端语音对讲时采集并发送本机音频。"
+    }
+  ]
+}
