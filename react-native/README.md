@@ -1,26 +1,22 @@
-# TiRTC React Native API Sample
+# TiRTC React Native API 示例
 
-This sample consumes `tirtc-react-native@2.2.0` from the public npm
-registry. Android and iOS native TiRTC dependencies are resolved by that
-published package.
+这个工程固定引用 npm 公开仓库中的 `tirtc-react-native@2.2.0`。Android 和 iOS 使用的 TiRTC 原生依赖由该 package 自动解析。
 
-## Install
+## 安装依赖
 
 ```bash
 npm ci
 ```
 
-## Run
+## 运行
 
 ```bash
 npm run android
 npm run ios
 ```
 
-For iOS, run `cd ios && pod install` before opening
-`ios/TiRtcExample.xcworkspace`. Configure your own Apple development team when
-running on a device. `Podfile.lock` is generated locally and intentionally
-ignored; the release gate records the resolved lock separately and verifies the
-exact TiRTC CocoaPods versions. See the
-[TiRTC documentation](https://docs.tange.ai/products/tirtc/) for credentials and
-API guidance.
+运行 iOS 版本前，先执行 `cd ios && pod install`，再打开 `ios/TiRtcExample.xcworkspace`。如果需要在真机运行，请使用自己的 Apple Developer Team 完成签名配置。
+
+`Podfile.lock` 在本机生成，不提交到仓库。发布检查会单独保存实际解析的 lock，并验证 TiRTC CocoaPods 依赖是否为预期的精确版本。
+
+更多 API 用法和服务配置见 [TiRTC 文档](https://docs.tange.ai/products/tirtc/)。

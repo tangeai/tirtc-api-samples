@@ -1,26 +1,24 @@
-# TiRTC OHOS API Sample
+# TiRTC OHOS API 示例
 
-This project demonstrates the TiRTC OHOS client playback flow and microphone
-talkback with the published `tirtc@2.2.6` package.
+这个工程展示 TiRTC OHOS 客户端的拉流播放和麦克风对讲流程，固定引用已经公开发布的 `tirtc@2.2.6`。
 
-## Requirements
+## 环境准备
 
-- DevEco Studio with an OpenHarmony / HarmonyOS NEXT SDK compatible with API 23
+- DevEco Studio，以及兼容 API 23 的 OpenHarmony / HarmonyOS NEXT SDK
 - OHPM
 
-## Run
+## 运行
 
-1. Open this `ohos/` directory in DevEco Studio.
-2. Run `ohpm install`.
-3. For a physical device, open `Project Structure → SigningConfigs` and enable
-   the DevEco Studio automatic signing workflow recommended by the platform.
-4. Select the `entry` module and run the application.
+1. 使用 DevEco Studio 打开当前 `ohos/` 目录。
+2. 执行 `ohpm install`。
+3. 如果需要在真机运行，打开 `Project Structure → SigningConfigs`，按平台建议启用 DevEco Studio 自动签名。
+4. 选择 `entry` 模块并运行应用。
 
-Generated certificates, profiles and signing configuration are local developer
-state and must not be committed.
+证书、Profile 和签名配置由 DevEco Studio 保存在本机，不应提交到仓库。
 
-The project intentionally consumes the exact public dependency in both package
-manifests:
+## 依赖版本
+
+根工程与 `entry` 模块都使用同一个公开版本：
 
 ```json5
 {
@@ -30,4 +28,4 @@ manifests:
 }
 ```
 
-TiRTC documentation: https://docs.tange.ai/products/tirtc/
+更多 API 用法和服务配置见 [TiRTC 文档](https://docs.tange.ai/products/tirtc/)。
