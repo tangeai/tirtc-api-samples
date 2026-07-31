@@ -47,6 +47,7 @@ struct ExampleClientPlayer: View {
                         session.toggleClientLocalAudio()
                     }
                     .accessibilityIdentifier("client.local_audio")
+                    .accessibilityValue(session.clientLocalAudioStatus)
                     ExampleAudioOutputVolumeButton(
                         enabled: session.conn?.state == .connected,
                         muted: session.isAudioOutputMuted

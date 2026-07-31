@@ -6,19 +6,27 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
     TiRtcVideoOutputDelegate, @preconcurrency TiRtcAudioInputDelegate
 {
     nonisolated func conn(_ conn: TiRtcConn, didChangeState state: TiRtcConnState, errorCode: Int32) {
+        let connectionIdentity = ObjectIdentifier(conn)
         let rawValue = state.rawValue
         let isConnected = state == .connected
         let isDisconnected = state == .disconnected
         Task { @MainActor [weak self] in
-            self?.setStatus("conn state=\(rawValue) error=\(errorCode)")
+            guard let self else {
+                return
+            }
+            self.setStatus("conn state=\(rawValue) error=\(errorCode)")
             if isConnected {
-                self?.appendStatusLogLine("connected")
-                self?.subscribeDownlink(conn)
+                self.appendStatusLogLine("connected")
+                if let activeConnection = self.conn,
+                    ObjectIdentifier(activeConnection) == connectionIdentity
+                {
+                    self.subscribeDownlink(activeConnection)
+                }
             }
             if isDisconnected {
-                self?.appendStatusLogLine("disconnected error=\(errorCode)")
+                self.appendStatusLogLine("disconnected error=\(errorCode)")
                 if errorCode != 0 {
-                    self?.showUserFacingError(code: errorCode, context: "connect")
+                    self.showUserFacingError(code: errorCode, context: "connect")
                 }
             }
         }

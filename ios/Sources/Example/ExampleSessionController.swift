@@ -303,7 +303,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func stopClient() {
-        appendStatusLogLine("teardown_requested flow=client")
+        setStatus("teardown_requested flow=client")
         let resources = takeClientCleanupResources(shouldShutdownRuntime: false)
         if let resources {
             retiredClientCleanupResources.append(resources)
@@ -420,11 +420,10 @@ final class ExampleSessionController: NSObject, ObservableObject {
             self.clientLocalAudioInput = input
             self.isClientLocalAudioBusy = false
             self.isClientLocalAudioRunning = optionsCode == 0 && startCode == 0 && attachCode == 0
-            self.clientLocalAudioStatus =
-                "local audio options=\(optionsCode) start=\(startCode) attach=\(attachCode)"
-            self.appendStatusLogLine(
+            let status =
                 "client.local_audio started stream=\(streamId) options=\(optionsCode) start=\(startCode) attach=\(attachCode) codec=\(options.codec.rawValue) sample_rate_hz=\(options.sampleRate.rawValue) aec=\(options.aecMode.rawValue) agc=\(options.agcLevel.rawValue) ans=\(options.ansLevel.rawValue)"
-            )
+            self.clientLocalAudioStatus = status
+            self.appendStatusLogLine(status)
             if !self.isClientLocalAudioRunning {
                 let errorCode = optionsCode != 0 ? optionsCode : (startCode != 0 ? startCode : attachCode)
                 self.showUserFacingError(code: errorCode, context: "local audio")
@@ -447,8 +446,9 @@ final class ExampleSessionController: NSObject, ObservableObject {
         clientLocalAudioInput = nil
         isClientLocalAudioBusy = false
         isClientLocalAudioRunning = false
-        clientLocalAudioStatus = "local audio stopped"
-        appendStatusLogLine("client.local_audio stopped detach=\(detachCode) stop=\(stopCode)")
+        let status = "client.local_audio stopped detach=\(detachCode) stop=\(stopCode)"
+        clientLocalAudioStatus = status
+        appendStatusLogLine(status)
     }
 
     private func connect(_ configuration: ExampleClientConfiguration) {
@@ -544,10 +544,14 @@ final class ExampleSessionController: NSObject, ObservableObject {
 
     private func scheduleClientStop(_ resources: ClientCleanupResources?) {
         guard let resources else {
+            statusText = "cleaned"
             return
         }
-        Self.clientCleanupQueue.async {
+        Self.clientCleanupQueue.async { [weak self] in
             resources.stopStreamingForConfigureRoute()
+            Task { @MainActor [weak self] in
+                self?.statusText = "cleaned"
+            }
         }
     }
 

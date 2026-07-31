@@ -122,7 +122,7 @@ final class ExampleUITests: XCTestCase {
         XCTAssertTrue(
             waitForStatusHandlingSystemPermissions(
                 app,
-                "client.player.page",
+                "client.local_audio",
                 statusLog,
                 containing: "client.local_audio started",
                 timeout: 12.0),
@@ -130,27 +130,27 @@ final class ExampleUITests: XCTestCase {
         XCTAssertTrue(
             waitForStatus(
                 app,
-                "client.player.page",
+                "client.local_audio",
                 statusLog,
                 containing: "options=0 start=0 attach=0",
                 timeout: 2.0),
             "client microphone start returned a non-zero code")
         Self.appendStatus(
             statusLog,
-            "smoke_local_audio_started options=0 start=0 attach=0")
+            "smoke_local_audio_started \(statusValue(app, "client.local_audio"))")
         waitForRenderWindow(seconds: 1.0)
         tap(app, "client.local_audio")
         XCTAssertTrue(
             waitForStatus(
                 app,
-                "client.player.page",
+                "client.local_audio",
                 statusLog,
                 containing: "client.local_audio stopped detach=0 stop=0",
                 timeout: 8.0),
             "client microphone did not stop cleanly")
         Self.appendStatus(
             statusLog,
-            "smoke_local_audio_stopped detach=0 stop=0")
+            "smoke_local_audio_stopped \(statusValue(app, "client.local_audio"))")
 
         let diagnostics = waitForClientDiagnosticsData(app, timeout: timeoutSeconds)
         XCTAssertNotNil(diagnostics, "client metrics overlay did not expose useful debug values")
@@ -218,19 +218,18 @@ final class ExampleUITests: XCTestCase {
             "Example did not return to foreground before teardown")
         tap(app, "client.stop")
         XCTAssertTrue(
-            waitForStatus(
-                app,
-                "client.player.page",
-                statusLog,
-                containing: "teardown_requested flow=client",
-                timeout: 3.0),
-            "client teardown was not requested")
-        XCTAssertTrue(waitForElement(app, "client.configure.page", timeout: 8.0))
+            waitForElement(app, "client.configure.page", timeout: 8.0),
+            "client did not return to configure after teardown request")
         Self.appendStatus(statusLog, "smoke_returned_to_configure")
         XCTAssertTrue(
-            Self.waitForFile(statusLog, containing: "cleaned", timeout: 8.0),
+            waitForStatus(
+                app,
+                "client.configure.page",
+                statusLog,
+                containing: "cleaned",
+                timeout: 8.0),
             "client teardown did not finish cleanup")
-        Self.appendStatus(statusLog, "smoke_teardown_completed")
+        Self.appendStatus(statusLog, "smoke_teardown_completed cleaned")
     }
 
     @MainActor
