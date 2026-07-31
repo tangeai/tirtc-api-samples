@@ -120,6 +120,7 @@ class ConfigureForm extends StatelessWidget {
     super.key,
     required this.formKey,
     required this.submitted,
+    required this.enabled,
     required this.startingPlayer,
     required this.appIdController,
     required this.endpointController,
@@ -139,6 +140,7 @@ class ConfigureForm extends StatelessWidget {
 
   final GlobalKey<FormState> formKey;
   final bool submitted;
+  final bool enabled;
   final bool startingPlayer;
   final TextEditingController appIdController;
   final TextEditingController endpointController;
@@ -166,23 +168,23 @@ class ConfigureForm extends StatelessWidget {
           _EndpointAndAppIdFields(
             appIdController: appIdController,
             endpointController: endpointController,
-            enabled: !startingPlayer,
+            enabled: enabled,
             validateEndpoint: validateEndpoint,
           ),
           const SizedBox(height: 16),
-          _RemoteIdField(controller: remoteIdController, enabled: !startingPlayer),
+          _RemoteIdField(controller: remoteIdController, enabled: enabled),
           const SizedBox(height: 16),
           _StreamIdRow(
             audioStreamIdController: audioStreamIdController,
             videoStreamIdController: videoStreamIdController,
-            enabled: !startingPlayer,
+            enabled: enabled,
             validator: validateStreamId,
           ),
           const SizedBox(height: 16),
           ConfigureTokenAcquisitionSection(
             tokenController: tokenController,
             tokenServerAddressController: tokenServerAddressController,
-            enabled: !startingPlayer,
+            enabled: enabled,
             scanSupported: scanSupported,
             validateOneTimeToken: validateOneTimeToken,
             validateTokenServerAddress: validateTokenServerAddress,
@@ -191,10 +193,69 @@ class ConfigureForm extends StatelessWidget {
           const SizedBox(height: 20),
           FilledButton(
             key: DemoWidgetKeys.startDownlinkButton,
-            onPressed: startingPlayer ? null : onStartPlaying,
+            onPressed: enabled ? onStartPlaying : null,
             child: _EnterPlayerButtonLabel(startingPlayer: startingPlayer),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class ConfigureLogUploadAction extends StatelessWidget {
+  const ConfigureLogUploadAction({
+    super.key,
+    required this.enabled,
+    required this.uploading,
+    required this.onUpload,
+  });
+
+  final bool enabled;
+  final bool uploading;
+  final VoidCallback onUpload;
+
+  @override
+  Widget build(BuildContext context) {
+    return Align(
+      alignment: Alignment.centerRight,
+      child: TextButton(
+        key: DemoWidgetKeys.configureLogUploadButton,
+        onPressed: enabled ? onUpload : null,
+        style: TextButton.styleFrom(
+          foregroundColor: ExampleTheme.textHint,
+          disabledForegroundColor: ExampleTheme.textHint.withAlpha(145),
+          minimumSize: const Size(44, 44),
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+          tapTargetSize: MaterialTapTargetSize.padded,
+        ),
+        child: uploading
+            ? const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  SizedBox(
+                    width: 12,
+                    height: 12,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 1.5,
+                      valueColor: AlwaysStoppedAnimation<Color>(ExampleTheme.textHint),
+                    ),
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    '正在上传…',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
+                  ),
+                ],
+              )
+            : const Text(
+                '上传日志',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w400,
+                  decoration: TextDecoration.underline,
+                  decorationThickness: 0.8,
+                ),
+              ),
       ),
     );
   }

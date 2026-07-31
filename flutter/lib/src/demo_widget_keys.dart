@@ -16,6 +16,8 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> commandPanelSendButton = ValueKey<String>('tirtc_example_command_panel_send_button');
   static const ValueKey<String> commandPanelEchoPreset = ValueKey<String>('tirtc_example_command_panel_echo_preset');
   static const ValueKey<String> startDownlinkButton = ValueKey<String>('tirtc_example_start_downlink_button');
+  static const ValueKey<String> configureLogUploadButton =
+      ValueKey<String>('tirtc_example_configure_log_upload_button');
   static const ValueKey<String> endpointField = ValueKey<String>('tirtc_example_endpoint_field');
   static const ValueKey<String> appIdField = ValueKey<String>('tirtc_example_app_id_field');
   static const ValueKey<String> remoteIdField = ValueKey<String>('tirtc_example_remote_id_field');

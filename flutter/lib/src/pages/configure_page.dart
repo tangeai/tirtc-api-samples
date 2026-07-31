@@ -6,11 +6,13 @@ import 'package:flutter/services.dart';
 import 'package:tirtc_flutter/tirtc_flutter.dart';
 
 import '../demo_configuration.dart';
+import '../demo_downlink_support.dart';
 import '../demo_permissions.dart';
 import '../demo_test_hooks.dart';
 import '../settings/downlink_configuration_store.dart';
 import '../settings/demo_example_settings_store.dart';
 import '../widgets/configure_page_widgets.dart';
+import '../widgets/notice_dialog.dart';
 import 'player_page.dart';
 import 'qr_scanner_page.dart';
 import 'settings_page.dart';
@@ -44,9 +46,11 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   final DemoExamplePermissions _permissions = const DemoExamplePermissions();
   final DemoExampleSettingsStore _settingsStore = const DemoExampleSettingsStore();
   final DemoDownlinkConfigurationStore _configurationStore = const DemoDownlinkConfigurationStore();
+  final DemoLogUploader _logUploader = DemoLogUploader();
 
   bool _submitted = false;
   bool _startingPlayer = false;
+  bool _uploadingLogs = false;
   DemoExampleSettings _settings = const DemoExampleSettings();
   bool _iosLocalNetworkPermissionReady = false;
   Future<bool>? _iosLocalNetworkPermissionRequest;
@@ -83,6 +87,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   @override
   Widget build(BuildContext context) {
     final bool showBackdropOrbs = !Platform.isMacOS;
+    final bool runtimeBusy = _startingPlayer || _uploadingLogs;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _configurePageOverlayStyle,
@@ -100,13 +105,14 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
                       ConfigureHeader(
-                        startingPlayer: _startingPlayer,
+                        startingPlayer: runtimeBusy,
                         onOpenSettings: _openSettings,
                       ),
                       const SizedBox(height: 20),
                       ConfigureForm(
                         formKey: _formKey,
                         submitted: _submitted,
+                        enabled: !runtimeBusy,
                         startingPlayer: _startingPlayer,
                         appIdController: _appIdController,
                         endpointController: _endpointController,
@@ -122,6 +128,12 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
                         scanSupported: _scanSupported,
                         onScanToken: _scanToken,
                         onStartPlaying: _startPlaying,
+                      ),
+                      const SizedBox(height: 2),
+                      ConfigureLogUploadAction(
+                        enabled: !runtimeBusy,
+                        uploading: _uploadingLogs,
+                        onUpload: _uploadLogsFromConfigurePage,
                       ),
                     ],
                   ),
@@ -201,12 +213,74 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   }
 
   Future<void> _startPlaying() async {
+    if (_startingPlayer || _uploadingLogs) {
+      return;
+    }
     final DemoDownlinkConfiguration? configuration = _validatedConfiguration(showFeedback: true);
     if (configuration == null) {
       return;
     }
     await _saveConfigurationSnapshot();
     await _openPlayer(configuration);
+  }
+
+  Future<void> _uploadLogsFromConfigurePage() async {
+    if (_startingPlayer || _uploadingLogs) {
+      return;
+    }
+
+    _dismissKeyboard();
+    setState(() {
+      _uploadingLogs = true;
+    });
+
+    try {
+      final int initializeCode = await TiRtc.initialize(const TiRtcInitOptions());
+      if (initializeCode != 0) {
+        if (mounted) {
+          await context.showNoticeDialog(
+            title: '日志上传失败',
+            content: '日志初始化失败，code $initializeCode。',
+          );
+        }
+        return;
+      }
+
+      final String marker = 'FLUTTER_HOME_LOG_UPLOAD_${DateTime.now().toLocal().toIso8601String()}';
+      TiRtcLogging.i(
+        'flutter_example',
+        'home_log_upload_marker=$marker',
+      );
+      await _logUploader.upload(
+        remoteId: _remoteIdController.text.trim(),
+        isActive: () => mounted,
+        showResult: ({
+          required String title,
+          required String content,
+        }) {
+          if (!mounted) {
+            return Future<void>.value();
+          }
+          return context.showNoticeDialog(
+            title: title,
+            content: content,
+          );
+        },
+      );
+    } finally {
+      final int shutdownCode = await _shutdownRuntimeAfterDisposal();
+      if (shutdownCode != 0) {
+        TiRtcLogging.w(
+          'flutter_example',
+          'home_log_upload_runtime_shutdown_failed code=$shutdownCode',
+        );
+      }
+      if (mounted) {
+        setState(() {
+          _uploadingLogs = false;
+        });
+      }
+    }
   }
 
   DemoDownlinkConfiguration? _validatedConfiguration({
@@ -380,6 +454,9 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   }
 
   Future<void> _openSettings() async {
+    if (_startingPlayer || _uploadingLogs) {
+      return;
+    }
     _dismissKeyboard();
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
@@ -448,7 +525,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   }
 
   Future<void> _scanToken() async {
-    if (!_scanSupported || _startingPlayer) {
+    if (!_scanSupported || _startingPlayer || _uploadingLogs) {
       return;
     }
 

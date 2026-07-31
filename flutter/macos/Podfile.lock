@@ -2,10 +2,10 @@ PODS:
   - FlutterMacOS (1.0.0)
   - mobile_scanner (6.0.2):
     - FlutterMacOS
-  - TiRTC (2.2.9)
+  - TiRTC (2.3.0)
   - tirtc_flutter (1.0.0):
     - FlutterMacOS
-    - TiRTC (= 2.2.9)
+    - TiRTC (= 2.3.0)
 
 DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)
@@ -27,8 +27,8 @@ EXTERNAL SOURCES:
 SPEC CHECKSUMS:
   FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
   mobile_scanner: 07710d6b9b2c220ae899de2d7ecf5d77ffa56333
-  TiRTC: ea9c75c9e92e077b244bd8f4a91301c7d74f4d45
-  tirtc_flutter: 966d865e6ae2a59b26270669e6639d0219b3ac4e
+  TiRTC: fd0f960ca4467161780ae0badc22a9a22d866a5a
+  tirtc_flutter: 5a0fb64dcbfa9f881b87c27482435b29804a0abe
 
 PODFILE CHECKSUM: e62b46eef50f94a6e40d4eb0b6f4bbd518353c09
 

@@ -140,9 +140,6 @@ class DownlinkMetricsOverlayModel {
         height != null &&
         height > 0 &&
         _isKnownVideoCodec(videoCodec) &&
-        _isKnownAudioCodec(audioCodec) &&
-        _isKnownAudioSampleRate(audioSampleRate) &&
-        _isKnownAudioChannels(audioChannels) &&
         _isResolvedDecoderBackend(resolvedDecoderBackend);
   }
 
@@ -295,22 +292,6 @@ class DownlinkMetricsOverlayModel {
 
   static bool _isKnownVideoCodec(int? codec) {
     return codec == _mediaCodecVideoH264 || codec == _mediaCodecVideoH265 || codec == _mediaCodecVideoMjpeg;
-  }
-
-  static bool _isKnownAudioCodec(int? codec) {
-    return codec == _mediaCodecAudioG711A ||
-        codec == _mediaCodecAudioAac ||
-        codec == _mediaCodecAudioPcm ||
-        codec == _mediaCodecAudioOpus ||
-        codec == _mediaCodecAudioAmr;
-  }
-
-  static bool _isKnownAudioSampleRate(int? sampleRate) {
-    return sampleRate == 8000 || sampleRate == 16000;
-  }
-
-  static bool _isKnownAudioChannels(int? channels) {
-    return channels == 1 || channels == 2;
   }
 
   static bool _isResolvedDecoderBackend(int? backend) {
