@@ -2,7 +2,9 @@
 /.api-samples-build/
 /.artifacts/
 /android/.gradle/
+/android/app/.cxx/
 /android/app/build/
+/android/local.properties
 /ios/Pods/
 /ios/Podfile.lock
 /ios/TiRtcExample.xcworkspace/

@@ -20,7 +20,7 @@ if linkage != nil
 end
 
 target 'TiRtcExample' do
-  pod 'TiRTC', '2.2.9'
+  pod 'TiRTC', '2.3.0'
 
   config = use_native_modules!
 
