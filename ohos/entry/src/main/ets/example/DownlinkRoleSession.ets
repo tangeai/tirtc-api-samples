@@ -48,6 +48,7 @@ const MEDIA_CODEC_VIDEO_H265 = 66;
 const MEDIA_CODEC_VIDEO_MJPEG = 67;
 const VIDEO_DECODER_BACKEND_SOFTWARE = 1;
 const VIDEO_DECODER_BACKEND_HARDWARE = 2;
+const METRICS_REFRESH_INTERVAL_MS = 1000;
 
 export interface DownlinkRoleStartOptions {
   context: common.UIAbilityContext;
@@ -109,6 +110,7 @@ export class DownlinkRoleSession {
   private audioOutputMuted: boolean = false;
   private audioOutputMuteStartedAtMs: number = 0;
   private audioOutputMuteStartDurationMs: number = -1;
+  private metricsRefreshTimer: number = -1;
 
   videoOutputViewModel(): TiRtcVideoOutput {
     return this.videoOutput;
@@ -207,6 +209,7 @@ export class DownlinkRoleSession {
     this.callbacks.onConnectingChanged?.(false);
     this.callbacks.onPlayingChanged?.(true);
     this.refreshMetrics();
+    this.startMetricsRefresh();
     hilog.info(LOG_DOMAIN, LOG_TAG,
       'TIRTC_downlink_start_done remote_id=%{public}s audio_stream_id=%{public}d video_stream_id=%{public}d',
       options.remoteId, options.audioStreamId, options.videoStreamId);
@@ -215,8 +218,10 @@ export class DownlinkRoleSession {
 
   async stop(reason: string): Promise<void> {
     if (!this.running && this.conn.state === TiRtcConnState.idle) {
+      this.stopMetricsRefresh();
       return;
     }
+    this.stopMetricsRefresh();
     this.callbacks.onConnectingChanged?.(false);
     this.callbacks.onPlayingChanged?.(false);
     await this.releaseLocalAudioInput();
@@ -384,6 +389,9 @@ export class DownlinkRoleSession {
     this.videoOutput.onRenderSizeChanged = (size) => {
       this.applyVideoRenderSize(size.width, size.height);
     };
+    this.videoOutput.onError = (code: number) => {
+      hilog.error(LOG_DOMAIN, LOG_TAG, 'TIRTC_video_error code=%{public}d', code);
+    };
     this.localAudioInput.onStateChanged = (state: TiRtcInputState): void => {
       hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_downlink_local_audio_state state=%{public}d', state);
     };
@@ -504,6 +512,23 @@ export class DownlinkRoleSession {
     this.callbacks.onMetricsChanged?.(lines.join('\n'));
   }
 
+  private startMetricsRefresh(): void {
+    this.stopMetricsRefresh();
+    this.metricsRefreshTimer = setInterval((): void => {
+      if (this.running) {
+        this.refreshMetrics();
+      }
+    }, METRICS_REFRESH_INTERVAL_MS);
+  }
+
+  private stopMetricsRefresh(): void {
+    if (this.metricsRefreshTimer < 0) {
+      return;
+    }
+    clearInterval(this.metricsRefreshTimer);
+    this.metricsRefreshTimer = -1;
+  }
+
   private formatVideoSize(width: number | undefined, height: number | undefined): string {
     if (width === undefined || height === undefined || width <= 0 || height <= 0) {
       return '--';
@@ -598,6 +623,7 @@ export class DownlinkRoleSession {
   }
 
   private fail(message: string, code: number | null): void {
+    this.stopMetricsRefresh();
     this.callbacks.onConnectingChanged?.(false);
     this.callbacks.onPlayingChanged?.(false);
     this.callbacks.onStatusChanged?.(message, '请检查 token、remote_id、source 或设备日志。');
@@ -630,6 +656,7 @@ export class DownlinkRoleSession {
   }
 
   private resetObjects(): void {
+    this.stopMetricsRefresh();
     this.conn = new TiRtcConn();
     this.audioOutput = new TiRtcAudioOutput();
     this.videoOutput = new TiRtcVideoOutput();

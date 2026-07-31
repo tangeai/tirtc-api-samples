@@ -1,5 +1,5 @@
 import { hilog } from '@kit.PerformanceAnalysisKit';
-import { TiRtcConn, TiRtcVideoOutput } from 'tirtc/Index';
+import { TiRtcConn, TiRtcConnState, TiRtcVideoOutput } from 'tirtc/Index';
 import {
   asciiBytes,
   CONNECT_WAIT_INTERVAL_MS,
@@ -16,7 +16,9 @@ export async function waitConnected(conn: TiRtcConn, timeoutMs: number): Promise
   return new Promise<boolean>((resolve) => {
     const poll = (): void => {
       const metrics = conn.getMetricsSnapshot();
-      if (metrics.code === 0 && metrics.snapshot?.hasConnected === true) {
+      if (metrics.code === 0
+        && metrics.snapshot?.hasConnected === true
+        && conn.state === TiRtcConnState.connected) {
         hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_downlink_connected wait_ms=%{public}d',
           Date.now() - startedAt);
         resolve(true);
