@@ -5,11 +5,11 @@ project 'Example.xcodeproj'
 target 'ExampleIOS' do
   platform :ios, '14.0'
   use_frameworks!
-  pod 'TiRTC', '2.3.0'
+  pod 'TiRTC', '2.3.1'
 end
 
 target 'ExampleMacOS' do
   platform :osx, '11.5'
   use_frameworks!
-  pod 'TiRTC', '2.3.0'
+  pod 'TiRTC', '2.3.1'
 end
