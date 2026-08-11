@@ -1,6 +1,6 @@
 # TiRTC React Native API 示例
 
-这个工程固定引用 npm 公开仓库中的 `tirtc-react-native@2.3.0`。Android 和 iOS 使用的 TiRTC 原生依赖由该 package 自动解析。
+这个工程固定引用 npm 公开仓库中的 `tirtc-react-native@2.3.1`。Android 和 iOS 使用的 TiRTC 原生依赖由该 package 自动解析。
 
 ## 安装依赖
 
