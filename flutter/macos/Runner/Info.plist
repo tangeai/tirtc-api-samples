@@ -30,5 +30,7 @@
 	<string>NSApplication</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Capture local audio for TiRTC example talkback.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save TiRTC recordings and snapshots to your photo library.</string>
 </dict>
 </plist>

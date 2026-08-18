@@ -1,15 +1,17 @@
 import AVFoundation
 import Flutter
 import Network
+import Photos
 import UIKit
 
 @main
 @objc class AppDelegate: FlutterAppDelegate {
   private let preferencesChannelName = "tirtc_example/preferences"
   private let preferencesKeyPrefix = "tirtc_example."
+  private let permissionPreflightEnvironmentKey = "TIRTC_FLUTTER_IOS_PERMISSION_PREFLIGHT"
   private let localNetworkPermissionTimeoutSeconds: TimeInterval = 12.0
   private var localNetworkBrowser: NWBrowser?
-  private var localNetworkPermissionResults: [FlutterResult] = []
+  private var localNetworkPermissionResults: [(Bool) -> Void] = []
 
   override func application(
     _ application: UIApplication,
@@ -60,7 +62,13 @@ import UIKit
       }
     }
 
-    return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
+    if ProcessInfo.processInfo.environment[permissionPreflightEnvironmentKey] == "1" {
+      DispatchQueue.main.async { [weak self] in
+        self?.prepareAutomationPermissions()
+      }
+    }
+    return launched
   }
 
   private func handlePreferencesCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
@@ -143,7 +151,13 @@ import UIKit
   }
 
   private func requestLocalNetworkPermission(result: @escaping FlutterResult) {
-    localNetworkPermissionResults.append(result)
+    beginLocalNetworkPermissionRequest { granted in
+      result(granted)
+    }
+  }
+
+  private func beginLocalNetworkPermissionRequest(completion: @escaping (Bool) -> Void) {
+    localNetworkPermissionResults.append(completion)
     if localNetworkBrowser != nil {
       return
     }
@@ -194,6 +208,54 @@ import UIKit
     localNetworkBrowser = nil
     for result in results {
       result(granted)
+    }
+  }
+
+  private func prepareAutomationPermissions() {
+    NSLog("[TiRTCLab] iOS permission preflight started")
+    beginLocalNetworkPermissionRequest { [weak self] localNetworkGranted in
+      guard let self else { return }
+      self.requestCaptureAccessIfNeeded(for: .video) { cameraGranted in
+        self.requestCaptureAccessIfNeeded(for: .audio) { microphoneGranted in
+          self.requestPhotoLibraryAddAccessIfNeeded { photoLibraryGranted in
+            NSLog(
+              "[TiRTCLab] iOS permission preflight completed local_network=%@ camera=%@ microphone=%@ photo_library_add=%@",
+              localNetworkGranted.description,
+              cameraGranted.description,
+              microphoneGranted.description,
+              photoLibraryGranted.description
+            )
+          }
+        }
+      }
+    }
+  }
+
+  private func requestPhotoLibraryAddAccessIfNeeded(completion: @escaping (Bool) -> Void) {
+    let status: PHAuthorizationStatus
+    if #available(iOS 14.0, *) {
+      status = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+    } else {
+      status = PHPhotoLibrary.authorizationStatus()
+    }
+    switch status {
+    case .authorized, .limited:
+      completion(true)
+    case .notDetermined:
+      let handler: (PHAuthorizationStatus) -> Void = { updatedStatus in
+        DispatchQueue.main.async {
+          completion(updatedStatus == .authorized || updatedStatus == .limited)
+        }
+      }
+      if #available(iOS 14.0, *) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly, handler: handler)
+      } else {
+        PHPhotoLibrary.requestAuthorization(handler)
+      }
+    case .denied, .restricted:
+      completion(false)
+    @unknown default:
+      completion(false)
     }
   }
 

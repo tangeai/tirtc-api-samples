@@ -1,5 +1,10 @@
 export 'demo_token_acquisition.dart'
-    show DemoScanPayload, DemoTokenAcquirer, normalizeDemoConnectionToken, normalizeDemoTokenServerAddress;
+    show
+        DemoScanPayload,
+        DemoStoreScanPayload,
+        DemoTokenAcquirer,
+        normalizeDemoConnectionToken,
+        normalizeDemoTokenServerAddress;
 
 final class DemoExampleSettings {
   static const int videoDecoderPreferenceAuto = 0;

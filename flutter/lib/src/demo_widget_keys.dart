@@ -1,12 +1,36 @@
 import 'package:flutter/widgets.dart';
 
 abstract final class DemoWidgetKeys {
+  static const ValueKey<String> rtcProductTab = ValueKey<String>('tirtc_example_product_tab_rtc');
+  static const ValueKey<String> storeProductTab = ValueKey<String>('tirtc_example_product_tab_store');
+  static const ValueKey<String> storeAppIdField = ValueKey<String>('tirtc_example_store_app_id_field');
+  static const ValueKey<String> storeEndpointField = ValueKey<String>('tirtc_example_store_endpoint_field');
+  static const ValueKey<String> storeTokenField = ValueKey<String>('tirtc_example_store_token_field');
+  static const ValueKey<String> storeAudioChannelField = ValueKey<String>('tirtc_example_store_audio_channel_field');
+  static const ValueKey<String> storeVideoChannelField = ValueKey<String>('tirtc_example_store_video_channel_field');
+  static const ValueKey<String> storeScanButton = ValueKey<String>('tirtc_example_store_scan_button');
+  static const ValueKey<String> storeEnterButton = ValueKey<String>('tirtc_example_store_enter_button');
+  static const ValueKey<String> storeRecordingsPage = ValueKey<String>('tirtc_example_store_recordings_page');
+  static const ValueKey<String> storeCalendarButton = ValueKey<String>('tirtc_example_store_calendar_button');
+  static const ValueKey<String> storeDatePickerButton = ValueKey<String>('tirtc_example_store_date_picker_button');
+  static const ValueKey<String> storeQueryButton = ValueKey<String>('tirtc_example_store_query_button');
+  static const ValueKey<String> storeQueryRetryButton = ValueKey<String>('tirtc_example_store_query_retry_button');
+  static const ValueKey<String> storeSeekSlider = ValueKey<String>('tirtc_example_store_seek_slider');
+  static const ValueKey<String> storeSpeedSelector = ValueKey<String>('tirtc_example_store_speed_selector');
+  static const ValueKey<String> storePauseButton = ValueKey<String>('tirtc_example_store_pause_button');
+  static const ValueKey<String> storeRecordingButton = ValueKey<String>('tirtc_example_store_recording_button');
+  static const ValueKey<String> storeSnapshotButton = ValueKey<String>('tirtc_example_store_snapshot_button');
+  static const ValueKey<String> storeGalleryButton = ValueKey<String>('tirtc_example_store_gallery_button');
+  static const ValueKey<String> storeAudioVolumeButton = ValueKey<String>('tirtc_example_store_audio_volume_button');
   static const ValueKey<String> playerPage = ValueKey<String>('tirtc_example_player_page');
   static const ValueKey<String> playerCommandButton = ValueKey<String>('tirtc_example_player_command_button');
   static const ValueKey<String> playerLocalAudioButton = ValueKey<String>('tirtc_example_player_local_audio_button');
   static const ValueKey<String> playerAudioVolumeButton = ValueKey<String>('tirtc_example_player_audio_volume_button');
   static const ValueKey<String> streamMessageBubble = ValueKey<String>('tirtc_example_stream_message_bubble');
   static const ValueKey<String> playerLogUploadButton = ValueKey<String>('tirtc_example_player_log_upload_button');
+  static const ValueKey<String> playerRecordingButton = ValueKey<String>('tirtc_example_player_recording_button');
+  static const ValueKey<String> playerSnapshotButton = ValueKey<String>('tirtc_example_player_snapshot_button');
+  static const ValueKey<String> playerGalleryButton = ValueKey<String>('tirtc_example_player_gallery_button');
   static const ValueKey<String> commandPanelSheet = ValueKey<String>('tirtc_example_command_panel_sheet');
   static const ValueKey<String> commandPanelCloseButton = ValueKey<String>('tirtc_example_command_panel_close_button');
   static const ValueKey<String> commandPanelCommandIdField =

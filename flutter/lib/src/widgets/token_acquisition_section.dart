@@ -39,23 +39,10 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 10),
-            TextButton(
-              key: DemoWidgetKeys.tokenScanButton,
-              onPressed: enabled && scanSupported ? onScanToken : null,
-              style: TextButton.styleFrom(
-                foregroundColor: enabled && scanSupported ? ExampleTheme.primary : ExampleTheme.textHint,
-                backgroundColor: ExampleTheme.inputSurface,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-                minimumSize: const Size(0, 52),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                  side: const BorderSide(color: ExampleTheme.inputBorder),
-                ),
-              ),
-              child: const Text(
-                '扫码',
-                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
+            ConfigureScanButton(
+              buttonKey: DemoWidgetKeys.tokenScanButton,
+              enabled: enabled && scanSupported,
+              onPressed: onScanToken,
             ),
           ],
         ),
@@ -77,7 +64,7 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
           enabled: enabled,
           keyboardType: TextInputType.url,
           textInputAction: TextInputAction.done,
-          style: const TextStyle(fontSize: 13),
+          style: ExampleTheme.inputTextStyle,
           decoration: const InputDecoration(
             labelText: 'TiRTC DevTools 服务地址',
             hintText: '例如 http://192.168.1.10:8966',
@@ -108,12 +95,52 @@ class _TokenField extends StatelessWidget {
       enabled: enabled,
       keyboardType: TextInputType.text,
       textInputAction: TextInputAction.done,
-      style: const TextStyle(fontSize: 13),
-      decoration: InputDecoration(
+      style: ExampleTheme.inputTextStyle,
+      decoration: const InputDecoration(
         labelText: '一次性连接 Token',
         hintText: '粘贴 v1.xxx 一次性 Token，或点右侧扫码。',
       ),
       validator: validator,
+    );
+  }
+}
+
+class ConfigureScanButton extends StatelessWidget {
+  const ConfigureScanButton({
+    super.key,
+    required this.buttonKey,
+    required this.enabled,
+    required this.onPressed,
+  });
+
+  final Key buttonKey;
+  final bool enabled;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: ExampleTheme.inputControlHeight,
+      child: TextButton(
+        key: buttonKey,
+        onPressed: enabled ? onPressed : null,
+        style: TextButton.styleFrom(
+          foregroundColor: enabled ? ExampleTheme.primary : ExampleTheme.textHint,
+          backgroundColor: ExampleTheme.inputSurface,
+          disabledForegroundColor: ExampleTheme.textHint,
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          minimumSize: const Size(56, ExampleTheme.inputControlHeight),
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          visualDensity: VisualDensity.standard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(ExampleTheme.inputRadius),
+          ),
+        ),
+        child: const Text(
+          '扫码',
+          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+        ),
+      ),
     );
   }
 }

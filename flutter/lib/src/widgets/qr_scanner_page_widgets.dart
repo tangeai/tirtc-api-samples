@@ -14,6 +14,7 @@ class DemoQrScannerPayloadPage<T extends Object> extends StatefulWidget {
     required this.guideText,
     required this.samplePayloadText,
     required this.parsePayload,
+    this.invalidPayloadText = '二维码内容无效，请使用包含 app_id、remote_id、token 的 JSON，或 v1.xxx 纯 Token。',
   });
 
   final String title;
@@ -21,6 +22,7 @@ class DemoQrScannerPayloadPage<T extends Object> extends StatefulWidget {
   final String guideText;
   final String samplePayloadText;
   final DemoQrPayloadParser<T> parsePayload;
+  final String invalidPayloadText;
 
   @override
   State<DemoQrScannerPayloadPage<T>> createState() => _DemoQrScannerPayloadPageState<T>();
@@ -67,24 +69,22 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
             ),
             Positioned.fill(
               child: SafeArea(
-                child: Padding(
-                  padding: const EdgeInsets.fromLTRB(24, 18, 24, 24),
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(24, 18, 24, 32),
                   child: Center(
                     child: ConstrainedBox(
                       constraints: const BoxConstraints(maxWidth: 460),
-                      child: SingleChildScrollView(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: <Widget>[
-                            _buildHeader(context),
-                            const SizedBox(height: 18),
-                            _buildPageLead(context),
-                            const SizedBox(height: 20),
-                            _buildScannerPanel(),
-                            const SizedBox(height: 18),
-                            _buildPayloadGuideCard(context),
-                          ],
-                        ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: <Widget>[
+                          _buildHeader(context),
+                          const SizedBox(height: 18),
+                          _buildPageLead(context),
+                          const SizedBox(height: 20),
+                          _buildScannerPanel(),
+                          const SizedBox(height: 18),
+                          _buildPayloadGuideCard(context),
+                        ],
                       ),
                     ),
                   ),
@@ -257,8 +257,8 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('二维码内容无效，请使用包含 app_id、remote_id、token 的 JSON，或 v1.xxx 纯 Token。'),
+          SnackBar(
+            content: Text(widget.invalidPayloadText),
           ),
         );
       await Future<void>.delayed(const Duration(milliseconds: 900));

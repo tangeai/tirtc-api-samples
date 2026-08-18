@@ -27,12 +27,14 @@ final class DemoExampleSmokeHooks {
   const DemoExampleSmokeHooks({
     required this.markerSink,
     required this.renderWindowSeconds,
+    this.storeQueryWindow,
   });
 
   static DemoExampleSmokeHooks? current;
 
   final DemoAutomationMarkerSink markerSink;
   final int renderWindowSeconds;
+  final ({int startTimeMs, int endTimeMs})? storeQueryWindow;
 }
 
 const int automationCommandEchoId = demoEchoCommandId;

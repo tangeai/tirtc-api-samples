@@ -47,6 +47,8 @@
 	<string>Scan a TiRTC connection token QR code.</string>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Capture local audio for TiRTC example talkback.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Save TiRTC recordings and snapshots to your photo library.</string>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Ti RTC uses local network discovery to trigger iOS network access permission before downlink.</string>
 	<key>NSBonjourServices</key>

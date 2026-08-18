@@ -14,6 +14,9 @@ final class ExampleTheme {
   static const Color surface = Color(0xFFFFFFFF);
   static const Color inputSurface = surface;
   static const Color inputBorder = Color(0xFFE1DBCF);
+  static const double inputControlHeight = 56;
+  static const double inputRadius = 20;
+  static const TextStyle inputTextStyle = TextStyle(fontSize: 13);
   static const Color overlayGlow = Color(0x14659287);
   static const Color overlayShadow = Color(0x0DE7D9B7);
   static const Color failure = Color(0xFFB42318);

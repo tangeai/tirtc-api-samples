@@ -140,6 +140,19 @@ bool demoConnectionTokenLooksValid(String value) {
   return value.trim().startsWith('v1.');
 }
 
+String normalizeDemoStoreToken(String rawValue) {
+  final String token = rawValue.trim();
+  if (!demoStoreTokenLooksValid(token)) {
+    throw const FormatException('store token must be a non-empty opaque value');
+  }
+  return token;
+}
+
+bool demoStoreTokenLooksValid(String value) {
+  final String token = value.trim();
+  return token.isNotEmpty && !token.contains(RegExp(r'\s'));
+}
+
 final class DemoScanPayload {
   const DemoScanPayload({
     required this.token,
@@ -236,4 +249,81 @@ bool _validEndpoint(String text) {
   }
   final Uri? uri = Uri.tryParse(text);
   return uri != null && uri.host.isNotEmpty && (uri.scheme == 'http' || uri.scheme == 'https');
+}
+
+final class DemoStoreScanPayload {
+  const DemoStoreScanPayload({
+    required this.token,
+    this.appId,
+    this.endpoint,
+  });
+
+  final String token;
+  final String? appId;
+  final String? endpoint;
+
+  static const Set<String> _allowedPayloadKeys = <String>{
+    'app_id',
+    'endpoint',
+    'token',
+  };
+
+  static DemoStoreScanPayload? tryParse(String rawValue) {
+    final String text = rawValue.trim();
+    if (text.isEmpty) {
+      return null;
+    }
+    if (text.startsWith('{')) {
+      return _tryParseJson(text);
+    }
+    if (demoStoreTokenLooksValid(text)) {
+      return DemoStoreScanPayload(token: normalizeDemoStoreToken(text));
+    }
+    return null;
+  }
+
+  static DemoStoreScanPayload? _tryParseJson(String rawValue) {
+    final Object? decoded;
+    try {
+      decoded = jsonDecode(DemoScanPayload._normalizeJson(rawValue));
+    } on FormatException {
+      return null;
+    }
+    if (decoded is! Map<Object?, Object?>) {
+      return null;
+    }
+    for (final Object? key in decoded.keys) {
+      if (key is! String || !_allowedPayloadKeys.contains(key)) {
+        return null;
+      }
+    }
+    final String appId = DemoScanPayload._stringValue(decoded['app_id']);
+    final String token = DemoScanPayload._stringValue(decoded['token']);
+    final Object? rawEndpoint = decoded['endpoint'];
+    if (appId.isEmpty || !demoStoreTokenLooksValid(token)) {
+      return null;
+    }
+    if (decoded.containsKey('endpoint') && rawEndpoint != null && rawEndpoint is! String) {
+      return null;
+    }
+    final String? endpoint = rawEndpoint is String ? rawEndpoint.trim() : null;
+    if (endpoint != null && endpoint.isNotEmpty && !_validStoreEndpoint(endpoint)) {
+      return null;
+    }
+    return DemoStoreScanPayload(
+      appId: appId,
+      token: normalizeDemoStoreToken(token),
+      endpoint: endpoint == null || endpoint.isEmpty ? null : endpoint,
+    );
+  }
+}
+
+bool _validStoreEndpoint(String text) {
+  final Uri? uri = Uri.tryParse(text);
+  return uri != null &&
+      uri.scheme == 'https' &&
+      uri.host.isNotEmpty &&
+      uri.userInfo.isEmpty &&
+      uri.fragment.isEmpty &&
+      uri.isAbsolute;
 }

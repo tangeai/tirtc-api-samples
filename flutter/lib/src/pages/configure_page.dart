@@ -11,6 +11,7 @@ import '../demo_permissions.dart';
 import '../demo_test_hooks.dart';
 import '../settings/downlink_configuration_store.dart';
 import '../settings/demo_example_settings_store.dart';
+import '../store/store_entry_page.dart';
 import '../widgets/configure_page_widgets.dart';
 import '../widgets/notice_dialog.dart';
 import 'player_page.dart';
@@ -24,8 +25,9 @@ class DemoConfigurePage extends StatefulWidget {
   State<DemoConfigurePage> createState() => _DemoConfigurePageState();
 }
 
-class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindingObserver {
-  static const int _runtimeObjectsLiveCode = 1007;
+class _DemoConfigurePageState extends State<DemoConfigurePage>
+    with WidgetsBindingObserver, SingleTickerProviderStateMixin {
+  static const int _runtimeObjectsLiveCode = 6026;
   static const int _runtimeShutdownRetryCount = 10;
   static const Duration _runtimeShutdownRetryDelay = Duration(milliseconds: 100);
   static const SystemUiOverlayStyle _configurePageOverlayStyle = SystemUiOverlayStyle(
@@ -47,6 +49,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   final DemoExampleSettingsStore _settingsStore = const DemoExampleSettingsStore();
   final DemoDownlinkConfigurationStore _configurationStore = const DemoDownlinkConfigurationStore();
   final DemoLogUploader _logUploader = DemoLogUploader();
+  late final TabController _productTabController;
 
   bool _submitted = false;
   bool _startingPlayer = false;
@@ -61,6 +64,8 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    _productTabController = TabController(length: 2, vsync: this);
+    _productTabController.addListener(_onProductTabChanged);
     _attachConfigurationAutosaveListeners();
     unawaited(_loadConfigurationSnapshot());
     unawaited(_loadSettingsSnapshot(reason: 'initial'));
@@ -73,6 +78,9 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _productTabController
+      ..removeListener(_onProductTabChanged)
+      ..dispose();
     _appIdController.dispose();
     _endpointController.dispose();
     _remoteIdController.dispose();
@@ -108,32 +116,45 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
                         startingPlayer: runtimeBusy,
                         onOpenSettings: _openSettings,
                       ),
+                      const SizedBox(height: 16),
+                      ConfigureProductTabBar(controller: _productTabController),
                       const SizedBox(height: 20),
-                      ConfigureForm(
-                        formKey: _formKey,
-                        submitted: _submitted,
-                        enabled: !runtimeBusy,
-                        startingPlayer: _startingPlayer,
-                        appIdController: _appIdController,
-                        endpointController: _endpointController,
-                        remoteIdController: _remoteIdController,
-                        audioStreamIdController: _audioStreamIdController,
-                        videoStreamIdController: _videoStreamIdController,
-                        tokenController: _tokenController,
-                        tokenServerAddressController: _tokenServerAddressController,
-                        validateEndpoint: _validateEndpoint,
-                        validateStreamId: _validateStreamId,
-                        validateOneTimeToken: _validateOneTimeToken,
-                        validateTokenServerAddress: _validateTokenServerAddress,
-                        scanSupported: _scanSupported,
-                        onScanToken: _scanToken,
-                        onStartPlaying: _startPlaying,
-                      ),
-                      const SizedBox(height: 2),
-                      ConfigureLogUploadAction(
-                        enabled: !runtimeBusy,
-                        uploading: _uploadingLogs,
-                        onUpload: _uploadLogsFromConfigurePage,
+                      IndexedStack(
+                        index: _productTabController.index,
+                        children: <Widget>[
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: <Widget>[
+                              ConfigureForm(
+                                formKey: _formKey,
+                                submitted: _submitted,
+                                enabled: !runtimeBusy,
+                                startingPlayer: _startingPlayer,
+                                appIdController: _appIdController,
+                                endpointController: _endpointController,
+                                remoteIdController: _remoteIdController,
+                                audioStreamIdController: _audioStreamIdController,
+                                videoStreamIdController: _videoStreamIdController,
+                                tokenController: _tokenController,
+                                tokenServerAddressController: _tokenServerAddressController,
+                                validateEndpoint: _validateEndpoint,
+                                validateStreamId: _validateStreamId,
+                                validateOneTimeToken: _validateOneTimeToken,
+                                validateTokenServerAddress: _validateTokenServerAddress,
+                                scanSupported: _scanSupported,
+                                onScanToken: _scanToken,
+                                onStartPlaying: _startPlaying,
+                              ),
+                              const SizedBox(height: 2),
+                              ConfigureLogUploadAction(
+                                enabled: !runtimeBusy,
+                                uploading: _uploadingLogs,
+                                onUpload: _uploadLogsFromConfigurePage,
+                              ),
+                            ],
+                          ),
+                          DemoStoreEntryPage(enabled: !runtimeBusy),
+                        ],
                       ),
                     ],
                   ),
@@ -147,6 +168,12 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
   }
 
   bool get _scanSupported => Platform.isAndroid || Platform.isIOS;
+
+  void _onProductTabChanged() {
+    if (!_productTabController.indexIsChanging && mounted) {
+      setState(() {});
+    }
+  }
 
   String? _validateEndpoint(String? value) {
     final String text = (value ?? '').trim();
@@ -235,7 +262,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
     });
 
     try {
-      final int initializeCode = await TiRtc.initialize(const TiRtcInitOptions());
+      final int initializeCode = await TiRtc.init(const TiRtcInitOptions());
       if (initializeCode != 0) {
         if (mounted) {
           await context.showNoticeDialog(
@@ -370,7 +397,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage> with WidgetsBindi
           'endpoint=${resolvedConfiguration.endpoint} remoteId=${resolvedConfiguration.remoteId} '
           'tokenPresent=${resolvedConfiguration.token.isNotEmpty}',
     );
-    final int initializeCode = await TiRtc.initialize(
+    final int initializeCode = await TiRtc.init(
       TiRtcInitOptions(
         appId: resolvedConfiguration.appId,
         endpoint: resolvedConfiguration.endpoint,

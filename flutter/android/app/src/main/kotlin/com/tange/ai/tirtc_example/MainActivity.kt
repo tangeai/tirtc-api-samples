@@ -35,6 +35,13 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "checkMicrophonePermission" -> result.success(permissionGranted(Manifest.permission.RECORD_AUDIO))
                 "requestMicrophonePermission" -> requestPermission(Manifest.permission.RECORD_AUDIO, result)
+                "requestGalleryWritePermission" -> {
+                    if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
+                        requestPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE, result)
+                    } else {
+                        result.success(true)
+                    }
+                }
                 "requestLocalNetworkPermission" -> result.success(true)
                 else -> result.notImplemented()
             }

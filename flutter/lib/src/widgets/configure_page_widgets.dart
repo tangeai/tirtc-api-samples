@@ -47,6 +47,115 @@ class ConfigurePageBackground extends StatelessWidget {
   }
 }
 
+class ConfigureProductTabBar extends StatelessWidget {
+  const ConfigureProductTabBar({
+    super.key,
+    required this.controller,
+  });
+
+  static const double _height = 44;
+  static const double _inset = 3;
+
+  final TabController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: controller.animation ?? controller,
+      builder: (BuildContext context, Widget? child) {
+        final double t = controller.animation?.value ?? controller.index.toDouble();
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: ExampleTheme.inputSurface,
+            borderRadius: BorderRadius.circular(ExampleTheme.inputRadius),
+          ),
+          child: SizedBox(
+            height: _height,
+            child: Padding(
+              padding: const EdgeInsets.all(_inset),
+              child: LayoutBuilder(
+                builder: (BuildContext context, BoxConstraints constraints) {
+                  final double segmentWidth = constraints.maxWidth / 2;
+                  return Stack(
+                    children: <Widget>[
+                      Positioned(
+                        left: t * segmentWidth,
+                        top: 0,
+                        bottom: 0,
+                        width: segmentWidth,
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: ExampleTheme.primary,
+                            borderRadius: BorderRadius.circular(ExampleTheme.inputRadius - _inset),
+                          ),
+                        ),
+                      ),
+                      Row(
+                        children: <Widget>[
+                          _ConfigureProductTab(
+                            tabKey: DemoWidgetKeys.rtcProductTab,
+                            label: 'RTC',
+                            selected: controller.index == 0,
+                            onTap: () => controller.animateTo(0),
+                          ),
+                          _ConfigureProductTab(
+                            tabKey: DemoWidgetKeys.storeProductTab,
+                            label: '云录像',
+                            selected: controller.index == 1,
+                            onTap: () => controller.animateTo(1),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ConfigureProductTab extends StatelessWidget {
+  const _ConfigureProductTab({
+    required this.tabKey,
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  final Key tabKey;
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          key: tabKey,
+          onTap: onTap,
+          borderRadius: BorderRadius.circular(ExampleTheme.inputRadius - ConfigureProductTabBar._inset),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight: selected ? FontWeight.w700 : FontWeight.w600,
+                color: selected ? ExampleTheme.foreground : ExampleTheme.textSecondary,
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class ConfigureHeader extends StatelessWidget {
   const ConfigureHeader({
     super.key,
@@ -310,7 +419,7 @@ class _EndpointField extends StatelessWidget {
       enabled: enabled,
       keyboardType: TextInputType.url,
       textInputAction: TextInputAction.next,
-      style: const TextStyle(fontSize: 13),
+      style: ExampleTheme.inputTextStyle,
       decoration: const InputDecoration(
         labelText: 'endpoint',
         hintText: '接入的云端环境，留空则使用默认环境。',
@@ -336,7 +445,7 @@ class _AppIdField extends StatelessWidget {
       controller: controller,
       enabled: enabled,
       textInputAction: TextInputAction.next,
-      style: const TextStyle(fontSize: 13),
+      style: ExampleTheme.inputTextStyle,
       decoration: const InputDecoration(
         labelText: 'app_id',
         hintText: 'TiRTC 应用标识，进入播放页前必须提供。',
@@ -367,7 +476,7 @@ class _RemoteIdField extends StatelessWidget {
       controller: controller,
       enabled: enabled,
       textInputAction: TextInputAction.next,
-      style: const TextStyle(fontSize: 13),
+      style: ExampleTheme.inputTextStyle,
       decoration: const InputDecoration(
         labelText: 'remote_id',
         hintText: '待连接的设备 ID',
@@ -406,7 +515,7 @@ class _StreamIdRow extends StatelessWidget {
             enabled: enabled,
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.next,
-            style: const TextStyle(fontSize: 13),
+            style: ExampleTheme.inputTextStyle,
             decoration: const InputDecoration(
               labelText: 'audio_stream_id',
               hintText: '音频流 ID，默认 10',
@@ -422,7 +531,7 @@ class _StreamIdRow extends StatelessWidget {
             enabled: enabled,
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.next,
-            style: const TextStyle(fontSize: 13),
+            style: ExampleTheme.inputTextStyle,
             decoration: const InputDecoration(
               labelText: 'video_stream_id',
               hintText: '视频流 ID，默认 11',

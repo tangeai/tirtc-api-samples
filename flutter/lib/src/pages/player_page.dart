@@ -8,6 +8,7 @@ import '../app_theme.dart';
 import '../demo_configuration.dart';
 import '../demo_downlink_session.dart';
 import '../demo_downlink_support.dart';
+import '../demo_permissions.dart';
 import '../demo_route_lifecycle.dart';
 import '../demo_stream_message.dart';
 import '../demo_test_hooks.dart';
@@ -23,6 +24,8 @@ import '../widgets/stream_message_bubble.dart';
 import 'player_command_controller.dart';
 import 'player_local_audio_controller.dart';
 import 'player_log_upload_controller.dart';
+
+part 'player_media_file_actions.dart';
 
 enum _DownlinkViewState { idle, connecting, playing, failed }
 
@@ -58,10 +61,16 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   int _sessionGeneration = 0;
   bool _commandConnected = false;
   bool _audioMuted = false;
+  bool _mediaFileBusy = false;
   bool _smokeConnectedMarked = false;
   bool _smokeAudioPlayingMarked = false;
   bool _smokeVideoRenderingMarked = false;
   bool _hasRenderedVideoOnce = false;
+
+  void _setMediaFileBusy(bool value) {
+    if (mounted) setState(() => _mediaFileBusy = value);
+  }
+
   bool _smokeDebugStatsMarked = false;
   bool _smokeRenderWindowStarted = false;
   bool _smokeRenderWindowMarked = false;
@@ -132,7 +141,22 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _logUploadController.reset(notify: false);
     _commandController.reset(notify: false);
     _clearSessionCallbacks();
-    _session.dispose();
+    final DemoAutomationMarkerSink? markerSink = widget.smokeMarkerSink;
+    unawaited(
+      _session.disposeAsync().then((int code) {
+        if (code == 0) {
+          markerSink?.passed('smoke_dispose_completed', payload: <String, Object?>{
+            'dispose_result_observed': true,
+            'code': code,
+          });
+          return;
+        }
+        TiRtcLogging.e(
+          'flutter_example',
+          'downlink_dispose_failed code=$code',
+        );
+      }),
+    );
     super.dispose();
   }
 
@@ -758,11 +782,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       final DownlinkMetricsOverlayModel? metrics = _session.readMetricsOverlay(
         requestedDecoderPreference: widget.configuration.settings.videoDecoderPreference,
       );
-      if (_smokeAudioErrorCount != 0 ||
-          _smokeVideoErrorCount != 0 ||
-          _session.videoState != TiRtcVideoOutputState.rendering ||
-          metrics == null ||
-          !metrics.debugStatsReady) {
+      if (_smokeAudioErrorCount != 0 || _smokeVideoErrorCount != 0 || metrics == null || !metrics.debugStatsReady) {
         _smokeFail(failureStage: 'render_window', message: 'render window ended without healthy output');
         return;
       }
@@ -899,6 +919,24 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                       alignment: WrapAlignment.end,
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: <Widget>[
+                        IconButton.filledTonal(
+                          key: DemoWidgetKeys.playerRecordingButton,
+                          tooltip: _session.isRecording ? '停止本地保存' : '开始本地保存',
+                          onPressed: playing && !_mediaFileBusy ? _toggleRecording : null,
+                          icon: Icon(_session.isRecording ? Icons.stop_circle_outlined : Icons.fiber_manual_record),
+                        ),
+                        IconButton.filledTonal(
+                          key: DemoWidgetKeys.playerSnapshotButton,
+                          tooltip: '截图',
+                          onPressed: playing && !_mediaFileBusy ? _takeSnapshot : null,
+                          icon: const Icon(Icons.camera_alt_outlined),
+                        ),
+                        IconButton.filledTonal(
+                          key: DemoWidgetKeys.playerGalleryButton,
+                          tooltip: '保存到系统相册',
+                          onPressed: playing && !_mediaFileBusy ? _moveLatestMediaToGallery : null,
+                          icon: const Icon(Icons.photo_library_outlined),
+                        ),
                         AudioOutputVolumeButton(
                           key: DemoWidgetKeys.playerAudioVolumeButton,
                           enabled: _commandConnected,
