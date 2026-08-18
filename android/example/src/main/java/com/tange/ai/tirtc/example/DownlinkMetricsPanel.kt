@@ -22,59 +22,62 @@ internal class DownlinkMetricsPanel(
     private val requestedDecoderPreference: Int,
     onShowExplanation: () -> Unit,
 ) : LinearLayout(context) {
-    private val avParameters = metricLine("音视频参数", maxLines = 2)
+    private val avParameters = metricLine("媒体参数")
     private val videoReceive = metricLine("视频接收")
     private val audioReceive = metricLine("音频接收")
-    private val audioStutter = metricLine("音频卡顿", maxLines = 2)
-    private val videoLatency = metricLine("视频输出延迟", maxLines = 2)
-    private val audioLatency = metricLine("音频输出延迟", maxLines = 2)
-    private val connectDuration = metricLine("连接耗时")
-    private val firstFrameDuration = metricLine("首帧耗时")
-    private val sessionStutterRatio = metricLine("本次播放卡顿占比")
-    private val sessionStutterCount = metricLine("本次播放卡顿次数")
-    private val sessionStutterPeak = metricLine("本次播放最长卡顿")
+    private val latency = metricLine("估算延迟")
+    private val startup = metricLine("启动耗时")
+    private val stutter = metricLine("卡顿统计")
+    private val rows = listOf(avParameters, videoReceive, audioReceive, latency, startup, stutter)
 
     init {
         orientation = VERTICAL
-        setPadding(context.dp(12), context.dp(10), context.dp(12), context.dp(10))
-        background = rounded(Color.argb(204, 0, 0, 0), context.dp(8))
-        elevation = context.dp(4).toFloat()
+        setPadding(context.dp(12), context.dp(8), context.dp(12), context.dp(8))
+        background = rounded(Color.WHITE, context.dp(20))
+        elevation = context.dp(8).toFloat()
         addView(
-            TextView(context).apply {
-                text = "播放调试信息"
-                setTextColor(Color.WHITE)
-                textSize = 10f
-                typeface = Typeface.DEFAULT_BOLD
-                paint.isUnderlineText = true
-                setPadding(0, 0, 0, context.dp(10))
+            LinearLayout(context).apply {
+                orientation = HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                addView(
+                    TextView(context).apply {
+                        text = "即时统计"
+                        setTextColor(Color.rgb(17, 17, 17))
+                        textSize = 11f
+                        typeface = Typeface.DEFAULT_BOLD
+                    },
+                    LayoutParams(0, LayoutParams.WRAP_CONTENT, 1f),
+                )
+                addView(
+                    TextView(context).apply {
+                        text = "?"
+                        gravity = Gravity.CENTER
+                        setTextColor(ExampleTheme.primary)
+                        textSize = 15f
+                        setOnClickListener { onShowExplanation() }
+                    },
+                    LayoutParams(context.dp(22), context.dp(22)),
+                )
+                addView(
+                    TextView(context).apply {
+                        text = "⌃ 收起"
+                        gravity = Gravity.CENTER
+                        setTextColor(Color.WHITE)
+                        textSize = 10f
+                        typeface = Typeface.DEFAULT_BOLD
+                        background = rounded(Color.rgb(79, 134, 217), context.dp(12))
+                        setPadding(context.dp(8), 0, context.dp(8), 0)
+                        setOnClickListener {
+                            val show = rows.first().root.visibility != View.VISIBLE
+                            rows.forEach { it.root.visibility = if (show) View.VISIBLE else View.GONE }
+                            text = if (show) "⌃ 收起" else "▮ 即时统计"
+                        }
+                    },
+                    LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(20)).apply { leftMargin = context.dp(6) },
+                )
             },
         )
-        addMetric(avParameters)
-        addMetric(videoReceive)
-        addMetric(audioReceive)
-        addMetric(audioStutter)
-        addMetric(videoLatency)
-        addMetric(audioLatency)
-        addMetric(connectDuration)
-        addMetric(firstFrameDuration)
-        addMetric(sessionStutterRatio)
-        addMetric(sessionStutterCount)
-        addMetric(sessionStutterPeak)
-        addView(
-            TextView(context).apply {
-                text = "?"
-                gravity = Gravity.CENTER
-                textSize = 14f
-                typeface = Typeface.DEFAULT_BOLD
-                setTextColor(Color.WHITE)
-                setPadding(context.dp(6), context.dp(2), context.dp(6), context.dp(2))
-                setOnClickListener { onShowExplanation() }
-            },
-            LayoutParams(context.dp(28), context.dp(28)).apply {
-                gravity = Gravity.END
-                topMargin = context.dp(2)
-            },
-        )
+        rows.forEach(::addMetric)
     }
 
     fun render(
@@ -89,27 +92,25 @@ internal class DownlinkMetricsPanel(
         val videoDebug: TiRtcVideoOutputDebugSnapshot? = video?.getDebugSnapshot()?.snapshot
 
         avParameters.value.text =
-            "分辨率 ${displayVideoSize(videoDebug)} / 视频 ${displayVideoCodec(videoDebug?.codec)} / " +
-            "音频 ${displayAudioCodec(audioDebug?.codec)} / ${displayVideoDecoder(videoDebug)}"
+            "${displayVideoSize(videoDebug)} · ${displayVideoCodec(videoDebug?.codec)} · " +
+            "${displayAudioCodec(audioDebug?.codec)} · ${displayVideoDecoder(videoDebug)}"
         videoReceive.value.text =
-            "码率 ${formatKbps(videoMetrics?.videoInputBitrateKbps)} / " +
-            "接收 ${formatRate(videoMetrics?.videoInputFps, "帧/秒")} / " +
-            "渲染 ${formatRate(videoMetrics?.videoRenderFps, "帧/秒")}"
+            "码率 ${formatKbps(videoMetrics?.videoInputBitrateKbps)} · " +
+            "接收 ${formatRate(videoMetrics?.videoInputFps, "FPS")}"
         audioReceive.value.text =
-            "码率 ${formatKbps(audioMetrics?.audioInputBitrateKbps)} / " +
-            "音频包 ${formatRate(audioMetrics?.audioInputPacketRate, "个/秒")}"
-        audioStutter.value.text =
-            "次数 ${formatCount(audioMetrics?.stutter?.stutterCount)} / " +
-            "累计 ${formatDuration(audioMetrics?.stutter?.stutterTotalMs)} / " +
-            "最长 ${formatDuration(audioMetrics?.stutter?.stutterPeakMs)} / " +
-            (if (audioOutputHealthOk(audioMetrics)) "稳定" else "断续风险")
-        videoLatency.value.text = formatOutputLatency(videoMetrics?.estimatedOutputLatencyMs)
-        audioLatency.value.text = formatOutputLatency(audioMetrics?.estimatedOutputLatencyMs)
-        connectDuration.value.text = formatDuration(connMetrics?.connectDurationMs)
-        firstFrameDuration.value.text = formatDuration(videoMetrics?.startup?.timeToFirstOutputMs)
-        sessionStutterRatio.value.text = formatPercent(videoMetrics?.stutter?.stutterRate)
-        sessionStutterCount.value.text = formatCount(videoMetrics?.stutter?.stutterCount)
-        sessionStutterPeak.value.text = formatDuration(videoMetrics?.stutter?.stutterPeakMs)
+            "码率 ${formatKbps(audioMetrics?.audioInputBitrateKbps)} · " +
+            "PPS ${formatRate(audioMetrics?.audioInputPacketRate, "/s")}"
+        latency.value.text =
+            "视频 ${formatDuration(videoMetrics?.estimatedOutputLatencyMs)} · " +
+            "音频 ${formatDuration(audioMetrics?.estimatedOutputLatencyMs)}"
+        startup.value.text =
+            "连接 ${formatDuration(connMetrics?.connectDurationMs)} · " +
+            "首帧 ${formatDuration(videoMetrics?.startup?.timeToFirstOutputMs)}"
+        stutter.value.text =
+            "视频 ${formatCount(videoMetrics?.stutter?.stutterCount)} / " +
+            "最长 ${formatDuration(videoMetrics?.stutter?.stutterPeakMs)} · " +
+            "音频 ${formatCount(audioMetrics?.stutter?.stutterCount)} / " +
+            "最长 ${formatDuration(audioMetrics?.stutter?.stutterPeakMs)}"
     }
 
     private fun addMetric(metric: MetricLine) {
@@ -123,18 +124,18 @@ internal class DownlinkMetricsPanel(
         val value =
             TextView(context).apply {
                 text = "--"
-                setTextColor(Color.WHITE)
+                setTextColor(Color.rgb(17, 17, 17))
                 textSize = 10f
                 this.maxLines = maxLines
             }
         val root =
             LinearLayout(context).apply {
                 orientation = HORIZONTAL
-                setPadding(0, 0, 0, context.dp(6))
+                setPadding(0, 0, 0, context.dp(4))
                 addView(
                     TextView(context).apply {
-                        text = "[$label] "
-                        setTextColor(Color.WHITE)
+                        text = "$label："
+                        setTextColor(ExampleTheme.primary)
                         textSize = 10f
                         typeface = Typeface.DEFAULT_BOLD
                     },
@@ -185,8 +186,7 @@ internal class DownlinkMetricsPanel(
             nonNegative(metrics?.estimatedOutputLatencyMs)
     }
 
-    private fun formatOutputLatency(valueMs: Long?): String =
-        if (nonNegative(valueMs)) "估算输出延迟 $valueMs ms" else "--"
+    private fun formatOutputLatency(valueMs: Long?): String = if (nonNegative(valueMs)) "估算输出延迟 $valueMs ms" else "--"
 
     private fun formatDuration(durationMs: Long?): String {
         if (durationMs == null || durationMs < 0) {

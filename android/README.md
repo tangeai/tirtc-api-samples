@@ -1,6 +1,6 @@
 # TiRTC Android API 示例
 
-这是一个可以独立构建的 Android 工程，展示 TiRTC SDK 的基本使用方式。工程从 TiRTC 主仓的 Android Example 生成，并固定引用已经公开发布的 `com.tange.ai:tirtc:2.3.1`。
+这是一个可以独立构建的 Android 工程，展示 TiRTC SDK 的基本使用方式。工程从 TiRTC 主仓的 Android Example 生成，并固定引用已经公开发布的 `com.tange.ai:tirtc:2.4.0-alpha.1`。
 
 ## 运行
 

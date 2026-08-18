@@ -17,6 +17,16 @@ data class ClientConfiguration(
     val oneTimeToken: String = token,
 )
 
+data class StoreConfiguration(
+    val appId: String = "",
+    val endpoint: String = "",
+    val token: String = "",
+    val audioChannelId: Int = 10,
+    val videoChannelId: Int = 11,
+)
+
+enum class ConfigureProduct { RTC, STORE }
+
 data class ExampleSettings(
     val decoderPreference: DecoderPreference = DecoderPreference.AUTO,
     val outputBufferStrategy: TiRtcOutputBufferStrategy = TiRtcOutputBufferStrategy.AUTOMATIC,

@@ -12,6 +12,7 @@ import android.widget.AdapterView
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.ImageButton
 import android.widget.LinearLayout
 import android.widget.ScrollView
 import android.widget.Spinner
@@ -104,6 +105,61 @@ internal fun LinearLayout.navigationHeader(
     addViewWithMargin(row, bottom = 20)
 }
 
+internal fun Context.productTabs(
+    selected: ConfigureProduct,
+    onSelected: (ConfigureProduct) -> Unit,
+): View =
+    LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        val rtc =
+            if (selected == ConfigureProduct.RTC) {
+                compactFilledButton("RTC") { onSelected(ConfigureProduct.RTC) }
+            } else {
+                outlinedButton("RTC") { onSelected(ConfigureProduct.RTC) }
+            }
+        rtc.id = R.id.tab_rtc
+        val store =
+            if (selected == ConfigureProduct.STORE) {
+                compactFilledButton("云录像") { onSelected(ConfigureProduct.STORE) }
+            } else {
+                outlinedButton("云录像") { onSelected(ConfigureProduct.STORE) }
+            }
+        store.id = R.id.tab_store
+        addView(rtc, LinearLayout.LayoutParams(0, wrap(), 1f))
+        addView(space(dp(12)))
+        addView(store, LinearLayout.LayoutParams(0, wrap(), 1f))
+    }
+
+internal fun Context.storePlayerTopBar(
+    onBack: () -> Unit,
+    onSelectRecording: () -> Unit,
+    onUploadLogs: () -> Unit,
+): View =
+    LinearLayout(this).apply {
+        gravity = Gravity.CENTER_VERTICAL
+        orientation = LinearLayout.HORIZONTAL
+        setPadding(dp(16), statusBarInset() + dp(12), dp(12), dp(10))
+        setBackgroundColor(ExampleTheme.background)
+        addView(appBarBackButton(onBack).apply { id = R.id.store_back_button }, appBarBackLayoutParams())
+        addView(
+            TextView(context).apply {
+                text = "云录像"
+                setTextColor(ExampleTheme.primary)
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+            },
+            LinearLayout.LayoutParams(0, wrap(), 1f),
+        )
+        addView(
+            appBarActionButton("选择录像", onSelectRecording).apply { id = R.id.store_recordings_button },
+            appBarActionLayoutParams(),
+        )
+        addView(
+            appBarActionButton("上传日志", onUploadLogs).apply { id = R.id.store_upload_logs_button },
+            appBarActionLayoutParams(),
+        )
+    }
+
 internal fun Context.playerTopBar(
     remoteId: String,
     onBack: () -> Unit,
@@ -134,6 +190,8 @@ internal fun Context.playerTopBar(
 
 internal fun Context.playerBottomControls(
     bubble: TextView,
+    recordingButton: View,
+    snapshotButton: View,
     localAudioButton: TextView,
     outputVolumeButton: TextView,
     downlinkButton: TextView,
@@ -152,15 +210,23 @@ internal fun Context.playerBottomControls(
             LinearLayout(context).apply {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
                 orientation = LinearLayout.VERTICAL
-                addView(localAudioButton, context.compactButtonLayoutParams())
+                addView(
+                    LinearLayout(context).apply {
+                        gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                        orientation = LinearLayout.HORIZONTAL
+                        addView(recordingButton, context.mediaButtonLayoutParams())
+                        addView(snapshotButton, context.mediaButtonLayoutParams())
+                    },
+                )
                 addViewWithMargin(
                     LinearLayout(context).apply {
                         gravity = Gravity.END or Gravity.CENTER_VERTICAL
                         orientation = LinearLayout.HORIZONTAL
                         addView(outputVolumeButton, context.compactButtonLayoutParams())
+                        addView(localAudioButton, context.compactButtonLayoutParams())
                         addView(downlinkButton, context.compactButtonLayoutParams())
                     },
-                    top = 8,
+                    top = 12,
                     bottom = 0,
                 )
             },
@@ -169,6 +235,23 @@ internal fun Context.playerBottomControls(
         )
     }
 }
+
+internal fun Context.mediaIconButton(
+    iconResource: Int,
+    description: String,
+    action: () -> Unit,
+): ImageButton =
+    ImageButton(this).apply {
+        setImageResource(iconResource)
+        contentDescription = description
+        setColorFilter(ExampleTheme.primary)
+        background = rounded(0xFFD9E5E2.toInt(), radius = 24, strokeColor = 0xFFD9E5E2.toInt())
+        setPadding(dp(13), dp(13), dp(13), dp(13))
+        setOnClickListener { action() }
+    }
+
+private fun Context.mediaButtonLayoutParams(): LinearLayout.LayoutParams =
+    LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(12) }
 
 internal fun Context.appBarActionButton(
     text: String,

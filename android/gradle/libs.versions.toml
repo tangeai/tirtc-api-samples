@@ -11,8 +11,9 @@ constraintlayout = "2.2.1"
 activityKtx = "1.9.3"
 zxingEmbedded = "4.3.0"
 zxingCore = "3.5.3"
-androidxTestRunner = "1.6.2"
-androidxTestExtJunit = "1.2.1"
+androidxTestRunner = "1.7.0"
+androidxTestExtJunit = "1.3.0"
+androidxTestEspresso = "3.7.0"
 androidxTestUiautomator = "2.3.0"
 ktlintPlugin = "12.1.1"
 junit4 = "4.13.2"
@@ -28,6 +29,7 @@ zxing-embedded = { module = "com.journeyapps:zxing-android-embedded", version.re
 zxing-core = { module = "com.google.zxing:core", version.ref = "zxingCore" }
 androidx-test-runner = { module = "androidx.test:runner", version.ref = "androidxTestRunner" }
 androidx-test-ext-junit = { module = "androidx.test.ext:junit", version.ref = "androidxTestExtJunit" }
+androidx-test-espresso-core = { module = "androidx.test.espresso:espresso-core", version.ref = "androidxTestEspresso" }
 androidx-test-uiautomator = { module = "androidx.test.uiautomator:uiautomator", version.ref = "androidxTestUiautomator" }
 junit4 = { module = "junit:junit", version.ref = "junit4" }
 org-json = { module = "org.json:json", version.ref = "orgJson" }
