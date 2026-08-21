@@ -1,0 +1,4 @@
+interface:
+  display_name: "Nano API Sample"
+  short_description: "新增或维护公开 Nano 设备端 C API 示例"
+  default_prompt: "Use $nano-api-sample to add or update a public Nano device API sample."
