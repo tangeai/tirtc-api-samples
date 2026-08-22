@@ -9,6 +9,7 @@ type StoredConfig = Pick<
   | 'appId'
   | 'endpoint'
   | 'remoteId'
+  | 'tokenServerAddress'
   | 'audioStreamId'
   | 'videoStreamId'
   | 'videoDecoderPreference'
@@ -40,6 +41,7 @@ export async function saveStoredConfig(config: ExampleConfig): Promise<void> {
     appId: config.appId,
     endpoint: config.endpoint,
     remoteId: config.remoteId,
+    tokenServerAddress: config.tokenServerAddress,
     audioStreamId: config.audioStreamId,
     videoStreamId: config.videoStreamId,
     videoDecoderPreference: config.videoDecoderPreference,
@@ -69,6 +71,7 @@ function sanitizeStoredConfig(decoded: Partial<StoredConfig>): Partial<ExampleCo
     appId: stringOrDefault(decoded.appId),
     endpoint: stringOrDefault(decoded.endpoint),
     remoteId: stringOrDefault(decoded.remoteId),
+    tokenServerAddress: stringOrDefault(decoded.tokenServerAddress),
     audioStreamId: stringOrDefault(decoded.audioStreamId, initialConfig.audioStreamId),
     videoStreamId: stringOrDefault(decoded.videoStreamId, initialConfig.videoStreamId),
     videoDecoderPreference: choiceOrDefault(

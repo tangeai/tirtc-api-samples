@@ -3,6 +3,7 @@ package com.tange.ai.tirtc.reactnative.example
 import android.content.Intent
 import android.graphics.BitmapFactory
 import android.graphics.Color
+import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
 import androidx.test.core.app.ApplicationProvider
@@ -19,7 +20,10 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
+import java.io.ByteArrayOutputStream
 import java.io.File
+import java.net.HttpURLConnection
+import java.net.URL
 
 @RunWith(AndroidJUnit4::class)
 class ExamplePublicUiSmokeTest {
@@ -29,8 +33,14 @@ class ExamplePublicUiSmokeTest {
 
   @Test
   fun runPublicUiFlow() {
+    if (arg("flow", "downlink") == "store-sdk") {
+      launchSdkCase()
+      runStoreSdkCase()
+      return
+    }
     launchExample()
     when (arg("flow", "downlink")) {
+      "store" -> runStoreFlow()
       "stress" -> {
         fillCommonConfig()
         runStressFlow()
@@ -40,6 +50,227 @@ class ExamplePublicUiSmokeTest {
         runDownlinkFlow()
       }
     }
+  }
+
+  private fun launchSdkCase() {
+    collapseSystemOverlays()
+    device.pressHome()
+    val context = ApplicationProvider.getApplicationContext<android.content.Context>()
+    val intent = context.packageManager.getLaunchIntentForPackage(PACKAGE_NAME)
+    assertNotNull("missing launch intent for $PACKAGE_NAME", intent)
+    intent!!.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
+    context.startActivity(intent)
+    assertTrue(
+      "Store SDK Case app package did not launch",
+      device.wait(Until.hasObject(By.pkg(PACKAGE_NAME).depth(0)), LAUNCH_TIMEOUT_MS),
+    )
+  }
+
+  private fun runStoreSdkCase() {
+    val deadline = System.currentTimeMillis() + STORE_SDK_CASE_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      if (device.currentPackageName != PACKAGE_NAME) {
+        dumpFailureArtifacts("store_sdk_case_app_exited")
+        throw AssertionError("Store SDK Case app exited before a terminal result")
+      }
+      if (hasAnyText(listOf("TiStore SDK Case Failed"))) {
+        dumpFailureArtifacts("store_sdk_case_failed")
+        throw AssertionError("Store public SDK Case reported failure")
+      }
+      if (hasAnyText(listOf("TiStore SDK Case Passed"))) {
+        marker("store_sdk_case_completed")
+        return
+      }
+      Thread.sleep(500)
+    }
+    dumpFailureArtifacts("store_sdk_case_timeout")
+    throw AssertionError("timed out waiting for Store public SDK Case")
+  }
+
+  private fun runStoreFlow() {
+    val token = fetchOneUseToken(arg("storeTokenUrl"))
+    val startTimeMs = arg("storeStartTimeMs").toLongOrNull() ?: error("missing Store start time")
+    try {
+      clickText("云录像")
+      setConfigField("TiStore Config appId", arg("storeAppId"))
+      setConfigField("TiStore Config endpoint", arg("storeEndpoint"))
+      setConfigField("TiStore Config token", token.concatToString())
+      setConfigField("TiStore Config audioChannelId", arg("storeAudioChannelId", "10"))
+      setConfigField("TiStore Config videoChannelId", arg("storeVideoChannelId", "11"))
+      marker("store_config_filled")
+      storeUiGateCheckpoint("configure")
+      clickDesc("TiStore Open")
+      waitForDesc("TiStore Recordings Sheet", CONNECT_TIMEOUT_MS)
+      waitForDesc("TiStore Play $startTimeMs", CONNECT_TIMEOUT_MS)
+      storeUiGateCheckpoint("sheet", startTimeMs)
+      clickDesc("TiStore Play $startTimeMs")
+      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "store_rendering")
+      val videoDeadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+      while (System.currentTimeMillis() < videoDeadline && !hasVisibleVideoFrame()) Thread.sleep(750)
+      assertTrue("Store video frame was not visible", hasVisibleVideoFrame())
+      marker("store_visible_video_ok")
+      storeUiGateCheckpoint("playback")
+
+      Thread.sleep(5_000L)
+      val speedControl =
+        device.findObject(By.desc("TiStore Speed"))
+          ?: device.findObject(By.res(PACKAGE_NAME, automationId("TiStore Speed")))
+          ?: device.findObject(By.textContains("x1"))
+      assertNotNull("Store speed control is missing", speedControl)
+      val speedBounds = Rect(speedControl.visibleBounds)
+      device.click(speedBounds.centerX(), speedBounds.centerY())
+      waitAnyText(listOf("播放倍速：x2"), SHORT_TIMEOUT_MS, "store_speed_x2")
+      Thread.sleep(2_000L)
+      repeat(3) {
+        device.click(speedBounds.centerX(), speedBounds.centerY())
+        Thread.sleep(1_500L)
+      }
+      waitForStoreSpeedX1()
+
+      clickDesc("TiStore Pause Resume")
+      waitAnyText(listOf("已暂停"), SHORT_TIMEOUT_MS, "store_pause")
+      Thread.sleep(3_000L)
+      clickDesc("TiStore Pause Resume")
+      waitAnyText(listOf("继续播放", "正在播放"), SHORT_TIMEOUT_MS, "store_resume")
+
+      clickDesc("TiStore Mute")
+      waitAnyText(listOf("已静音"), SHORT_TIMEOUT_MS, "store_mute")
+      Thread.sleep(2_000L)
+      clickDesc("TiStore Mute")
+      waitAnyText(listOf("已恢复声音"), SHORT_TIMEOUT_MS, "store_unmute")
+
+      val seek = requireNotNull(findControl("TiStore Seek", "")) { "Store seek control missing" }
+      val seekBounds = seek.visibleBounds
+      device.click(seekBounds.left + seekBounds.width() * 45 / 100, seekBounds.centerY())
+      waitAnyText(listOf("已跳转"), SHORT_TIMEOUT_MS, "store_seek")
+      Thread.sleep(3_000L)
+
+      clickDesc("TiStore Snapshot")
+      waitAnyText(listOf("截图完成"), SHORT_TIMEOUT_MS, "store_snapshot")
+      clickDesc("TiStore Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_snapshot_gallery")
+
+      clickDesc("TiStore Recording")
+      waitAnyText(listOf("边播边录已开始"), SHORT_TIMEOUT_MS, "store_recording_started")
+      Thread.sleep(7_000L)
+      clickDesc("TiStore Recording")
+      waitAnyText(listOf("边播边录完成"), SHORT_TIMEOUT_MS, "store_recording_completed")
+      clickDesc("TiStore Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_recording_gallery")
+
+      clickDesc("TiStore Recordings")
+      clickDesc("TiStore Export $startTimeMs")
+      clickDesc("TiStore Close Recordings")
+      waitAnyText(listOf("范围下载完成"), STORE_EXPORT_TIMEOUT_MS, "store_export_completed")
+      clickDesc("TiStore Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_export_gallery")
+
+      clickDesc("TiStore Recordings")
+      clickDesc("TiStore Play $startTimeMs")
+      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "store_replay_restarted")
+      waitForStoreReplayRendering()
+      val replayDeadline = System.currentTimeMillis() + STORE_CONTINUOUS_PLAYBACK_MS
+      while (System.currentTimeMillis() < replayDeadline) {
+        assertTrue("Store replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
+        assertTrue("Store replay buffered after rendering", !hasAnyText(listOf("缓冲中")))
+        Thread.sleep(1_000L)
+      }
+      marker("store_continuous_playback_ok duration_ms=$STORE_CONTINUOUS_PLAYBACK_MS")
+
+      clickDesc("TiStore Upload Logs")
+      waitForLogUpload("store")
+      clickDesc("TiStore Back")
+      waitForControlVisible("TiStore Open", SHORT_TIMEOUT_MS)
+      marker("store_returned_to_configure")
+      storeUiGateCheckpoint("entry")
+      marker("store_public_ui_done")
+    } finally {
+      token.fill('\u0000')
+    }
+  }
+
+  private fun waitForStoreReplayRendering() {
+    val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      assertTrue("Store replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
+      if (!hasAnyText(listOf("缓冲中")) && hasVisibleVideoFrame()) {
+        marker("store_replay_rendering_ok")
+        return
+      }
+      Thread.sleep(500L)
+    }
+    dumpFailureArtifacts("store_replay_rendering")
+    throw AssertionError("Store replay did not leave its initial buffering state")
+  }
+
+  private fun waitForDesc(desc: String, timeoutMs: Long): UiObject2 {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+      ensureExampleWindow()
+      device.findObject(By.desc(desc))?.let { return it }
+      Thread.sleep(500)
+    }
+    throw AssertionError("timed out waiting for accessibility label: $desc")
+  }
+
+  private fun storeUiGateCheckpoint(name: String, expectedStartMs: Long? = null) {
+    val fileName = "store-ui-$name.png"
+    val checkpointDir = instrumentation.targetContext.getExternalFilesDir(null)
+      ?: instrumentation.targetContext.cacheDir
+    val file = File(checkpointDir, fileName)
+    assertTrue("Store checkpoint screenshot failed: $name", device.takeScreenshot(file))
+    when (name) {
+      "configure" -> {
+        val entry = device.findObject(By.desc("TiStore Open"))
+        assertNotNull("Store configure entry is not visible", entry)
+        assertTrue("Store configure entry is not visible", entry.visibleBounds.height() > 0)
+        val audio = device.findObject(By.desc("TiStore Config audioChannelId"))
+        val video = device.findObject(By.desc("TiStore Config videoChannelId"))
+        assertNotNull("Store audio channel field is missing", audio)
+        assertNotNull("Store video channel field is missing", video)
+        assertTrue("Store channel fields are not on the same row", audio.visibleBounds.top == video.visibleBounds.top)
+      }
+      "sheet" -> {
+        val sheet = device.findObject(By.desc("TiStore Recordings Sheet"))
+          ?: device.findObject(By.res(PACKAGE_NAME, "store-recordings-sheet"))
+        assertNotNull("Store recordings sheet is missing", sheet)
+        val bounds = sheet.visibleBounds
+        val heightRatio = bounds.height().toDouble() / device.displayHeight
+        val bottomRatio = bounds.bottom.toDouble() / device.displayHeight
+        val topRatio = bounds.top.toDouble() / device.displayHeight
+        assertTrue("Store sheet height out of contract: $heightRatio", heightRatio in 0.84..0.92)
+        assertTrue("Store sheet is not bottom anchored", bottomRatio >= 0.97 && topRatio <= 0.35)
+        val handle = device.findObject(By.desc("TiStore Sheet Handle"))
+          ?: device.findObject(By.res(PACKAGE_NAME, "store-sheet-handle"))
+        assertNotNull("Store sheet drag handle is missing", handle)
+        assertTrue("Store sheet drag handle is not visible", handle.visibleBounds.height() > 0)
+        val rows = device.findObjects(By.descContains("TiStore Play "))
+        assertTrue("Store recording rows are missing", rows.isNotEmpty())
+        val topmost = rows.minByOrNull { it.visibleBounds.top }
+        assertNotNull("Store recording row bounds are missing", topmost)
+        assertTrue(
+          "Store newest recording is not the first visible row",
+          topmost!!.contentDescription?.contains("TiStore Play ${expectedStartMs ?: 0}") == true,
+        )
+      }
+      "playback" -> {
+        val stage = device.findObject(By.descContains("录像播放中"))
+        assertNotNull("Store playback stage is missing", stage)
+        val bounds = stage.visibleBounds
+        val widthRatio = bounds.width().toDouble() / device.displayWidth
+        val heightRatio = bounds.height().toDouble() / device.displayHeight
+        assertTrue("Store video stage is squeezed horizontally: $widthRatio", widthRatio >= 0.6)
+        assertTrue("Store video stage is squeezed vertically: $heightRatio", heightRatio >= 0.35)
+        assertTrue("Store playback controls are not visible", hasControl("TiStore Pause Resume"))
+      }
+      "entry" -> {
+        val entry = device.findObject(By.desc("TiStore Open"))
+        assertNotNull("Store entry page did not render after back navigation", entry)
+        assertTrue("Store entry page is not visible", entry.visibleBounds.height() > 0)
+      }
+    }
+    marker("store_ui_gate_$name")
+    marker("store_ui_checkpoint_$name path=$fileName")
   }
 
   private fun runDownlinkFlow() {
@@ -144,7 +375,7 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun setConfigField(key: String, value: String) {
-    val desc = "TiRTC Config $key"
+    val desc = if (key.startsWith("TiStore ")) key else "TiRTC Config $key"
     assertTrue("missing test value for $desc", value.isNotEmpty())
     val field = findControl(desc, key)
     if (field == null) {
@@ -154,7 +385,45 @@ class ExamplePublicUiSmokeTest {
     field!!.click()
     field.text = value
     dismissSoftKeyboardIfShown()
-    waitForFieldValue(desc, value)
+    if (desc != "TiStore Config token") {
+      waitForFieldValue(desc, value)
+    }
+  }
+
+  private fun clickText(text: String) {
+    val item = findControl(text, text)
+    assertNotNull("missing control $text", item)
+    clickControl(item!!)
+    Thread.sleep(300)
+  }
+
+  private fun fetchOneUseToken(url: String): CharArray {
+    require(url.isNotEmpty()) { "missing Store token URL" }
+    val connection = URL(url).openConnection() as HttpURLConnection
+    connection.connectTimeout = SHORT_TIMEOUT_MS.toInt()
+    connection.readTimeout = SHORT_TIMEOUT_MS.toInt()
+    connection.useCaches = false
+    return try {
+      check(connection.responseCode == HttpURLConnection.HTTP_OK) { "Store token handoff failed" }
+      val output = ByteArrayOutputStream()
+      connection.inputStream.use { input ->
+        val buffer = ByteArray(4096)
+        while (true) {
+          val count = input.read(buffer)
+          if (count < 0) break
+          check(output.size() + count <= 64 * 1024) { "Store token handoff is too large" }
+          output.write(buffer, 0, count)
+        }
+        buffer.fill(0)
+      }
+      val bytes = output.toByteArray()
+      check(bytes.isNotEmpty() && bytes.none { it == 0.toByte() || it == 10.toByte() || it == 13.toByte() })
+      val value = bytes.toString(Charsets.UTF_8).toCharArray()
+      bytes.fill(0)
+      value
+    } finally {
+      connection.disconnect()
+    }
   }
 
   private fun waitForFieldValue(desc: String, expected: String) {
@@ -227,6 +496,25 @@ class ExamplePublicUiSmokeTest {
     marker("${stage}_timeout")
     dumpFailureArtifacts(stage)
     throw AssertionError("timed out waiting for $stage: ${values.joinToString()}")
+  }
+
+  private fun waitForStoreSpeedX1() {
+    val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      if (hasAnyText(listOf("播放倍速：x1"))) {
+        marker("store_speed_x1_ok")
+        return
+      }
+      if (hasAnyText(listOf("倍速设置失败"))) {
+        marker("store_speed_x1_rejected")
+        dumpFailureArtifacts("store_speed_x1_rejected")
+        throw AssertionError("Store replay rejected the x1 speed change")
+      }
+      Thread.sleep(250)
+    }
+    marker("store_speed_x1_timeout")
+    dumpFailureArtifacts("store_speed_x1_timeout")
+    throw AssertionError("timed out waiting for store_speed_x1")
   }
 
   private fun waitPlayerOpened() {
@@ -633,6 +921,8 @@ class ExamplePublicUiSmokeTest {
   private fun scrollToDesc(desc: String): UiObject2? {
     try {
       UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().description(desc))
+      device.waitForIdle()
+      Thread.sleep(SCROLL_SETTLE_MS)
     } catch (_: Throwable) {
     }
     return device.findObject(By.desc(desc))
@@ -641,6 +931,8 @@ class ExamplePublicUiSmokeTest {
   private fun scrollToText(text: String): UiObject2? {
     try {
       UiScrollable(UiSelector().scrollable(true)).scrollIntoView(UiSelector().text(text))
+      device.waitForIdle()
+      Thread.sleep(SCROLL_SETTLE_MS)
     } catch (_: Throwable) {
     }
     return device.findObject(By.text(text)) ?: device.findObject(By.textContains(text))
@@ -664,4 +956,11 @@ class ExamplePublicUiSmokeTest {
   private fun isIntegrationLayer(): Boolean = arg("layer") == "integration"
 
   private fun arg(name: String, default: String = ""): String = args.getString(name) ?: default
+
+  private companion object {
+    const val SCROLL_SETTLE_MS = 750L
+    const val STORE_EXPORT_TIMEOUT_MS = 240_000L
+    const val STORE_CONTINUOUS_PLAYBACK_MS = 119_000L
+    const val STORE_SDK_CASE_TIMEOUT_MS = 900_000L
+  }
 }

@@ -3,14 +3,20 @@ import {BackHandler, Platform} from 'react-native';
 import {ClientSession} from './ExampleClientSession';
 import {ConfigureScreen} from './ExamplePages';
 import {PlayerScreen} from './ExampleStagePages';
-import {QrScannerScreen, applyScanPayloadToConfig} from './ExampleQrScanner';
+import {
+  QrScannerScreen,
+  applyScanPayloadToConfig,
+  applyScanPayloadToStoreConfig,
+} from './ExampleQrScanner';
 import {SettingsScreen} from './ExampleSettings';
+import {StoreScreen} from './ExampleStorePage';
 import {loadStoredConfig, saveStoredConfig} from './ExampleStorage';
-import {resolveToken} from './ExampleToken';
+import {resolveStoreToken, resolveToken} from './ExampleToken';
 import {ExampleConfig, Page, initialConfig, parseStreamIds} from './ExampleTypes';
 
 export default function App(): React.ReactElement {
   const [page, setPage] = useState<Page>('configure');
+  const [configureProduct, setConfigureProduct] = useState<'rtc' | 'store'>('rtc');
   const [config, setConfig] = useState<ExampleConfig>(initialConfig);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -66,6 +72,22 @@ export default function App(): React.ReactElement {
     }
   };
 
+  const openStore = async () => {
+    if (busy) return;
+    setBusy(true);
+    setStatus('Store Token 校验中');
+    try {
+      const token = await resolveStoreToken(config.storeToken);
+      setConfig((current) => ({...current, storeToken: token}));
+      setPage('store');
+      setStatus('');
+    } catch (error) {
+      setStatus(`Store Token 校验失败 ${String(error)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const returnToConfigure = useCallback(async () => {
     await clientSession.stop();
     setStatus('');
@@ -92,32 +114,35 @@ export default function App(): React.ReactElement {
   }, [page, returnToConfigure]);
 
   if (page === 'player') {
-    return (
-      <PlayerScreen
-        config={config}
-        session={clientSession}
-        status={status}
-        onBack={returnToConfigure}
-      />
-    );
+    return <PlayerScreen config={config} session={clientSession} status={status} onBack={returnToConfigure} />;
   }
 
   if (page === 'settings') {
+    return <SettingsScreen config={config} onChange={updateConfig} onBack={() => setPage('configure')} />;
+  }
+
+  if (page === 'store') {
     return (
-      <SettingsScreen
+      <StoreScreen
         config={config}
-        onChange={updateConfig}
-        onBack={() => setPage('configure')}
+        onBack={() => {
+          setConfigureProduct('store');
+          setPage('configure');
+        }}
       />
     );
   }
 
   if (page === 'qrScanner') {
+    const scanProduct = configureProduct;
     return (
       <QrScannerScreen
+        product={scanProduct}
         onBack={() => setPage('configure')}
         onScan={(payload) => {
-          setConfig((current) => applyScanPayloadToConfig(current, payload));
+          setConfig((current) => scanProduct === 'store'
+            ? applyScanPayloadToStoreConfig(current, payload)
+            : applyScanPayloadToConfig(current, payload));
           setStatus('二维码已填充');
           setPage('configure');
         }}
@@ -128,10 +153,13 @@ export default function App(): React.ReactElement {
   return (
     <ConfigureScreen
       config={config}
+      product={configureProduct}
       busy={busy}
       status={status}
       onChange={updateConfig}
+      onSelectProduct={setConfigureProduct}
       onStart={openPlayer}
+      onOpenStore={openStore}
       onOpenSettings={() => setPage('settings')}
       onScanToken={() => setPage('qrScanner')}
     />

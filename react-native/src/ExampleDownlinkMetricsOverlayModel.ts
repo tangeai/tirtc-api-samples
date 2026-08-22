@@ -161,7 +161,7 @@ export function downlinkMetricsOverlayRows(metrics: DownlinkMetricsOverlayModel)
     },
     {
       rowKey: 'latency_stats',
-      label: '输出延迟',
+      label: '估算延迟',
       value: `视频 ${formatDuration(metrics.videoEstimatedOutputLatencyMs)} · 音频 ${formatDuration(
         metrics.audioEstimatedOutputLatencyMs,
       )}`,

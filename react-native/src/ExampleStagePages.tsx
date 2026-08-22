@@ -1,5 +1,5 @@
 import React, {useCallback, useEffect, useState} from 'react';
-import {PermissionsAndroid, Platform, StyleSheet, Text, View} from 'react-native';
+import {PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Camera} from 'react-native-vision-camera';
 import {CommandPanelSheet} from './ExampleCommandPanel';
@@ -39,6 +39,9 @@ export function PlayerScreen({
   const [talkbackRunning, setTalkbackRunning] = useState(session.talkbackRunning);
   const [talkbackBusy, setTalkbackBusy] = useState(false);
   const [audioMuted, setAudioMuted] = useState(session.audioOutputMuted);
+  const [recording, setRecording] = useState(session.recordingTask !== null);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [metricsOverlay, setMetricsOverlay] = useState<DownlinkMetricsOverlayModel | null>(null);
   const runLogUpload = useCallback(() => session.uploadLogs(), [session]);
   const {uploadingLogs, uploadLogs} = useExampleLogUpload(runLogUpload);
@@ -96,6 +99,39 @@ export function PlayerScreen({
       setAudioMuted(nextMuted);
     }
   };
+  const toggleRecording = async () => {
+    if (mediaBusy) return;
+    setMediaBusy(true);
+    const next = await session.toggleRecording();
+    setRecording(session.recordingTask !== null);
+    setMediaStatus(next);
+    setMediaBusy(false);
+  };
+  const takeSnapshot = async () => {
+    if (mediaBusy) return;
+    setMediaBusy(true);
+    try {
+      const path = await session.takeSnapshot();
+      setMediaStatus(path.length > 0
+        ? `截图完成 · ${path}`
+        : '截图失败');
+    } catch {
+      setMediaStatus('截图失败');
+    } finally {
+      setMediaBusy(false);
+    }
+  };
+  const moveLatestMediaToGallery = async () => {
+    if (mediaBusy) return;
+    setMediaBusy(true);
+    try {
+      setMediaStatus(await session.moveLatestMediaToGallery() ? '已保存到系统相册' : '保存失败');
+    } catch {
+      setMediaStatus('保存失败');
+    } finally {
+      setMediaBusy(false);
+    }
+  };
   return (
     <View style={styles.stageRoot}>
       <VideoStage
@@ -137,6 +173,7 @@ export function PlayerScreen({
           {notice}
         </Text>
       ) : null}
+      {mediaStatus ? <Text style={[styles.stageNotice, {bottom: controlBottom + STAGE_NOTICE_OFFSET}]}>{mediaStatus}</Text> : null}
       <View
         style={[
           styles.streamMessageBubbleWrap,
@@ -147,6 +184,9 @@ export function PlayerScreen({
       </View>
       <View style={[styles.stageControls, {bottom: controlBottom}]}>
         <View style={styles.stageControlRow}>
+          <MediaActionButton symbol={recording ? '◉' : '●'} label={recording ? '停止本地保存' : '开始本地保存'} disabled={mediaBusy} onPress={toggleRecording} />
+          <MediaActionButton symbol="▣" label="截图" disabled={mediaBusy} onPress={takeSnapshot} />
+          <MediaActionButton symbol="▧" label="保存到系统相册" disabled={mediaBusy} onPress={moveLatestMediaToGallery} />
           <StageControlButton
             label={audioMuted ? '恢复声音' : '静音'}
             accessibilityLabel={audioMuted ? 'TiRTC Player Restore Audio' : 'TiRTC Player Mute Audio'}
@@ -154,7 +194,7 @@ export function PlayerScreen({
             onPress={toggleAudioOutputMuted}
           />
           <StageControlButton
-            label={talkbackBusy ? '处理中' : talkbackRunning ? '语音对讲中' : '语音对讲'}
+            label={talkbackBusy ? '处理中' : talkbackRunning ? '停止麦克风' : '启动麦克风'}
             accessibilityLabel={talkbackRunning ? 'TiRTC Player Stop Talkback' : 'TiRTC Player Start Talkback'}
             tone={talkbackRunning ? 'primary' : 'surface'}
             busy={talkbackBusy}
@@ -177,6 +217,20 @@ export function PlayerScreen({
         onSendCommand={(commandId, payload) => session.sendCommand(commandId, payload)}
       />
     </View>
+  );
+}
+
+function MediaActionButton({symbol, label, disabled, onPress}: {
+  symbol: string;
+  label: string;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
+      style={({pressed}) => [styles.mediaAction, (disabled || pressed) && styles.mediaActionDimmed]}>
+      <Text style={styles.mediaActionSymbol}>{symbol}</Text>
+    </Pressable>
   );
 }
 
@@ -262,6 +316,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
   },
+  mediaAction: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: '#D9E5E2',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mediaActionDimmed: {opacity: 0.55},
+  mediaActionSymbol: {color: '#659287', fontSize: 18, fontWeight: '700'},
   streamMessageBubbleWrap: {
     position: 'absolute',
     right: 20,

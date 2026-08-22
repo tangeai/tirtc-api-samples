@@ -5,6 +5,7 @@ private let launchTimeout: TimeInterval = 40
 private let connectTimeout: TimeInterval = 180
 private let keyboardDismissTimeout: TimeInterval = 3
 private let keyboardDismissPollInterval: TimeInterval = 0.2
+private let controlledTextInputKeystrokeDelay: TimeInterval = 0.05
 private let videoFrameMinimumVisiblePercent = 5
 private let videoFrameBrightLumaThreshold = 62
 private let videoFrameChromaticLumaThreshold = 45
@@ -31,6 +32,8 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     waitForControl("TiRTC Config appId", timeout: launchTimeout)
 
     switch env("TIRTC_RN_FLOW", defaultValue: "downlink") {
+    case "store":
+      try runStoreFlow()
     case "stress":
       fillCommonConfig()
       runStressFlow()
@@ -40,6 +43,142 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     }
   }
 
+  func testTiStorePublicSdkCase() throws {
+    app.launch()
+    dismissSystemAlertsIfPresent()
+    app.tap()
+    dismissSystemAlertsIfPresent()
+    let deadline = Date().addingTimeInterval(900)
+    while Date() < deadline {
+      if app.state != .runningForeground {
+        attachScreenshot(name: "store-sdk-case-app-exited")
+        XCTFail("Store SDK Case app exited before a terminal result")
+        return
+      }
+      if labelContains("TiStore SDK Case Failed") {
+        attachScreenshot(name: "store-sdk-case-failed")
+        XCTFail("Store public SDK Case reported failure")
+        return
+      }
+      if labelContains("TiStore SDK Case Passed") {
+        marker("store_sdk_case_completed")
+        return
+      }
+      RunLoop.current.run(until: Date().addingTimeInterval(0.5))
+    }
+    attachScreenshot(name: "store-sdk-case-timeout")
+    XCTFail("timed out waiting for Store public SDK Case")
+  }
+
+  private func runStoreFlow() throws {
+    let startTimeMs = env("TIRTC_RN_STORE_START_TIME_MS")
+    guard !startTimeMs.isEmpty else {
+      XCTFail("missing Store start time")
+      return
+    }
+    tapControl("云录像")
+    setField("TiStore Config appId", value: env("TIRTC_RN_STORE_APP_ID"))
+    setField("TiStore Config endpoint", value: env("TIRTC_RN_STORE_ENDPOINT"))
+    setField(
+      "TiStore Config token",
+      value: env("TIRTC_RN_STORE_TOKEN_URL"))
+    setField(
+      "TiStore Config audioChannelId",
+      value: env("TIRTC_RN_STORE_AUDIO_CHANNEL_ID", defaultValue: "10"))
+    setField(
+      "TiStore Config videoChannelId",
+      value: env("TIRTC_RN_STORE_VIDEO_CHANNEL_ID", defaultValue: "11"))
+    marker("store_config_filled")
+    tapControl("TiStore Open")
+    tapControl("TiStore Play \(startTimeMs)")
+    waitForText("正在播放", timeout: connectTimeout)
+    marker("store_rendering_ok")
+    let videoDeadline = Date().addingTimeInterval(connectTimeout)
+    while Date() < videoDeadline && !hasVisibleVideoFrame() {
+      RunLoop.current.run(until: Date().addingTimeInterval(0.75))
+    }
+    XCTAssertTrue(hasVisibleVideoFrame(), "Store video frame was not visible")
+    attachScreenshot(name: "store-visible-video")
+    marker("store_visible_video_ok")
+
+    RunLoop.current.run(until: Date().addingTimeInterval(5))
+    tapControl("TiStore Pause Resume")
+    waitForText("已暂停", timeout: shortTimeout)
+    marker("store_pause_ok")
+    RunLoop.current.run(until: Date().addingTimeInterval(3))
+    tapControl("TiStore Pause Resume")
+    waitForText("继续播放", timeout: shortTimeout)
+    marker("store_resume_ok")
+
+    tapControl("TiStore Mute")
+    waitForText("已静音", timeout: shortTimeout)
+    marker("store_mute_ok")
+    RunLoop.current.run(until: Date().addingTimeInterval(2))
+    tapControl("TiStore Mute")
+    waitForText("已恢复声音", timeout: shortTimeout)
+    marker("store_unmute_ok")
+
+    tapControl("TiStore Speed")
+    waitForText("播放倍速：x2", timeout: shortTimeout)
+    marker("store_speed_x2_ok")
+    RunLoop.current.run(until: Date().addingTimeInterval(3))
+    for _ in 0..<3 { tapControl("TiStore Speed") }
+    waitForText("播放倍速：x1", timeout: shortTimeout)
+    marker("store_speed_x1_ok")
+
+    let seek = waitForControl("TiStore Seek", timeout: shortTimeout)
+    seek.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.5)).tap()
+    waitForText("已跳转", timeout: shortTimeout)
+    marker("store_seek_ok")
+    RunLoop.current.run(until: Date().addingTimeInterval(3))
+
+    tapControl("TiStore Snapshot")
+    waitForText("截图完成", timeout: shortTimeout)
+    marker("store_snapshot_ok")
+    tapControl("TiStore Save Gallery", dismissSystemAlertsAfterTap: false)
+    dismissSystemAlertsIfPresent()
+    waitForText("已保存到系统相册", timeout: shortTimeout)
+    marker("store_snapshot_gallery_ok")
+
+    tapControl("TiStore Recording")
+    waitForText("边播边录已开始", timeout: shortTimeout)
+    marker("store_recording_started_ok")
+    RunLoop.current.run(until: Date().addingTimeInterval(7))
+    tapControl("TiStore Recording")
+    waitForText("边播边录完成", timeout: shortTimeout)
+    marker("store_recording_completed_ok")
+    tapControl("TiStore Save Gallery")
+    waitForText("已保存到系统相册", timeout: shortTimeout)
+    marker("store_recording_gallery_ok")
+
+    tapControl("TiStore Recordings")
+    tapControl("TiStore Export \(startTimeMs)")
+    tapControl("TiStore Close Recordings")
+    waitForText("范围下载完成", timeout: 240)
+    marker("store_export_completed_ok")
+    tapControl("TiStore Save Gallery")
+    waitForText("已保存到系统相册", timeout: shortTimeout)
+    marker("store_export_gallery_ok")
+
+    tapControl("TiStore Recordings")
+    tapControl("TiStore Play \(startTimeMs)")
+    waitForText("正在播放", timeout: connectTimeout)
+    let replayDeadline = Date().addingTimeInterval(119)
+    while Date() < replayDeadline {
+      XCTAssertFalse(labelContains("播放失败") || labelContains("回放失败") || labelContains("输出失败"))
+      XCTAssertFalse(labelContains("缓冲中"), "Store replay buffered after rendering")
+      RunLoop.current.run(until: Date().addingTimeInterval(1))
+    }
+    marker("store_continuous_playback_ok duration_ms=119000")
+
+    tapControl("TiStore Upload Logs")
+    waitForLogUpload(role: "store")
+    tapControl("TiStore Back")
+    waitForControl("TiStore Open", timeout: shortTimeout)
+    marker("store_returned_to_configure")
+    marker("store_public_ui_done")
+  }
+
   private func runDownlinkFlow() {
     tapStartDownlink()
     marker("client_connect_clicked")
@@ -47,20 +186,22 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     waitClientDownlink()
     waitPlayerDiagnostics()
     runAudioOutputVolumeProbe()
-    runTalkbackProbe()
-    waitStreamMessageBubble()
-    if isIntegrationLayer() {
-      runBackgroundForegroundProbe(role: "client", expectedControl: "TiRTC Player Stop")
-      waitClientDownlink(captureEvidence: false)
+    if !isSimulatorDownlinkOnly() {
+      runTalkbackProbe()
+      waitStreamMessageBubble()
+      if isIntegrationLayer() {
+        runBackgroundForegroundProbe(role: "client", expectedControl: "TiRTC Player Stop")
+        waitClientDownlink(captureEvidence: false)
+      }
+      tapControl("TiRTC Player Send Command")
+      tapControl("TiRTC Command Panel Echo Preset")
+      tapControl("TiRTC Command Panel Send Command")
+      tapControl("TiRTC Command Panel Close")
+      tapControl("TiRTC Player Upload Logs")
+      marker("client_log_upload_clicked")
+      waitForLogUpload(role: "client")
+      marker("client_public_actions_clicked")
     }
-    tapControl("TiRTC Player Send Command")
-    tapControl("TiRTC Command Panel Echo Preset")
-    tapControl("TiRTC Command Panel Send Command")
-    tapControl("TiRTC Command Panel Close")
-    tapControl("TiRTC Player Upload Logs")
-    marker("client_log_upload_clicked")
-    waitForLogUpload(role: "client")
-    marker("client_public_actions_clicked")
     hold()
     tapControl("TiRTC Player Stop")
     waitForControl("TiRTC Config appId", timeout: shortTimeout)
@@ -146,6 +287,10 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
 
   private func isIntegrationLayer() -> Bool {
     env("TIRTC_RN_LAYER", defaultValue: "") == "integration"
+  }
+
+  private func isSimulatorDownlinkOnly() -> Bool {
+    env("TIRTC_RN_DOWNLINK_ONLY", defaultValue: "0") == "1"
   }
 
   private func runBackgroundForegroundProbe(role: String, expectedControl: String) {
@@ -391,7 +536,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     if !isPlaceholderValue(fieldValue(element)) {
       element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 256))
     }
-    element.typeText(value)
+    typeTextReliably(value, into: element)
     dismissSystemAlertsIfPresent()
     if !waitForFieldValue(label, expected: value, sensitive: sensitive) {
       attachScreenshot(name: "field-not-set-\(automationId(label))")
@@ -477,6 +622,14 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
 
   private func fieldValue(_ element: XCUIElement) -> String {
     (element.value as? String ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  private func typeTextReliably(_ value: String, into element: XCUIElement) {
+    for character in value {
+      element.typeText(String(character))
+      RunLoop.current.run(
+        until: Date().addingTimeInterval(controlledTextInputKeystrokeDelay))
+    }
   }
 
   private func isSensitiveField(_ label: String) -> Bool {
@@ -614,10 +767,28 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   private func dismissSystemAlertsIfPresent() -> Bool {
     let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
     let alert = springboard.alerts.firstMatch
-    guard alert.waitForExistence(timeout: 0.2) else {
+    if alert.waitForExistence(timeout: 0.2), tapPreferredSystemButton(in: alert) {
+      return true
+    }
+    return dismissPasswordSaveSheetIfPresent(springboard: springboard)
+  }
+
+  private func dismissPasswordSaveSheetIfPresent(springboard: XCUIApplication) -> Bool {
+    let dismissTitles = ["以后", "稍后", "取消", "Not Now", "Later", "Cancel"]
+    guard let applicationUnderTest = app else {
       return false
     }
-    return tapPreferredSystemButton(in: alert)
+    for application in [applicationUnderTest, springboard] {
+      for title in dismissTitles {
+        let button = application.buttons[title].firstMatch
+        if button.exists && button.isHittable {
+          button.tap()
+          RunLoop.current.run(until: Date().addingTimeInterval(0.2))
+          return true
+        }
+      }
+    }
+    return false
   }
 
   private func waitAndAllowSystemPermission(stage: String) {
@@ -684,9 +855,12 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   private func tapPreferredSystemButton(in alert: XCUIElement) -> Bool {
     let preferredButtons = [
       "允许",
+      "无线局域网与蜂窝网络",
       "好",
       "继续",
       "Allow",
+      "Wi-Fi & Cellular Data",
+      "WLAN & Cellular Data",
       "OK",
       "Continue",
       "Join",

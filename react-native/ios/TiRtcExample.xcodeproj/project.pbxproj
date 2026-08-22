@@ -11,6 +11,8 @@
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		22D1498339AA7A06B41868B4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		E10000000000000000000001 /* ExampleMediaModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000003 /* ExampleMediaModule.swift */; };
+		E10000000000000000000002 /* ExampleMediaModule.m in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* ExampleMediaModule.m */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		E00000000000000000000001 /* ExamplePublicUiSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */; };
 /* End PBXBuildFile section */
@@ -34,6 +36,8 @@
 		5709B34CF0A7D63546082F79 /* Pods-TiRtcExample.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TiRtcExample.release.xcconfig"; path = "Target Support Files/Pods-TiRtcExample/Pods-TiRtcExample.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-TiRtcExample.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TiRtcExample.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = TiRtcExample/AppDelegate.swift; sourceTree = "<group>"; };
+		E10000000000000000000003 /* ExampleMediaModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExampleMediaModule.swift; path = TiRtcExample/ExampleMediaModule.swift; sourceTree = "<group>"; };
+		E10000000000000000000004 /* ExampleMediaModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ExampleMediaModule.m; path = TiRtcExample/ExampleMediaModule.m; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = TiRtcExample/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExamplePublicUiSmokeTests.swift; sourceTree = "<group>"; };
 		E00000000000000000000004 /* TiRtcExampleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TiRtcExampleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -64,6 +68,8 @@
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
+				E10000000000000000000003 /* ExampleMediaModule.swift */,
+				E10000000000000000000004 /* ExampleMediaModule.m */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
@@ -307,6 +313,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				761780ED2CA45674006654EE /* AppDelegate.swift in Sources */,
+				E10000000000000000000001 /* ExampleMediaModule.swift in Sources */,
+				E10000000000000000000002 /* ExampleMediaModule.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

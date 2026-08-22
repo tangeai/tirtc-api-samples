@@ -92,12 +92,12 @@ export const uiStyles = StyleSheet.create({
   },
   inputWrap: {
     flex: 1,
-    minHeight: 74,
+    minHeight: 56,
     borderRadius: 20,
     backgroundColor: exampleTheme.surface,
     paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 10,
+    paddingTop: 6,
+    paddingBottom: 6,
   },
   inputLabel: {
     color: exampleTheme.textSecondary,
@@ -106,7 +106,7 @@ export const uiStyles = StyleSheet.create({
     marginBottom: 4,
   },
   input: {
-    minHeight: 34,
+    minHeight: 28,
     color: exampleTheme.textPrimary,
     fontSize: 13,
     padding: 0,

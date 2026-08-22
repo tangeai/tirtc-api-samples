@@ -11,6 +11,9 @@ import {
   type TiRtcSize,
   TiRtcVideoOutput,
   TiRtcVideoOutputState,
+  type TiRtcRecordingTask,
+  type TiRtcRecordingFile,
+  type TiRtcSnapshotFile,
 } from 'tirtc-react-native';
 import {
   clonePayload,
@@ -28,7 +31,9 @@ import {
 import {DemoStreamMessageOverlayController, DemoStreamMessageSender} from './ExampleStreamMessage';
 import {
   localAudioInputOptionsFromConfig,
+  galleryFileName,
   outputBufferStrategyFromConfig,
+  prepareGalleryWritePermission,
   validSize,
   videoDecoderPreferenceFromConfig,
 } from './ExampleSessionShared';
@@ -42,6 +47,9 @@ export class ClientSession {
   renderSize: TiRtcSize | null = null;
   audioOutputMuted = false;
   onTalkbackStateChanged: ((running: boolean) => void) | null = null;
+  recordingTask: TiRtcRecordingTask | null = null;
+  private latestMediaFile: TiRtcRecordingFile | TiRtcSnapshotFile | null = null;
+  private readonly ownedMediaFiles = new Set<TiRtcRecordingFile | TiRtcSnapshotFile>();
   private connState: TiRtcConnState = TiRtcConnState.idle;
   private audioState: TiRtcAudioOutputState = TiRtcAudioOutputState.idle;
   private videoState: TiRtcVideoOutputState = TiRtcVideoOutputState.idle;
@@ -65,12 +73,12 @@ export class ClientSession {
       'TiRtcRnExample',
       `client_start_begin app_id_present=${config.appId.length > 0} endpoint_present=${config.endpoint.length > 0} remote_id_present=${config.remoteId.length > 0}`,
     );
-    const initCode = await TiRtc.initialize({
+    const initCode = await TiRtc.init({
       appId: config.appId,
       endpoint: config.endpoint,
       consoleLogEnabled: config.consoleLogEnabled,
     });
-    TiRtcLogging.i('TiRtcRnExample', `client_initialize_done code=${initCode}`);
+    TiRtcLogging.i('TiRtcRnExample', `client_init_done code=${initCode}`);
     if (initCode !== 0) {
       this.setStatus(`播放准备失败 · ${TiRtc.formatError(initCode)}`);
       return;
@@ -330,6 +338,19 @@ export class ClientSession {
   }
 
   async stop() {
+    if (this.recordingTask !== null) {
+      const result = await this.recordingTask.stop();
+      if (result.success && result.data !== null) {
+        this.ownedMediaFiles.add(result.data);
+      }
+      this.recordingTask = null;
+    }
+    for (const file of this.ownedMediaFiles) {
+      if (await file.delete() === 0) {
+        this.ownedMediaFiles.delete(file);
+      }
+    }
+    if (this.ownedMediaFiles.size === 0) this.latestMediaFile = null;
     this.stopRenderPoll();
     this.streamMessageOverlay.clear();
     await this.stopTalkback();
@@ -355,6 +376,56 @@ export class ClientSession {
     this.pendingLocalEchoReplies = 0;
     this.commandEvents = [];
     TiRtc.shutdown();
+  }
+
+  async toggleRecording(): Promise<string> {
+    if (this.recordingTask !== null) {
+      const result = await this.recordingTask.stop();
+      this.recordingTask = null;
+      if (result.success && result.data !== null) {
+        this.latestMediaFile = result.data;
+        this.ownedMediaFiles.add(result.data);
+      }
+      return result.success ? `本地保存完成 · ${result.data?.path ?? ''}` : `本地保存失败 · #${result.code ?? 0}`;
+    }
+    const connection = this.conn;
+    if (connection === null) {
+      return '开始本地保存失败 · 播放未就绪';
+    }
+    const streams = this.downlinkStreams;
+    if (streams === null) {
+      return '开始本地保存失败 · 流未就绪';
+    }
+    const result = connection.startRecording({
+      videoStreamId: streams.video,
+      audioStreamId: streams.audio,
+    });
+    if (!result.success || result.data === null) {
+      return `开始本地保存失败 · #${result.code ?? 0}`;
+    }
+    this.recordingTask = result.data;
+    return '正在本地保存';
+  }
+
+  async takeSnapshot(): Promise<string> {
+    const result = await this.videoOutput?.takeSnapshot();
+    if (result?.success === true && result.data !== null) {
+      this.latestMediaFile = result.data;
+      this.ownedMediaFiles.add(result.data);
+      return result.data.path;
+    }
+    return '';
+  }
+
+  async moveLatestMediaToGallery(): Promise<boolean> {
+    if (this.latestMediaFile === null) return false;
+    if (!await prepareGalleryWritePermission()) return false;
+    const file = this.latestMediaFile;
+    const result = await file.moveToGallery(
+      galleryFileName('durationMs' in file ? 'mp4' : 'jpg'),
+    );
+    if (result.success) this.ownedMediaFiles.delete(file);
+    return result.success;
   }
 
   get commandConnected(): boolean {

@@ -45,6 +45,8 @@
 	</array>
 	<key>NSMicrophoneUsageDescription</key>
 	<string>TiRTC Example uses the microphone for local audio input.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>TiRTC Example saves snapshots to your photo library when requested.</string>
 	<key>RCTNewArchEnabled</key>
 	<true/>
 	<key>UILaunchStoryboardName</key>

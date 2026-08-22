@@ -28,9 +28,8 @@ export const downlinkMetricsExplanationContent =
   '这里只表达下行输入侧事实，不混入解码、渲染或音频输出回调。\n\n' +
   '【音频卡顿】：音频不用“帧率”判断体验。' +
   '这里展示最近窗口内，系统输出回调取不到可播放数据而产生的停滞次数和最长停滞。\n\n' +
-  '【缓冲长度】：来自 runtime 最近一个已闭合 5 秒窗口。' +
-  '它表示远端音视频数据在本机下行队列里等待被消费的大致时长。' +
-  '调试日志仍保留更细分的内部阶段数据，面板只显示最常用的本地待消费长度。';
+    '【估算延迟】：来自 runtime 当前输出延迟估算，综合最近到达帧的单向传输延迟和本地待输出缓冲时长。' +
+    '面板按秒刷新；还没有有效数据时显示“--”。';
 
 export function DownlinkMetricsOverlay({metrics}: {metrics: DownlinkMetricsOverlayModel}) {
   const [expanded, setExpanded] = useState(true);

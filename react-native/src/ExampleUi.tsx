@@ -108,6 +108,8 @@ export function InputField({
   autoCorrect,
   multiline,
   keyboardType,
+  secureTextEntry,
+  editable,
   style,
 }: {
   label: string;
@@ -119,6 +121,8 @@ export function InputField({
   autoCorrect?: TextInputProps['autoCorrect'];
   multiline?: boolean;
   keyboardType?: KeyboardTypeOptions;
+  secureTextEntry?: boolean;
+  editable?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
   return (
@@ -132,9 +136,13 @@ export function InputField({
         placeholder={hint}
         placeholderTextColor={exampleTheme.textSecondary}
         autoCapitalize={autoCapitalize}
+        autoComplete={secureTextEntry ? 'off' : undefined}
         autoCorrect={autoCorrect}
         multiline={multiline}
         keyboardType={keyboardType}
+        secureTextEntry={secureTextEntry}
+        editable={editable}
+        textContentType={secureTextEntry ? 'none' : undefined}
         style={[uiStyles.input, multiline ? uiStyles.multilineInput : null]}
       />
     </View>
@@ -371,10 +379,12 @@ export function VideoStage({
 export function TopBar({
   title,
   onBack,
+  backAccessibilityLabel = 'TiRTC Back',
   children,
 }: {
   title: string;
   onBack: () => void;
+  backAccessibilityLabel?: string;
   children?: ReactNode;
 }) {
   const insets = useSafeAreaInsets();
@@ -390,8 +400,8 @@ export function TopBar({
       <Pressable
         accessible
         accessibilityRole="button"
-        accessibilityLabel="TiRTC Back"
-        testID={automationTestId('TiRTC Back')}
+        accessibilityLabel={backAccessibilityLabel}
+        testID={automationTestId(backAccessibilityLabel)}
         importantForAccessibility="yes"
         collapsable={false}
         onPress={onBack}
