@@ -66,11 +66,23 @@ internal fun LinearLayout.header(
             gravity = Gravity.CENTER_VERTICAL
             orientation = LinearLayout.HORIZONTAL
             addView(
-                TextView(context).apply {
-                    text = title
-                    setTextColor(ExampleTheme.brandText)
-                    textSize = 22f
-                    typeface = Typeface.DEFAULT_BOLD
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.VERTICAL
+                    addView(
+                        TextView(context).apply {
+                            text = title
+                            setTextColor(ExampleTheme.brandText)
+                            textSize = 22f
+                            typeface = Typeface.DEFAULT_BOLD
+                        },
+                    )
+                    addView(
+                        TextView(context).apply {
+                            text = "Based on Android"
+                            setTextColor(ExampleTheme.textHint)
+                            textSize = 12f
+                        },
+                    )
                 },
                 LinearLayout.LayoutParams(0, wrap(), 1f),
             )
@@ -111,23 +123,31 @@ internal fun Context.productTabs(
 ): View =
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
-        val rtc =
-            if (selected == ConfigureProduct.RTC) {
-                compactFilledButton("RTC") { onSelected(ConfigureProduct.RTC) }
-            } else {
-                outlinedButton("RTC") { onSelected(ConfigureProduct.RTC) }
+        setPadding(dp(3), dp(3), dp(3), dp(3))
+        minimumHeight = dp(44)
+        background = rounded(0x1A659287, radius = 22, strokeColor = 0x1A659287)
+        fun tab(label: String, product: ConfigureProduct): TextView =
+            TextView(context).apply {
+                text = label
+                gravity = Gravity.CENTER
+                textSize = 14f
+                typeface = Typeface.DEFAULT_BOLD
+                setTextColor(if (selected == product) ExampleTheme.foreground else ExampleTheme.textSecondary)
+                background =
+                    rounded(
+                        if (selected == product) ExampleTheme.primary else 0x00000000,
+                        radius = 19,
+                        strokeColor = if (selected == product) ExampleTheme.primary else 0x00000000,
+                    )
+                setOnClickListener { onSelected(product) }
             }
+        val rtc = tab("RTC", ConfigureProduct.RTC)
         rtc.id = R.id.tab_rtc
-        val store =
-            if (selected == ConfigureProduct.STORE) {
-                compactFilledButton("云录像") { onSelected(ConfigureProduct.STORE) }
-            } else {
-                outlinedButton("云录像") { onSelected(ConfigureProduct.STORE) }
-            }
+        val store = tab("云录像", ConfigureProduct.STORE)
         store.id = R.id.tab_store
-        addView(rtc, LinearLayout.LayoutParams(0, wrap(), 1f))
-        addView(space(dp(12)))
-        addView(store, LinearLayout.LayoutParams(0, wrap(), 1f))
+        addView(rtc, LinearLayout.LayoutParams(0, dp(38), 1f))
+        addView(space(dp(3)))
+        addView(store, LinearLayout.LayoutParams(0, dp(38), 1f))
     }
 
 internal fun Context.storePlayerTopBar(
@@ -192,6 +212,7 @@ internal fun Context.playerBottomControls(
     bubble: TextView,
     recordingButton: View,
     snapshotButton: View,
+    galleryButton: View,
     localAudioButton: TextView,
     outputVolumeButton: TextView,
     downlinkButton: TextView,
@@ -216,6 +237,7 @@ internal fun Context.playerBottomControls(
                         orientation = LinearLayout.HORIZONTAL
                         addView(recordingButton, context.mediaButtonLayoutParams())
                         addView(snapshotButton, context.mediaButtonLayoutParams())
+                        addView(galleryButton, context.mediaButtonLayoutParams())
                     },
                 )
                 addViewWithMargin(
@@ -389,7 +411,7 @@ internal fun Context.editText(
         setHintTextColor(ExampleTheme.textHint)
         setSingleLine(!multiLine)
         textSize = 13f
-        minHeight = if (multiLine) dp(118) else dp(58)
+        minHeight = if (multiLine) dp(118) else dp(56)
         minLines = if (multiLine) 3 else 1
         gravity = if (multiLine) Gravity.TOP or Gravity.START else Gravity.CENTER_VERTICAL or Gravity.START
         setPadding(dp(20), dp(12), dp(20), dp(12))

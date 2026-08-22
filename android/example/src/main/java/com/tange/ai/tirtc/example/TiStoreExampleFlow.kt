@@ -17,6 +17,7 @@ import com.tange.ai.tirtc.TiStoreExportRequest
 import com.tange.ai.tirtc.TiStoreExportTask
 import com.tange.ai.tirtc.TiStoreOutputErrorListener
 import com.tange.ai.tirtc.TiStoreRecordingFile
+import com.tange.ai.tirtc.TiStoreRecordingDaysResult
 import com.tange.ai.tirtc.TiStoreRecordingRange
 import com.tange.ai.tirtc.TiStoreRecordingRangesResult
 import com.tange.ai.tirtc.TiStoreRecordingTask
@@ -31,6 +32,61 @@ import com.tange.ai.tirtc.TiStoreVideoOutputState
 import com.tange.ai.tirtc.TiStoreVideoOutputStateListener
 import java.io.File
 import kotlin.concurrent.thread
+
+internal fun copyPathToGallery(
+    context: Context,
+    sourcePath: String,
+    isVideo: Boolean,
+): Int {
+    val source = File(sourcePath)
+    if (!source.isFile) return TiStoreErrorCode.FILE_WRITE_FAILED
+    val resolver = context.contentResolver
+    val collection =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            if (isVideo) {
+                MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            } else {
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            }
+        } else if (isVideo) {
+            MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        } else {
+            MediaStore.Images.Media.EXTERNAL_CONTENT_URI
+        }
+    val values =
+        ContentValues().apply {
+            put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
+            put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/jpeg")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                put(
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES,
+                )
+                put(MediaStore.MediaColumns.IS_PENDING, 1)
+            }
+        }
+    return try {
+        val uri = resolver.insert(collection, values) ?: return TiStoreErrorCode.FILE_WRITE_FAILED
+        try {
+            resolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
+                ?: throw IllegalStateException("gallery output unavailable")
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                resolver.update(
+                    uri,
+                    ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
+                    null,
+                    null,
+                )
+            }
+            TiStoreErrorCode.OK
+        } catch (_: Throwable) {
+            resolver.delete(uri, null, null)
+            TiStoreErrorCode.FILE_WRITE_FAILED
+        }
+    } catch (_: Throwable) {
+        TiStoreErrorCode.FILE_WRITE_FAILED
+    }
+}
 
 /** Public-SDK-only TiStore flow used by the Android Example. */
 internal class TiStoreExampleFlow {
@@ -98,6 +154,22 @@ internal class TiStoreExampleFlow {
         if (closing) return TiStoreErrorCode.IN_USE
         beginOperation()
         owner.listRecordings(startMs, endMs) { result ->
+            callback(result)
+            endOperation()
+        }
+        return TiStoreErrorCode.OK
+    }
+
+    fun queryDays(
+        startDate: String,
+        endDate: String,
+        timeZoneId: String = "Asia/Shanghai",
+        callback: (TiStoreRecordingDaysResult) -> Unit,
+    ): Int {
+        val owner = store ?: return TiStoreErrorCode.NOT_INITIALIZED
+        if (closing) return TiStoreErrorCode.IN_USE
+        beginOperation()
+        owner.listRecordingDays(startDate, endDate, timeZoneId) { result ->
             callback(result)
             endOperation()
         }
@@ -427,57 +499,7 @@ internal class TiStoreExampleFlow {
     private fun copyToGallery(
         context: Context,
         media: OwnedMedia,
-    ): Int {
-        val source = File(media.path)
-        if (!source.isFile) return TiStoreErrorCode.FILE_WRITE_FAILED
-        val resolver = context.contentResolver
-        val isVideo = media is RecordingMedia
-        val collection =
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                if (isVideo) {
-                    MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                } else {
-                    MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY)
-                }
-            } else if (isVideo) {
-                MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-            } else {
-                MediaStore.Images.Media.EXTERNAL_CONTENT_URI
-            }
-        val values =
-            ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, source.name)
-                put(MediaStore.MediaColumns.MIME_TYPE, if (isVideo) "video/mp4" else "image/png")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    put(
-                        MediaStore.MediaColumns.RELATIVE_PATH,
-                        if (isVideo) Environment.DIRECTORY_MOVIES else Environment.DIRECTORY_PICTURES,
-                    )
-                    put(MediaStore.MediaColumns.IS_PENDING, 1)
-                }
-            }
-        return try {
-            val uri = resolver.insert(collection, values) ?: return TiStoreErrorCode.FILE_WRITE_FAILED
-            try {
-                resolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
-                    ?: throw IllegalStateException("gallery output unavailable")
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                    resolver.update(
-                        uri,
-                        ContentValues().apply { put(MediaStore.MediaColumns.IS_PENDING, 0) },
-                        null,
-                        null,
-                    )
-                }
-                TiStoreErrorCode.OK
-            } catch (_: Throwable) {
-                resolver.delete(uri, null, null)
-                TiStoreErrorCode.FILE_WRITE_FAILED
-            }
-        } catch (_: Throwable) {
-            TiStoreErrorCode.FILE_WRITE_FAILED
-        }
-    }
+    ): Int = copyPathToGallery(context, media.path, media is RecordingMedia)
 
     private sealed class OwnedMedia(val path: String) {
         abstract fun delete(callback: (Int) -> Unit)

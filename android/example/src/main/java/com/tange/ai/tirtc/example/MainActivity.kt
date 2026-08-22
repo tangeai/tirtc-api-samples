@@ -2,7 +2,6 @@ package com.tange.ai.tirtc.example
 
 import android.Manifest
 import android.app.AlertDialog
-import android.app.DatePickerDialog
 import android.app.Dialog
 import android.content.pm.PackageManager
 import android.media.AudioManager
@@ -16,6 +15,7 @@ import android.view.Gravity
 import android.view.View
 import android.widget.EditText
 import android.widget.FrameLayout
+import android.widget.GridLayout
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
@@ -61,6 +61,7 @@ import java.util.Calendar
 import java.util.Locale
 import java.util.Timer
 import java.util.TimerTask
+import java.util.TimeZone
 
 class MainActivity : AppCompatActivity() {
     private val mainHandler = Handler(Looper.getMainLooper())
@@ -90,6 +91,7 @@ class MainActivity : AppCompatActivity() {
     private var playerOutputMuted = false
     private var playerRecordingTask: TiRtcRecordingTask? = null
     private var playerLatestMediaFile: Any? = null
+    private var playerGalleryButton: View? = null
     private val playerOwnedMediaFiles = mutableSetOf<Any>()
     private var playerMediaBusy = false
     private var metricsTimer: Timer? = null
@@ -102,9 +104,12 @@ class MainActivity : AppCompatActivity() {
     private var scannerProcessing = false
     private var storeFlow: TiStoreExampleFlow? = null
     private var storeSelectedRange: TiStoreRecordingRange? = null
-    private val storeSelectedDate: Calendar = Calendar.getInstance()
+    private val storeSelectedDate: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
+    private val storeVisibleMonth: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
     private var storeRecordingsDialog: Dialog? = null
     private var storeRecordingsContent: LinearLayout? = null
+    private var storeDayQueryGeneration = 0
+    private var storeMonthQueryGeneration = 0
     private var storeExportProgress = -1
     private var storeRecordings: List<TiStoreRecordingRange> = emptyList()
     private var storeStatusView: TextView? = null
@@ -165,12 +170,7 @@ class MainActivity : AppCompatActivity() {
         val remoteIdField = editText("待连接的远端目标 ID", clientConfig.remoteId, viewId = R.id.field_remote_id)
         val audioStreamField = editText("音频流 ID，默认 10", clientConfig.audioStreamId.toString(), viewId = R.id.field_audio_stream_id)
         val videoStreamField = editText("视频流 ID，默认 11", clientConfig.videoStreamId.toString(), viewId = R.id.field_video_stream_id)
-        val tokenSource =
-            spinner(
-                listOf("tokenIssuer", "oneTimeToken"),
-                if (clientConfig.tokenSource == DemoTokenSource.ISSUER) 0 else 1,
-            )
-        val tokenIssuerField = editText("Token issuer base URL", clientConfig.tokenIssuerBaseUrl)
+        val tokenIssuerField = editText("例如 http://192.168.1.10:8966", clientConfig.tokenIssuerBaseUrl)
         val tokenField =
             editText(
                 "进行一次连接所需的一次性 token",
@@ -191,8 +191,8 @@ class MainActivity : AppCompatActivity() {
                     },
                     bottom = 20,
                 )
-                addViewWithMargin(fieldBlock("app_id", appIdField), bottom = 16)
                 addViewWithMargin(fieldBlock("endpoint", endpointField), bottom = 16)
+                addViewWithMargin(fieldBlock("app_id", appIdField), bottom = 16)
                 addViewWithMargin(fieldBlock("remote_id", remoteIdField), bottom = 16)
                 addViewWithMargin(
                     twoColumnFields(
@@ -204,22 +204,27 @@ class MainActivity : AppCompatActivity() {
                     bottom = 16,
                 )
                 addViewWithMargin(
-                    surface {
-                        addView(sectionTitle("连接 Token"))
-                        addView(inputLabel("token acquisition"))
-                        addViewWithMargin(tokenSource, bottom = 16)
-                        addViewWithMargin(fieldBlock("Token 签发服务地址", tokenIssuerField), bottom = 16)
-                        addViewWithMargin(fieldBlock("一次性连接 Token", tokenField), bottom = 12)
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.BOTTOM
+                        addView(fieldBlock("一次性连接 Token", tokenField), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(space(dp(10)))
                         addView(
-                            outlinedButton("扫一扫") {
+                            outlinedButton("扫码") {
                                 showClientQr(appIdField, endpointField, remoteIdField, tokenField)
                             },
+                            LinearLayout.LayoutParams(dp(68), dp(56)),
                         )
                     },
-                    bottom = 20,
+                    bottom = 8,
                 )
+                addViewWithMargin(
+                    body("或").apply { gravity = Gravity.CENTER },
+                    bottom = 8,
+                )
+                addViewWithMargin(fieldBlock("TiRTC DevTools 服务地址", tokenIssuerField), bottom = 20)
                 addView(
-                    primaryButton("进入播放页面") {
+                    primaryButton("开始连接、拉流播放") {
                         val next =
                             readClientConfig(
                                 appIdField = appIdField,
@@ -227,7 +232,7 @@ class MainActivity : AppCompatActivity() {
                                 remoteIdField = remoteIdField,
                                 audioStreamField = audioStreamField,
                                 videoStreamField = videoStreamField,
-                                tokenSource = tokenSource.selectedItemPosition,
+                                tokenSource = if (tokenField.text.toString().trim().isNotEmpty()) 1 else 0,
                                 tokenIssuerField = tokenIssuerField,
                                 tokenField = tokenField,
                             ) ?: return@primaryButton
@@ -235,17 +240,18 @@ class MainActivity : AppCompatActivity() {
                         resolveTokenAndShowPlayer(next)
                     },
                 )
+                addView(linkButton("上传日志") { uploadLogs() })
             },
         )
     }
 
     private fun showStoreConfigure() {
-        val appIdField = editText("TiStore App ID", storeConfig.appId, viewId = R.id.field_store_app_id)
+        val appIdField = editText("TiStore 应用标识", storeConfig.appId, viewId = R.id.field_store_app_id)
         val endpointField =
-            editText("Store Endpoint（可选）", storeConfig.endpoint, viewId = R.id.field_store_endpoint)
+            editText("留空则使用默认环境", storeConfig.endpoint, viewId = R.id.field_store_endpoint)
         val tokenField =
             editText(
-                "APP Access Token",
+                "粘贴 TiStore APP Token",
                 storeConfig.token,
                 multiLine = true,
                 isSecret = true,
@@ -276,26 +282,38 @@ class MainActivity : AppCompatActivity() {
                     },
                     bottom = 20,
                 )
-                addViewWithMargin(fieldBlock("TiStore App ID", appIdField), bottom = 16)
-                addViewWithMargin(fieldBlock("Store Endpoint（可选）", endpointField), bottom = 16)
-                addViewWithMargin(fieldBlock("APP Access Token", tokenField), bottom = 16)
+                addViewWithMargin(fieldBlock("app_id", appIdField), bottom = 16)
+                addViewWithMargin(fieldBlock("endpoint", endpointField), bottom = 16)
+                addViewWithMargin(
+                    LinearLayout(context).apply {
+                        orientation = LinearLayout.HORIZONTAL
+                        gravity = Gravity.BOTTOM
+                        addView(fieldBlock("token", tokenField), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                        addView(space(dp(10)))
+                        addView(
+                            outlinedButton("扫码") { showStoreQr(appIdField, endpointField, tokenField) },
+                            LinearLayout.LayoutParams(dp(68), dp(56)),
+                        )
+                    },
+                    bottom = 16,
+                )
                 addViewWithMargin(
                     twoColumnFields(
-                        "音频 Channel ID",
+                        "audio_channel_id",
                         audioChannelField,
-                        "视频 Channel ID",
+                        "video_channel_id",
                         videoChannelField,
                     ),
                     bottom = 20,
                 )
                 addView(
-                    primaryButton("进入云录像") {
+                    primaryButton("播放云录像") {
                         val appId = appIdField.text.toString().trim()
                         val token = tokenField.text.toString().trim()
                         val audioChannel = audioChannelField.text.toString().toIntOrNull()
                         val videoChannel = videoChannelField.text.toString().toIntOrNull()
                         if (appId.isEmpty() || token.isEmpty() || audioChannel !in 0..255 || videoChannel !in 0..255) {
-                            toast("请填写 TiStore App ID、APP Access Token 和有效 Channel ID。")
+                            toast("请填写 app_id、token 和有效 channel_id。")
                             return@primaryButton
                         }
                         val next =
@@ -310,6 +328,7 @@ class MainActivity : AppCompatActivity() {
                         showStorePlayer(next)
                     },
                 )
+                addView(linkButton("上传日志") { uploadLogs() })
             },
         )
     }
@@ -325,7 +344,7 @@ class MainActivity : AppCompatActivity() {
         val time = body("--:--:-- / --:--:--").apply { id = R.id.store_seek_time }
         val seek = storeSeekBar(flow)
         val recording =
-            outlinedButton("开始本地保存") { toggleStoreRecording(flow, config) }.apply {
+            outlinedButton("录屏") { toggleStoreRecording(flow, config) }.apply {
                 id = R.id.store_recording_button
             }
         val snapshot =
@@ -496,20 +515,6 @@ class MainActivity : AppCompatActivity() {
                 id = R.id.store_recordings_date_row
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
-                isClickable = true
-                isFocusable = true
-                setOnClickListener {
-                    DatePickerDialog(
-                        this@MainActivity,
-                        { _, year, month, day ->
-                            storeSelectedDate.set(year, month, day)
-                            showStoreRecordingsDialog(flow, config, query = true)
-                        },
-                        storeSelectedDate.get(Calendar.YEAR),
-                        storeSelectedDate.get(Calendar.MONTH),
-                        storeSelectedDate.get(Calendar.DAY_OF_MONTH),
-                    ).show()
-                }
                 addView(
                     LinearLayout(context).apply {
                         orientation = LinearLayout.VERTICAL
@@ -522,7 +527,7 @@ class MainActivity : AppCompatActivity() {
                         )
                         addView(
                             TextView(context).apply {
-                                text = "按设备所在本地日期查询"
+                                text = "自然日按 Asia/Shanghai 查询"
                                 setTextColor(ExampleTheme.textSecondary)
                                 textSize = 12f
                             },
@@ -568,6 +573,7 @@ class MainActivity : AppCompatActivity() {
                     top = dp(2),
                     bottom = 0,
                 )
+                addView(storeMonthCalendar(flow, config))
                 addView(
                     View(context).apply { setBackgroundColor(ExampleTheme.inputBorder) },
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1),
@@ -583,7 +589,7 @@ class MainActivity : AppCompatActivity() {
         root.layoutParams =
             FrameLayout.LayoutParams(
                 FrameLayout.LayoutParams.MATCH_PARENT,
-                (resources.displayMetrics.heightPixels * 0.72).toInt(),
+                (resources.displayMetrics.heightPixels * 0.88).toInt(),
             )
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(root)
@@ -608,11 +614,12 @@ class MainActivity : AppCompatActivity() {
         config: StoreConfiguration,
     ) {
         if (storeFlow !== flow) return
+        val generation = ++storeDayQueryGeneration
         renderStoreRecordings(emptyList(), "正在查询…")
         val bounds = storeQueryBounds()
         val accepted =
             flow.query(bounds.first, bounds.second) { result ->
-                if (storeFlow !== flow) return@query
+                if (storeFlow !== flow || generation != storeDayQueryGeneration) return@query
                 if (result.code != 0) {
                     storeRecordings = emptyList()
                     renderStoreRecordings(emptyList(), "查询失败：${result.code}")
@@ -631,6 +638,107 @@ class MainActivity : AppCompatActivity() {
         if (accepted != 0) {
             renderStoreRecordings(emptyList(), "查询启动失败：$accepted")
             updateStoreStatus("查询启动失败：$accepted")
+        }
+    }
+
+    private fun storeMonthCalendar(
+        flow: TiStoreExampleFlow,
+        config: StoreConfiguration,
+    ): View {
+        val title = body("").apply { gravity = Gravity.CENTER }
+        val grid = GridLayout(this).apply { columnCount = 7 }
+        var availableDays: Set<String> = emptySet()
+        lateinit var render: () -> Unit
+        lateinit var load: () -> Unit
+        render = {
+            title.text = SimpleDateFormat("yyyy-MM", Locale.ROOT).apply {
+                timeZone = TimeZone.getTimeZone("Asia/Shanghai")
+            }.format(storeVisibleMonth.time)
+            grid.removeAllViews()
+            val first = storeVisibleMonth.clone() as Calendar
+            first.set(Calendar.DAY_OF_MONTH, 1)
+            val leading = first.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
+            repeat(leading) {
+                grid.addView(space(dp(1)), GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = dp(46)
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                })
+            }
+            val lastDay = first.getActualMaximum(Calendar.DAY_OF_MONTH)
+            for (day in 1..lastDay) {
+                val date = first.clone() as Calendar
+                date.set(Calendar.DAY_OF_MONTH, day)
+                val key = storeDateKey(date)
+                val selected = key == storeDateLabel()
+                val available = key in availableDays
+                val button =
+                    if (selected) {
+                        compactFilledButton("$day\n${if (available) "有录像" else "无录像"}") {}
+                    } else {
+                        outlinedButton("$day\n${if (available) "有录像" else "无录像"}") {}
+                    }
+                button.apply {
+                    minHeight = dp(46)
+                    minWidth = 0
+                    textSize = 10f
+                    isEnabled = available
+                    alpha = if (isEnabled) 1f else 0.34f
+                    setOnClickListener {
+                        storeSelectedDate.timeInMillis = date.timeInMillis
+                        render()
+                        queryStoreRecordings(flow, config)
+                    }
+                }
+                grid.addView(button, GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = dp(46)
+                    setMargins(dp(1), dp(1), dp(1), dp(1))
+                    columnSpec = GridLayout.spec(GridLayout.UNDEFINED, 1f)
+                })
+            }
+        }
+        load = {
+            val generation = ++storeMonthQueryGeneration
+            availableDays = emptySet()
+            render()
+            val first = storeVisibleMonth.clone() as Calendar
+            first.set(Calendar.DAY_OF_MONTH, 1)
+            val last = first.clone() as Calendar
+            last.set(Calendar.DAY_OF_MONTH, last.getActualMaximum(Calendar.DAY_OF_MONTH))
+            val accepted =
+                flow.queryDays(storeDateKey(first), storeDateKey(last), "Asia/Shanghai") { result ->
+                    if (storeFlow !== flow || generation != storeMonthQueryGeneration) return@queryDays
+                    availableDays = result.days.filter { it.hasRecording }.map { it.date }.toSet()
+                    render()
+                    if (result.code != 0) updateStoreStatus("月份加载失败：${result.code}，切换月份可重试")
+                }
+            if (accepted != 0) updateStoreStatus("月份加载启动失败：$accepted")
+        }
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(4), dp(18), dp(8))
+            addView(
+                LinearLayout(context).apply {
+                    orientation = LinearLayout.HORIZONTAL
+                    gravity = Gravity.CENTER_VERTICAL
+                    addView(appBarActionButton("上个月") {
+                        storeVisibleMonth.add(Calendar.MONTH, -1)
+                        load()
+                    })
+                    addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                    addView(appBarActionButton("下个月") {
+                        storeVisibleMonth.add(Calendar.MONTH, 1)
+                        load()
+                    })
+                },
+            )
+            addView(body("日       一       二       三       四       五       六").apply { gravity = Gravity.CENTER })
+            addView(grid)
+            post {
+                render()
+                load()
+            }
         }
     }
 
@@ -699,7 +807,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                     addView(
-                        appBarActionButton(if (exportBusy) "${storeExportProgress}%" else "直接导出") {
+                        appBarActionButton(if (exportBusy) "${storeExportProgress}%" else "下载") {
                             if (flow != null && config != null) exportStoreRecording(flow, config, range)
                         }.apply {
                             id = R.id.store_range_export
@@ -881,7 +989,7 @@ class MainActivity : AppCompatActivity() {
         storeSeekBar?.isEnabled = playing
         storeRecordingButton.enabled(playing)
         storeSnapshotButton.enabled(playing)
-        storeRecordingButton?.text = if (flow?.isRecording == true) "停止本地保存" else "开始本地保存"
+        storeRecordingButton?.text = if (flow?.isRecording == true) "结束录屏" else "录屏"
         storeGalleryButton.enabled(flow?.hasLatestMedia == true)
         storeMuteButton.enabled(playing && flow?.speed == TiStoreReplaySpeed.X1)
         storeMuteButton?.text = if (flow?.muted == true) "恢复声音" else "静音"
@@ -905,9 +1013,17 @@ class MainActivity : AppCompatActivity() {
         return start.timeInMillis to end.timeInMillis
     }
 
-    private fun storeDateLabel(): String = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(storeSelectedDate.time)
+    private fun storeDateKey(calendar: Calendar): String =
+        SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Shanghai")
+        }.format(calendar.time)
 
-    private fun formatStoreTime(timeMs: Long): String = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(timeMs)
+    private fun storeDateLabel(): String = storeDateKey(storeSelectedDate)
+
+    private fun formatStoreTime(timeMs: Long): String =
+        SimpleDateFormat("HH:mm:ss", Locale.ROOT).apply {
+            timeZone = TimeZone.getTimeZone("Asia/Shanghai")
+        }.format(timeMs)
 
     private fun formatStoreDuration(durationMs: Long): String {
         val seconds = (durationMs / 1000L).coerceAtLeast(0L)
@@ -935,6 +1051,8 @@ class MainActivity : AppCompatActivity() {
     private fun closeStoreFlow(completion: () -> Unit = {}) {
         val flow = storeFlow
         storeFlow = null
+        storeDayQueryGeneration += 1
+        storeMonthQueryGeneration += 1
         storeRecordingsDialog?.dismiss()
         storeRecordingsDialog = null
         storeRecordingsContent = null
@@ -1002,7 +1120,7 @@ class MainActivity : AppCompatActivity() {
             }
         setContentView(
             page {
-                navigationHeader("扫一扫") { showConfigure() }
+                navigationHeader("扫描二维码") { showConfigure() }
                 addView(scannerPanel(scannerView))
                 addView(qrGuide("将二维码完整放入方框内，系统会自动识别并填充 app_id、remote_id、token。"))
                 addViewWithMargin(
@@ -1022,6 +1140,34 @@ class MainActivity : AppCompatActivity() {
                         showConfigure()
                     },
                 )
+            },
+        )
+        activateScanner(scannerView)
+    }
+
+    private fun showStoreQr(
+        appIdField: EditText,
+        endpointField: EditText,
+        tokenField: EditText,
+    ) {
+        val payloadField = editText("粘贴云录像 Token", "", multiLine = true)
+        fun applyToken(raw: String): Boolean {
+            val payload = parseStoreQrPayload(raw, storeConfig, ::toast) ?: return false
+            appIdField.setText(payload.appId)
+            endpointField.setText(payload.endpoint)
+            tokenField.setText(payload.token)
+            storeConfig = payload
+            showConfigure()
+            return true
+        }
+        val scannerView = qrScannerView(::applyToken)
+        setContentView(
+            page {
+                navigationHeader("扫描二维码") { showConfigure() }
+                addView(qrGuide("对准云录像 Token 二维码，或使用包含 app_id、token 和可选 endpoint 的 JSON。"))
+                addView(scannerPanel(scannerView))
+                addViewWithMargin(fieldBlock("二维码内容", payloadField), bottom = 20)
+                addView(primaryButton("应用二维码内容") { applyToken(payloadField.text.toString()) })
             },
         )
         activateScanner(scannerView)
@@ -1066,6 +1212,15 @@ class MainActivity : AppCompatActivity() {
             mediaIconButton(android.R.drawable.ic_menu_camera, "截图") {
                 takePlayerSnapshot()
             }
+        val galleryButton =
+            mediaIconButton(android.R.drawable.ic_menu_gallery, "保存到系统相册") {
+                savePlayerLatestToGallery()
+            }.apply {
+                id = R.id.player_gallery_button
+                isEnabled = false
+                alpha = 0.46f
+            }
+        playerGalleryButton = galleryButton
         playerConfig = config
         playerStage = videoStage
         playerLocalAudioButton = localAudioButton
@@ -1095,6 +1250,7 @@ class MainActivity : AppCompatActivity() {
                         bubble = bubble,
                         recordingButton = recordingButton,
                         snapshotButton = snapshotButton,
+                        galleryButton = galleryButton,
                         localAudioButton = localAudioButton,
                         outputVolumeButton = outputVolumeButton,
                         downlinkButton = downlinkButton,
@@ -1241,6 +1397,7 @@ class MainActivity : AppCompatActivity() {
             playerLocalAudioButton = null
             playerOutputVolumeButton = null
             playerDownlinkButton = null
+            playerGalleryButton = null
         }
         playerMediaBusy = false
         TiRtc.shutdown()
@@ -1259,6 +1416,10 @@ class MainActivity : AppCompatActivity() {
                     if (result.code == 0 && completedFile != null) {
                         playerLatestMediaFile = completedFile
                         playerOwnedMediaFiles.add(completedFile)
+                        playerGalleryButton?.apply {
+                            isEnabled = true
+                            alpha = 1f
+                        }
                     }
                     appendStatus(
                         if (result.code == 0) {
@@ -1296,6 +1457,10 @@ class MainActivity : AppCompatActivity() {
             deletePlayerMediaFile(playerLatestMediaFile) {
                 playerLatestMediaFile = file
                 playerOwnedMediaFiles.add(file)
+                playerGalleryButton?.apply {
+                    isEnabled = true
+                    alpha = 1f
+                }
                 playerMediaBusy = false
                 appendStatus("截图完成 ${file.path}")
             }
@@ -1316,6 +1481,27 @@ class MainActivity : AppCompatActivity() {
             is TiRtcSnapshotFile -> file.delete(callback)
             else -> completion()
         }
+    }
+
+    private fun savePlayerLatestToGallery() {
+        if (playerMediaBusy) return
+        val file = playerLatestMediaFile ?: return
+        val path =
+            when (file) {
+                is TiRtcRecordingFile -> file.path
+                is TiRtcSnapshotFile -> file.path
+                else -> return
+            }
+        playerMediaBusy = true
+        playerGalleryButton?.isEnabled = false
+        Thread {
+            val code = copyPathToGallery(this, path, file is TiRtcRecordingFile)
+            mainHandler.post {
+                playerMediaBusy = false
+                playerGalleryButton?.isEnabled = true
+                appendStatus(if (code == 0) "已保存到系统相册" else "保存到系统相册失败 code=$code")
+            }
+        }.start()
     }
 
     private fun deletePlayerMediaFiles(
@@ -1508,6 +1694,7 @@ class MainActivity : AppCompatActivity() {
             LinearLayout(this).apply {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(16), dp(10), dp(16), 0)
+                addView(sectionTitle("发送命令"))
                 addViewWithMargin(fieldBlock("命令 ID", commandField), bottom = 16)
                 addView(spinnerBlock("call command schema", preset))
                 addView(spinnerBlock("payload mode", mode))
@@ -1515,24 +1702,34 @@ class MainActivity : AppCompatActivity() {
                 addView(sectionTitle("history"))
                 addView(history)
             }
-        AlertDialog.Builder(this)
-            .setTitle("发送命令")
-            .setView(root)
-            .setNegativeButton("关闭", null)
-            .setPositiveButton("发送") { _, _ ->
-                val command = parseCommandIdOrNull(commandField.text.toString(), ::toast) ?: return@setPositiveButton
+        val dialog = BottomSheetDialog(this)
+        root.addView(
+            LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                addView(outlinedButton("关闭") { dialog.dismiss() }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+                addView(space(dp(12)))
+                addView(primaryButton("发送") send@{
+                val command = parseCommandIdOrNull(commandField.text.toString(), ::toast) ?: return@send
                 val payload =
                     if (preset.selectedItemPosition > 0) {
                         utf8Payload(demoCommandPresetPayload(preset.selectedItemPosition))
                     } else if (mode.selectedItemPosition == 1) {
-                        parseHexPayloadOrNull(payloadField.text.toString(), ::toast) ?: return@setPositiveButton
+                        parseHexPayloadOrNull(payloadField.text.toString(), ::toast) ?: return@send
                     } else {
                         utf8Payload(payloadField.text.toString())
                     }
                 val code = conn?.sendCommand(command, payload) ?: -1
                 appendCommand("sent code=$code", command, payload)
-            }
-            .show()
+                }, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
+            },
+        )
+        root.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, (resources.displayMetrics.heightPixels * 0.5).toInt())
+        dialog.setContentView(root)
+        dialog.show()
+        dialog.behavior.apply {
+            peekHeight = root.layoutParams.height
+            state = BottomSheetBehavior.STATE_EXPANDED
+        }
     }
 
     private fun uploadLogs() {
