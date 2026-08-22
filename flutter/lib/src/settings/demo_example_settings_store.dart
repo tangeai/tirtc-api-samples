@@ -4,9 +4,7 @@ import '../demo_configuration.dart';
 import 'example_preferences.dart';
 
 final class DemoExampleSettingsStore {
-  const DemoExampleSettingsStore({
-    this.preferences = const MethodChannelDemoExamplePreferences(),
-  });
+  const DemoExampleSettingsStore({this.preferences = const MethodChannelDemoExamplePreferences()});
 
   static const String videoDecoderPreferenceKey = 'tirtc_example.settings.video_decoder_preference';
   static const String outputBufferPolicyKey = 'tirtc_example.settings.output_buffer_policy';
@@ -20,10 +18,7 @@ final class DemoExampleSettingsStore {
 
   final DemoExamplePreferences preferences;
 
-  Future<DemoExampleSettings> load({
-    int? testVideoDecoderPreference,
-    String? testOutputBufferPolicy,
-  }) async {
+  Future<DemoExampleSettings> load({int? testVideoDecoderPreference, String? testOutputBufferPolicy}) async {
     final DemoExampleSettings manualSettings = await _loadManualSettings();
     if (testVideoDecoderPreference == null && testOutputBufferPolicy == null) {
       return manualSettings;
@@ -33,8 +28,9 @@ final class DemoExampleSettingsStore {
       videoDecoderPreference: _validVideoDecoderPreferenceOrDefault(
         testVideoDecoderPreference ?? manualSettings.videoDecoderPreference,
       ),
-      outputBufferPolicy:
-          _validOutputBufferPolicyOrDefault(testOutputBufferPolicy ?? manualSettings.outputBufferPolicy),
+      outputBufferPolicy: _validOutputBufferPolicyOrDefault(
+        testOutputBufferPolicy ?? manualSettings.outputBufferPolicy,
+      ),
       consoleLogEnabled: true,
       localAudioCodec: manualSettings.localAudioCodec,
       localAudioSampleRateHz: manualSettings.localAudioSampleRateHz,
@@ -54,10 +50,7 @@ final class DemoExampleSettingsStore {
       key: outputBufferPolicyKey,
       value: _validOutputBufferPolicyOrDefault(settings.outputBufferPolicy),
     );
-    await preferences.putInt(
-      key: consoleLogEnabledKey,
-      value: settings.consoleLogEnabled ? 1 : 0,
-    );
+    await preferences.putInt(key: consoleLogEnabledKey, value: settings.consoleLogEnabled ? 1 : 0);
     await preferences.putString(
       key: localAudioCodecKey,
       value: _validLocalAudioCodecOrDefault(settings.localAudioCodec),
@@ -70,10 +63,7 @@ final class DemoExampleSettingsStore {
       key: localAudioStreamIdKey,
       value: _validLocalAudioStreamIdOrDefault(settings.localAudioStreamId),
     );
-    await preferences.putInt(
-      key: localAudioAecEnabledKey,
-      value: settings.localAudioAecEnabled ? 1 : 0,
-    );
+    await preferences.putInt(key: localAudioAecEnabledKey, value: settings.localAudioAecEnabled ? 1 : 0);
     await preferences.putInt(
       key: localAudioAgcLevelKey,
       value: _validLocalAudioProcessingLevelOrDefault(settings.localAudioAgcLevel),
@@ -89,10 +79,7 @@ final class DemoExampleSettingsStore {
       key: videoDecoderPreferenceKey,
       defaultValue: DemoExampleSettings.videoDecoderPreferenceAuto,
     );
-    final int consoleLogEnabled = await _readInt(
-      key: consoleLogEnabledKey,
-      defaultValue: 0,
-    );
+    final int consoleLogEnabled = await _readInt(key: consoleLogEnabledKey, defaultValue: 0);
     final String outputBufferPolicy = await _readString(
       key: outputBufferPolicyKey,
       defaultValue: DemoExampleSettings.outputBufferPolicyAutomatic,
@@ -109,18 +96,9 @@ final class DemoExampleSettingsStore {
       key: localAudioStreamIdKey,
       defaultValue: DemoExampleSettings.defaultLocalAudioStreamId,
     );
-    final int localAudioAecEnabled = await _readInt(
-      key: localAudioAecEnabledKey,
-      defaultValue: 0,
-    );
-    final int localAudioAgcLevel = await _readInt(
-      key: localAudioAgcLevelKey,
-      defaultValue: 0,
-    );
-    final int localAudioAnsLevel = await _readInt(
-      key: localAudioAnsLevelKey,
-      defaultValue: 0,
-    );
+    final int localAudioAecEnabled = await _readInt(key: localAudioAecEnabledKey, defaultValue: 0);
+    final int localAudioAgcLevel = await _readInt(key: localAudioAgcLevelKey, defaultValue: 0);
+    final int localAudioAnsLevel = await _readInt(key: localAudioAnsLevelKey, defaultValue: 0);
 
     return DemoExampleSettings(
       videoDecoderPreference: _validVideoDecoderPreferenceOrDefault(videoDecoderPreference),
@@ -135,32 +113,20 @@ final class DemoExampleSettingsStore {
     );
   }
 
-  Future<int> _readInt({
-    required String key,
-    required int defaultValue,
-  }) async {
+  Future<int> _readInt({required String key, required int defaultValue}) async {
     try {
       return await preferences.getInt(key: key, defaultValue: defaultValue);
     } on Object catch (error) {
-      TiRtcLogging.w(
-        'flutter_example',
-        'example_settings_read_failed key=$key error=$error',
-      );
+      TiRtcLogging.w('flutter_example', 'example_settings_read_failed key=$key error=$error');
       return defaultValue;
     }
   }
 
-  Future<String> _readString({
-    required String key,
-    required String defaultValue,
-  }) async {
+  Future<String> _readString({required String key, required String defaultValue}) async {
     try {
       return await preferences.getString(key: key, defaultValue: defaultValue);
     } on Object catch (error) {
-      TiRtcLogging.w(
-        'flutter_example',
-        'example_settings_read_failed key=$key error=$error',
-      );
+      TiRtcLogging.w('flutter_example', 'example_settings_read_failed key=$key error=$error');
       return defaultValue;
     }
   }

@@ -219,14 +219,16 @@ class DownlinkMetricsOverlayModel {
         rowKey: 'video_receive',
         widgetKey: DemoWidgetKeys.downlinkMetricsVideoReceiveText,
         label: '视频接收',
-        value: '码率 ${_formatKbps(videoInputBitrateKbps)} · '
+        value:
+            '码率 ${_formatKbps(videoInputBitrateKbps)} · '
             '接收 ${_formatFps(videoInputFps)}',
       ),
       DownlinkMetricsOverlayRow(
         rowKey: 'audio_receive',
         widgetKey: DemoWidgetKeys.downlinkMetricsAudioReceiveText,
         label: '音频接收',
-        value: '码率 ${_formatKbps(audioInputBitrateKbps)} · '
+        value:
+            '码率 ${_formatKbps(audioInputBitrateKbps)} · '
             'PPS ${_formatPerSecond(audioInputPacketRate)}',
       ),
       DownlinkMetricsOverlayRow(
@@ -249,7 +251,8 @@ class DownlinkMetricsOverlayModel {
         rowKey: 'stutter',
         widgetKey: DemoWidgetKeys.downlinkMetricsStutterText,
         label: '卡顿统计',
-        value: '视频 ${_formatCount(videoStutterCount)} / 最长 ${_formatDuration(videoStutterPeakMs)} · '
+        value:
+            '视频 ${_formatCount(videoStutterCount)} / 最长 ${_formatDuration(videoStutterPeakMs)} · '
             '音频 ${_formatCount(audioStutterCount)} / 最长 ${_formatDuration(audioStutterPeakMs)}',
         periodTextPresent: true,
         periodAvailable: stutterReady,
@@ -272,8 +275,9 @@ class DownlinkMetricsOverlayModel {
   }
 
   Map<String, Object?> periodSummaryPayload() {
-    final List<DownlinkMetricsOverlayRow> periodRows =
-        overlayRows.where((DownlinkMetricsOverlayRow row) => row.periodTextPresent).toList(growable: false);
+    final List<DownlinkMetricsOverlayRow> periodRows = overlayRows
+        .where((DownlinkMetricsOverlayRow row) => row.periodTextPresent)
+        .toList(growable: false);
     return <String, Object?>{
       'available': periodSummaryAvailable,
       'source': 'ui_text_period_summary',

@@ -15,9 +15,8 @@ final class DemoStoreConfigurationSnapshot {
 }
 
 final class DemoStoreConfigurationStore {
-  const DemoStoreConfigurationStore({
-    DemoExamplePreferences preferences = const MethodChannelDemoExamplePreferences(),
-  }) : _preferences = preferences;
+  const DemoStoreConfigurationStore({DemoExamplePreferences preferences = const MethodChannelDemoExamplePreferences()})
+    : _preferences = preferences;
 
   static const String _appIdKey = 'tirtc_example.store.app_id';
   static const String _endpointKey = 'tirtc_example.store.endpoint';

@@ -8,11 +8,9 @@ import '../widgets/command_panel_model.dart';
 import '../widgets/command_panel_sheet.dart';
 
 class DemoPlayerCommandController {
-  DemoPlayerCommandController({
-    required DemoDownlinkSession session,
-    required VoidCallback onChanged,
-  })  : _session = session,
-        _onChanged = onChanged;
+  DemoPlayerCommandController({required DemoDownlinkSession session, required VoidCallback onChanged})
+    : _session = session,
+      _onChanged = onChanged;
 
   final DemoDownlinkSession _session;
   final DemoEchoCommandResponder _echoResponder = DemoEchoCommandResponder();
@@ -29,10 +27,7 @@ class DemoPlayerCommandController {
     }
   }
 
-  void handleReceived({
-    required int commandId,
-    required Uint8List payload,
-  }) {
+  void handleReceived({required int commandId, required Uint8List payload}) {
     _append(
       DemoCommandPanelEvent(
         direction: DemoCommandEventDirection.received,
@@ -44,10 +39,7 @@ class DemoPlayerCommandController {
     final int? echoCode = _echoResponder.handleReceived(
       commandId: commandId,
       payload: payload,
-      sendCommand: (int commandId, Uint8List payload) => _session.sendCommand(
-        commandId: commandId,
-        payload: payload,
-      ),
+      sendCommand: (int commandId, Uint8List payload) => _session.sendCommand(commandId: commandId, payload: payload),
     );
     if (echoCode != null) {
       _append(
@@ -64,11 +56,7 @@ class DemoPlayerCommandController {
 
   Future<int> send(int commandId, Uint8List payload) async {
     final int code = _session.sendCommand(commandId: commandId, payload: payload);
-    _echoResponder.trackLocalSend(
-      commandId: commandId,
-      payload: payload,
-      resultCode: code,
-    );
+    _echoResponder.trackLocalSend(commandId: commandId, payload: payload, resultCode: code);
     _append(
       DemoCommandPanelEvent(
         direction: DemoCommandEventDirection.sent,
@@ -81,10 +69,7 @@ class DemoPlayerCommandController {
     return code;
   }
 
-  Future<void> showPanel(
-    BuildContext context, {
-    required bool Function() connected,
-  }) {
+  Future<void> showPanel(BuildContext context, {required bool Function() connected}) {
     return showDemoCommandPanelSheet(
       context: context,
       title: '发送命令',

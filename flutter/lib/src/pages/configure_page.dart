@@ -112,10 +112,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      ConfigureHeader(
-                        startingPlayer: runtimeBusy,
-                        onOpenSettings: _openSettings,
-                      ),
+                      ConfigureHeader(startingPlayer: runtimeBusy, onOpenSettings: _openSettings),
                       const SizedBox(height: 16),
                       ConfigureProductTabBar(controller: _productTabController),
                       const SizedBox(height: 20),
@@ -153,7 +150,11 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
                               ),
                             ],
                           ),
-                          DemoStoreEntryPage(enabled: !runtimeBusy),
+                          DemoStoreEntryPage(
+                            enabled: !runtimeBusy,
+                            uploadingLogs: _uploadingLogs,
+                            onUploadLogs: _uploadLogsFromConfigurePage,
+                          ),
                         ],
                       ),
                     ],
@@ -265,42 +266,27 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       final int initializeCode = await TiRtc.init(const TiRtcInitOptions());
       if (initializeCode != 0) {
         if (mounted) {
-          await context.showNoticeDialog(
-            title: '日志上传失败',
-            content: '日志初始化失败，code $initializeCode。',
-          );
+          await context.showNoticeDialog(title: '日志上传失败', content: '日志初始化失败，code $initializeCode。');
         }
         return;
       }
 
       final String marker = 'FLUTTER_HOME_LOG_UPLOAD_${DateTime.now().toLocal().toIso8601String()}';
-      TiRtcLogging.i(
-        'flutter_example',
-        'home_log_upload_marker=$marker',
-      );
+      TiRtcLogging.i('flutter_example', 'home_log_upload_marker=$marker');
       await _logUploader.upload(
         remoteId: _remoteIdController.text.trim(),
         isActive: () => mounted,
-        showResult: ({
-          required String title,
-          required String content,
-        }) {
+        showResult: ({required String title, required String content}) {
           if (!mounted) {
             return Future<void>.value();
           }
-          return context.showNoticeDialog(
-            title: title,
-            content: content,
-          );
+          return context.showNoticeDialog(title: title, content: content);
         },
       );
     } finally {
       final int shutdownCode = await _shutdownRuntimeAfterDisposal();
       if (shutdownCode != 0) {
-        TiRtcLogging.w(
-          'flutter_example',
-          'home_log_upload_runtime_shutdown_failed code=$shutdownCode',
-        );
+        TiRtcLogging.w('flutter_example', 'home_log_upload_runtime_shutdown_failed code=$shutdownCode');
       }
       if (mounted) {
         setState(() {
@@ -310,9 +296,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     }
   }
 
-  DemoDownlinkConfiguration? _validatedConfiguration({
-    required bool showFeedback,
-  }) {
+  DemoDownlinkConfiguration? _validatedConfiguration({required bool showFeedback}) {
     setState(() {
       _submitted = true;
     });
@@ -343,10 +327,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     );
   }
 
-  int _resolvedStreamId({
-    required TextEditingController controller,
-    required int fallback,
-  }) {
+  int _resolvedStreamId({required TextEditingController controller, required int fallback}) {
     final String text = controller.text.trim();
     if (text.isEmpty) {
       return fallback;
@@ -423,10 +404,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       return;
     }
 
-    TiRtcLogging.i(
-      'flutter_example',
-      'runtime_initialized endpoint=${resolvedConfiguration.endpoint}',
-    );
+    TiRtcLogging.i('flutter_example', 'runtime_initialized endpoint=${resolvedConfiguration.endpoint}');
 
     try {
       TiRtcLogging.i(
@@ -464,9 +442,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     }
   }
 
-  Future<DemoDownlinkConfiguration> _configurationWithResolvedToken(
-    DemoDownlinkConfiguration configuration,
-  ) async {
+  Future<DemoDownlinkConfiguration> _configurationWithResolvedToken(DemoDownlinkConfiguration configuration) async {
     final String token = await _tokenAcquirer.resolve(
       token: configuration.token,
       serverAddress: configuration.tokenServerAddress,
@@ -487,10 +463,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     _dismissKeyboard();
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => DemoSettingsPage(
-          initialSettings: _settings,
-          settingsStore: _settingsStore,
-        ),
+        builder: (BuildContext context) => DemoSettingsPage(initialSettings: _settings, settingsStore: _settingsStore),
       ),
     );
     if (!mounted) {
@@ -558,9 +531,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
 
     _dismissKeyboard();
     final DemoScanPayload? payload = await Navigator.of(context).push<DemoScanPayload>(
-      MaterialPageRoute<DemoScanPayload>(
-        builder: (BuildContext context) => const DemoQrScannerPage(),
-      ),
+      MaterialPageRoute<DemoScanPayload>(builder: (BuildContext context) => const DemoQrScannerPage()),
     );
     if (!mounted || payload == null) {
       return;

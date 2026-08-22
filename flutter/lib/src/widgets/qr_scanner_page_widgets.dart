@@ -52,16 +52,8 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
         backgroundColor: Colors.transparent,
         body: Stack(
           children: <Widget>[
-            Positioned.fill(
-              child: DecoratedBox(
-                decoration: ExampleTheme.pageBackgroundDecoration,
-              ),
-            ),
-            const Positioned(
-              top: -120,
-              right: -90,
-              child: _DecorativeOrb(size: 260, color: ExampleTheme.overlayGlow),
-            ),
+            Positioned.fill(child: DecoratedBox(decoration: ExampleTheme.pageBackgroundDecoration)),
+            const Positioned(top: -120, right: -90, child: _DecorativeOrb(size: 260, color: ExampleTheme.overlayGlow)),
             const Positioned(
               bottom: -110,
               left: -70,
@@ -102,10 +94,7 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
 
     return Text(
       widget.leadText,
-      style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(
-        color: ExampleTheme.textSecondary,
-        height: 1.6,
-      ),
+      style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(color: ExampleTheme.textSecondary, height: 1.6),
     );
   }
 
@@ -184,11 +173,7 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
                   color: ExampleTheme.primary.withAlpha(20),
                   borderRadius: BorderRadius.circular(14),
                 ),
-                child: const Icon(
-                  Icons.qr_code_2_rounded,
-                  color: ExampleTheme.primary,
-                  size: 22,
-                ),
+                child: const Icon(Icons.qr_code_2_rounded, color: ExampleTheme.primary, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -205,10 +190,7 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
           const SizedBox(height: 14),
           Text(
             widget.guideText,
-            style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(
-              color: ExampleTheme.textSecondary,
-              height: 1.6,
-            ),
+            style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(color: ExampleTheme.textSecondary, height: 1.6),
           ),
           const SizedBox(height: 14),
           Container(
@@ -256,11 +238,7 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
 
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text(widget.invalidPayloadText),
-          ),
-        );
+        ..showSnackBar(SnackBar(content: Text(widget.invalidPayloadText)));
       await Future<void>.delayed(const Duration(milliseconds: 900));
       _processing = false;
       return;
@@ -278,11 +256,7 @@ class _ScannerFrameOverlay extends StatelessWidget {
         gradient: LinearGradient(
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
-          colors: <Color>[
-            Colors.black.withAlpha(34),
-            Colors.transparent,
-            Colors.black.withAlpha(58),
-          ],
+          colors: <Color>[Colors.black.withAlpha(34), Colors.transparent, Colors.black.withAlpha(58)],
         ),
       ),
       child: Align(
@@ -290,18 +264,8 @@ class _ScannerFrameOverlay extends StatelessWidget {
         child: Container(
           margin: const EdgeInsets.only(top: 16),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-          decoration: BoxDecoration(
-            color: Colors.black.withAlpha(112),
-            borderRadius: BorderRadius.circular(999),
-          ),
-          child: const Text(
-            '对准二维码',
-            style: TextStyle(
-              color: Colors.white,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          decoration: BoxDecoration(color: Colors.black.withAlpha(112), borderRadius: BorderRadius.circular(999)),
+          child: const Text('对准二维码', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
         ),
       ),
     );
@@ -322,9 +286,7 @@ class _DecorativeOrb extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: <Color>[color, color.withAlpha(0)],
-          ),
+          gradient: RadialGradient(colors: <Color>[color, color.withAlpha(0)]),
         ),
       ),
     );

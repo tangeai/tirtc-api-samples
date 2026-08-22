@@ -6,7 +6,8 @@ import 'downlink_metrics_overlay_model.dart';
 
 const double _statsPanelMaxWidth = 430;
 
-const String downlinkMetricsExplanationContent = '【连接耗时】：从点击开始连接，到 runtime 确认连接成功的时间。'
+const String downlinkMetricsExplanationContent =
+    '【连接耗时】：从点击开始连接，到 runtime 确认连接成功的时间。'
     '只表示连接建立用了多久，不表示画面已经出来。\n\n'
     '【首帧等待】：连接成功后，到第一个视频帧真正显示成功的等待时间。'
     '如果只能拿到从点击连接开始计算的首帧时间，面板会明确显示为首帧总耗时。\n\n'
@@ -28,11 +29,7 @@ const String downlinkMetricsExplanationContent = '【连接耗时】：从点击
     '面板按秒刷新；还没有有效数据时显示“--”。';
 
 class DownlinkMetricsOverlay extends StatefulWidget {
-  const DownlinkMetricsOverlay({
-    super.key,
-    required this.metrics,
-    required this.onShowExplanation,
-  });
+  const DownlinkMetricsOverlay({super.key, required this.metrics, required this.onShowExplanation});
 
   final DownlinkMetricsOverlayModel metrics;
   final VoidCallback onShowExplanation;
@@ -66,11 +63,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
                 color: Colors.white,
                 borderRadius: BorderRadius.circular(18),
                 boxShadow: <BoxShadow>[
-                  BoxShadow(
-                    color: Colors.black.withAlpha(35),
-                    blurRadius: 10,
-                    offset: const Offset(0, 3),
-                  ),
+                  BoxShadow(color: Colors.black.withAlpha(35), blurRadius: 10, offset: const Offset(0, 3)),
                 ],
               ),
               child: const Row(
@@ -80,12 +73,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
                   SizedBox(width: 5),
                   Text(
                     '即时统计',
-                    style: TextStyle(
-                      color: Color(0xDD111111),
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      height: 1,
-                    ),
+                    style: TextStyle(color: Color(0xDD111111), fontSize: 10, fontWeight: FontWeight.w800, height: 1),
                   ),
                 ],
               ),
@@ -110,11 +98,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
               color: Colors.white,
               borderRadius: BorderRadius.circular(20),
               boxShadow: <BoxShadow>[
-                BoxShadow(
-                  color: Colors.black.withAlpha(40),
-                  blurRadius: 14,
-                  offset: const Offset(0, 5),
-                ),
+                BoxShadow(color: Colors.black.withAlpha(40), blurRadius: 14, offset: const Offset(0, 5)),
               ],
             ),
             child: Column(
@@ -183,11 +167,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
                 ),
                 const SizedBox(height: 6),
                 for (final DownlinkMetricsOverlayRow row in metrics.overlayRows)
-                  _MetricLine(
-                    key: row.widgetKey,
-                    label: row.label,
-                    value: row.value,
-                  ),
+                  _MetricLine(key: row.widgetKey, label: row.label, value: row.value),
               ],
             ),
           ),
@@ -198,11 +178,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
 }
 
 class _MetricLine extends StatelessWidget {
-  const _MetricLine({
-    super.key,
-    required this.label,
-    required this.value,
-  });
+  const _MetricLine({super.key, required this.label, required this.value});
 
   final String label;
   final String value;
@@ -216,21 +192,11 @@ class _MetricLine extends StatelessWidget {
           children: <InlineSpan>[
             TextSpan(
               text: '$label：',
-              style: const TextStyle(
-                color: Color(0xFF659287),
-                fontSize: 10,
-                fontWeight: FontWeight.w900,
-                height: 1.15,
-              ),
+              style: const TextStyle(color: Color(0xFF659287), fontSize: 10, fontWeight: FontWeight.w900, height: 1.15),
             ),
             TextSpan(
               text: value,
-              style: const TextStyle(
-                color: Color(0xCC111111),
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                height: 1.15,
-              ),
+              style: const TextStyle(color: Color(0xCC111111), fontSize: 10, fontWeight: FontWeight.w600, height: 1.15),
             ),
           ],
         ),

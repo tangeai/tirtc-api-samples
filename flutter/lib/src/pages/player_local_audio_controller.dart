@@ -18,14 +18,14 @@ class DemoPlayerLocalAudioController {
     required VoidCallback onChanged,
     required void Function(String message) showMessage,
     DemoExamplePermissions permissions = const DemoExamplePermissions(),
-  })  : _session = session,
-        _settings = settings,
-        _isMounted = isMounted,
-        _isCommandConnected = isCommandConnected,
-        _markerSink = markerSink,
-        _onChanged = onChanged,
-        _showMessage = showMessage,
-        _permissions = permissions;
+  }) : _session = session,
+       _settings = settings,
+       _isMounted = isMounted,
+       _isCommandConnected = isCommandConnected,
+       _markerSink = markerSink,
+       _onChanged = onChanged,
+       _showMessage = showMessage,
+       _permissions = permissions;
 
   static const Duration _connectionWaitTimeout = Duration(seconds: 8);
   static const Duration _connectionWaitPollInterval = Duration(milliseconds: 100);
@@ -74,10 +74,7 @@ class DemoPlayerLocalAudioController {
     }
     if (!microphoneReady) {
       TiRtcLogging.w('flutter_example', 'local_audio_input_permission_denied');
-      _markerSink()?.failure(
-        failureStage: 'local_audio_permission',
-        message: 'microphone permission denied',
-      );
+      _markerSink()?.failure(failureStage: 'local_audio_permission', message: 'microphone permission denied');
       _showMessage('麦克风权限未授权。');
       _setBusy(false);
       return;
@@ -112,10 +109,10 @@ class DemoPlayerLocalAudioController {
       }
       code = await _session.attachLocalAudio(streamId: streamId);
       if (code == 0) {
-        _markerSink()?.passed('local_audio_input_attached', payload: <String, Object?>{
-          'stream_id': streamId,
-          'previous_stream_id': previousStreamId,
-        });
+        _markerSink()?.passed(
+          'local_audio_input_attached',
+          payload: <String, Object?>{'stream_id': streamId, 'previous_stream_id': previousStreamId},
+        );
         attachedStreamId = streamId;
       }
     }
@@ -129,12 +126,15 @@ class DemoPlayerLocalAudioController {
         'flutter_example',
         'local_audio_input_start_done stream_id=$streamId start_count=$startCount reused_binding=$reusedBinding',
       );
-      _markerSink()?.passed('local_audio_input_started', payload: <String, Object?>{
-        'stream_id': streamId,
-        'start_count': startCount,
-        'stop_count': stopCount,
-        'reused_binding': reusedBinding,
-      });
+      _markerSink()?.passed(
+        'local_audio_input_started',
+        payload: <String, Object?>{
+          'stream_id': streamId,
+          'start_count': startCount,
+          'stop_count': stopCount,
+          'reused_binding': reusedBinding,
+        },
+      );
       running = true;
       busy = false;
       _notifyChanged();
@@ -163,11 +163,10 @@ class DemoPlayerLocalAudioController {
     if (code == 0) {
       stopCount += 1;
       TiRtcLogging.i('flutter_example', 'local_audio_input_stop_done stop_count=$stopCount');
-      _markerSink()?.passed('local_audio_input_stopped', payload: <String, Object?>{
-        'stream_id': attachedStreamId,
-        'start_count': startCount,
-        'stop_count': stopCount,
-      });
+      _markerSink()?.passed(
+        'local_audio_input_stopped',
+        payload: <String, Object?>{'stream_id': attachedStreamId, 'start_count': startCount, 'stop_count': stopCount},
+      );
       running = false;
       busy = false;
       _notifyChanged();
@@ -189,16 +188,9 @@ class DemoPlayerLocalAudioController {
     }
   }
 
-  void handleInputError({
-    required int code,
-    String? message,
-  }) {
+  void handleInputError({required int code, String? message}) {
     TiRtcLogging.w('flutter_example', 'local_audio_input_error code=$code message=${message ?? ''}');
-    _markerSink()?.failure(
-      failureStage: 'local_audio_input',
-      message: 'local audio input failed',
-      errorCode: code,
-    );
+    _markerSink()?.failure(failureStage: 'local_audio_input', message: 'local audio input failed', errorCode: code);
     running = false;
     busy = false;
     _notifyChanged();
@@ -237,9 +229,10 @@ class DemoPlayerLocalAudioController {
         DemoExampleSettings.localAudioCodecAmr => TiRtcAudioCodec.amr,
         _ => TiRtcAudioCodec.g711a,
       },
-      sampleRate: settings.localAudioSampleRateHz == DemoExampleSettings.localAudioSampleRate8k
-          ? TiRtcAudioSampleRate.rate8k
-          : TiRtcAudioSampleRate.rate16k,
+      sampleRate:
+          settings.localAudioSampleRateHz == DemoExampleSettings.localAudioSampleRate8k
+              ? TiRtcAudioSampleRate.rate8k
+              : TiRtcAudioSampleRate.rate16k,
       channels: TiRtcAudioChannelCount.mono,
       aecMode: settings.localAudioAecEnabled ? TiRtcAudioAecMode.enabled : TiRtcAudioAecMode.disabled,
       agcLevel: _localAudioAgcLevel(settings.localAudioAgcLevel),

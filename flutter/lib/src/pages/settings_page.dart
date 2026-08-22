@@ -44,36 +44,28 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       enabled: !_saving,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('视频解码偏好'),
-                      subtitle: Text(
-                        DemoExampleSettings.videoDecoderPreferenceLabel(_settings.videoDecoderPreference),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseVideoDecoderPreference());
-                            },
+                      subtitle: Text(DemoExampleSettings.videoDecoderPreferenceLabel(_settings.videoDecoderPreference)),
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseVideoDecoderPreference());
+                              },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16, color: ExampleTheme.inputBorder),
                     ListTile(
                       enabled: !_saving,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('输出缓冲策略'),
-                      subtitle: Text(
-                        DemoExampleSettings.outputBufferPolicyLabel(_settings.outputBufferPolicy),
-                      ),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseOutputBufferPolicy());
-                            },
+                      subtitle: Text(DemoExampleSettings.outputBufferPolicyLabel(_settings.outputBufferPolicy)),
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseOutputBufferPolicy());
+                              },
                     ),
                   ],
                 ),
@@ -88,15 +80,13 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('编码格式'),
                       subtitle: Text(DemoExampleSettings.localAudioCodecLabel(_settings.localAudioCodec)),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseLocalAudioCodec());
-                            },
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseLocalAudioCodec());
+                              },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16, color: ExampleTheme.inputBorder),
                     ListTile(
@@ -104,15 +94,13 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('采样率'),
                       subtitle: Text(DemoExampleSettings.localAudioSampleRateLabel(_settings.localAudioSampleRateHz)),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseLocalAudioSampleRate());
-                            },
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseLocalAudioSampleRate());
+                              },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16, color: ExampleTheme.inputBorder),
                     ListTile(
@@ -120,24 +108,23 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('传输 Stream ID'),
                       subtitle: Text('${_settings.localAudioStreamId}'),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseLocalAudioStreamId());
-                            },
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseLocalAudioStreamId());
+                              },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16, color: ExampleTheme.inputBorder),
                     SwitchListTile(
                       value: _settings.localAudioAecEnabled,
-                      onChanged: _saving
-                          ? null
-                          : (bool value) {
-                              unawaited(_setLocalAudioAecEnabled(value));
-                            },
+                      onChanged:
+                          _saving
+                              ? null
+                              : (bool value) {
+                                unawaited(_setLocalAudioAecEnabled(value));
+                              },
                       // ignore: deprecated_member_use
                       activeColor: ExampleTheme.primary,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -149,15 +136,13 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('AGC'),
                       subtitle: Text(DemoExampleSettings.localAudioProcessingLevelLabel(_settings.localAudioAgcLevel)),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseLocalAudioAgcLevel());
-                            },
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseLocalAudioAgcLevel());
+                              },
                     ),
                     const Divider(height: 1, indent: 16, endIndent: 16, color: ExampleTheme.inputBorder),
                     ListTile(
@@ -165,15 +150,13 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
                       contentPadding: const EdgeInsets.symmetric(horizontal: 16),
                       title: const Text('ANS'),
                       subtitle: Text(DemoExampleSettings.localAudioProcessingLevelLabel(_settings.localAudioAnsLevel)),
-                      trailing: const Icon(
-                        Icons.chevron_right_rounded,
-                        color: ExampleTheme.textSecondary,
-                      ),
-                      onTap: _saving
-                          ? null
-                          : () {
-                              unawaited(_chooseLocalAudioAnsLevel());
-                            },
+                      trailing: const Icon(Icons.chevron_right_rounded, color: ExampleTheme.textSecondary),
+                      onTap:
+                          _saving
+                              ? null
+                              : () {
+                                unawaited(_chooseLocalAudioAnsLevel());
+                              },
                     ),
                   ],
                 ),
@@ -183,11 +166,12 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
               SettingsSurface(
                 child: SwitchListTile(
                   value: _settings.consoleLogEnabled,
-                  onChanged: _saving
-                      ? null
-                      : (bool value) {
-                          unawaited(_setConsoleLogEnabled(value));
-                        },
+                  onChanged:
+                      _saving
+                          ? null
+                          : (bool value) {
+                            unawaited(_setConsoleLogEnabled(value));
+                          },
                   // ignore: deprecated_member_use
                   activeColor: ExampleTheme.primary,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 16),
@@ -208,10 +192,7 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
     if (value == _settings.videoDecoderPreference) {
       return;
     }
-    await _saveSettings(
-      _settings.copyWith(videoDecoderPreference: value),
-      reason: 'video_decoder_preference',
-    );
+    await _saveSettings(_settings.copyWith(videoDecoderPreference: value), reason: 'video_decoder_preference');
   }
 
   Future<void> _chooseVideoDecoderPreference() async {
@@ -224,18 +205,9 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
           title: '视频解码偏好',
           currentValue: _settings.videoDecoderPreference,
           options: const <PreferenceOption<int>>[
-            PreferenceOption<int>(
-              value: DemoExampleSettings.videoDecoderPreferenceAuto,
-              label: '自动',
-            ),
-            PreferenceOption<int>(
-              value: DemoExampleSettings.videoDecoderPreferenceHardware,
-              label: '硬解',
-            ),
-            PreferenceOption<int>(
-              value: DemoExampleSettings.videoDecoderPreferenceSoftware,
-              label: '软解',
-            ),
+            PreferenceOption<int>(value: DemoExampleSettings.videoDecoderPreferenceAuto, label: '自动'),
+            PreferenceOption<int>(value: DemoExampleSettings.videoDecoderPreferenceHardware, label: '硬解'),
+            PreferenceOption<int>(value: DemoExampleSettings.videoDecoderPreferenceSoftware, label: '软解'),
           ],
         );
       },
@@ -253,10 +225,7 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
     if (value == _settings.outputBufferPolicy) {
       return;
     }
-    await _saveSettings(
-      _settings.copyWith(outputBufferPolicy: value),
-      reason: 'output_buffer_policy',
-    );
+    await _saveSettings(_settings.copyWith(outputBufferPolicy: value), reason: 'output_buffer_policy');
   }
 
   Future<void> _chooseOutputBufferPolicy() async {
@@ -269,14 +238,8 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
           title: '输出缓冲策略',
           currentValue: _settings.outputBufferPolicy,
           options: const <PreferenceOption<String>>[
-            PreferenceOption<String>(
-              value: DemoExampleSettings.outputBufferPolicyAutomatic,
-              label: '自动',
-            ),
-            PreferenceOption<String>(
-              value: DemoExampleSettings.outputBufferPolicyNoBuffer,
-              label: '不缓冲',
-            ),
+            PreferenceOption<String>(value: DemoExampleSettings.outputBufferPolicyAutomatic, label: '自动'),
+            PreferenceOption<String>(value: DemoExampleSettings.outputBufferPolicyNoBuffer, label: '不缓冲'),
           ],
         );
       },
@@ -297,26 +260,11 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
           title: '编码格式',
           currentValue: _settings.localAudioCodec,
           options: const <PreferenceOption<String>>[
-            PreferenceOption<String>(
-              value: DemoExampleSettings.localAudioCodecG711a,
-              label: 'G711A',
-            ),
-            PreferenceOption<String>(
-              value: DemoExampleSettings.localAudioCodecAac,
-              label: 'AAC',
-            ),
-            PreferenceOption<String>(
-              value: DemoExampleSettings.localAudioCodecPcm,
-              label: 'PCM',
-            ),
-            PreferenceOption<String>(
-              value: DemoExampleSettings.localAudioCodecOpus,
-              label: 'OPUS',
-            ),
-            PreferenceOption<String>(
-              value: DemoExampleSettings.localAudioCodecAmr,
-              label: 'AMR',
-            ),
+            PreferenceOption<String>(value: DemoExampleSettings.localAudioCodecG711a, label: 'G711A'),
+            PreferenceOption<String>(value: DemoExampleSettings.localAudioCodecAac, label: 'AAC'),
+            PreferenceOption<String>(value: DemoExampleSettings.localAudioCodecPcm, label: 'PCM'),
+            PreferenceOption<String>(value: DemoExampleSettings.localAudioCodecOpus, label: 'OPUS'),
+            PreferenceOption<String>(value: DemoExampleSettings.localAudioCodecAmr, label: 'AMR'),
           ],
         );
       },
@@ -327,9 +275,10 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
     await _saveSettings(
       _settings.copyWith(
         localAudioCodec: value,
-        localAudioSampleRateHz: value == DemoExampleSettings.localAudioCodecAmr
-            ? DemoExampleSettings.localAudioSampleRate8k
-            : _settings.localAudioSampleRateHz,
+        localAudioSampleRateHz:
+            value == DemoExampleSettings.localAudioCodecAmr
+                ? DemoExampleSettings.localAudioSampleRate8k
+                : _settings.localAudioSampleRateHz,
       ),
       reason: 'local_audio_codec',
     );
@@ -345,14 +294,8 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
           title: '采样率',
           currentValue: _settings.localAudioSampleRateHz,
           options: const <PreferenceOption<int>>[
-            PreferenceOption<int>(
-              value: DemoExampleSettings.localAudioSampleRate8k,
-              label: '8 kHz',
-            ),
-            PreferenceOption<int>(
-              value: DemoExampleSettings.localAudioSampleRate16k,
-              label: '16 kHz',
-            ),
+            PreferenceOption<int>(value: DemoExampleSettings.localAudioSampleRate8k, label: '8 kHz'),
+            PreferenceOption<int>(value: DemoExampleSettings.localAudioSampleRate16k, label: '16 kHz'),
           ],
         );
       },
@@ -362,9 +305,10 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
     }
     await _saveSettings(
       _settings.copyWith(
-        localAudioSampleRateHz: _settings.localAudioCodec == DemoExampleSettings.localAudioCodecAmr
-            ? DemoExampleSettings.localAudioSampleRate8k
-            : value,
+        localAudioSampleRateHz:
+            _settings.localAudioCodec == DemoExampleSettings.localAudioCodecAmr
+                ? DemoExampleSettings.localAudioSampleRate8k
+                : value,
       ),
       reason: 'local_audio_sample_rate',
     );
@@ -381,15 +325,10 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
             controller: controller,
             autofocus: true,
             keyboardType: TextInputType.number,
-            decoration: const InputDecoration(
-              hintText: '1-255',
-            ),
+            decoration: const InputDecoration(hintText: '1-255'),
           ),
           actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('取消'),
-            ),
+            TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('取消')),
             FilledButton(
               onPressed: () {
                 Navigator.of(context).pop(int.tryParse(controller.text.trim()));
@@ -404,51 +343,30 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
     if (!mounted || value == null || !DemoExampleSettings.isValidLocalAudioStreamId(value)) {
       return;
     }
-    await _saveSettings(
-      _settings.copyWith(localAudioStreamId: value),
-      reason: 'local_audio_stream_id',
-    );
+    await _saveSettings(_settings.copyWith(localAudioStreamId: value), reason: 'local_audio_stream_id');
   }
 
   Future<void> _setLocalAudioAecEnabled(bool value) async {
-    await _saveSettings(
-      _settings.copyWith(localAudioAecEnabled: value),
-      reason: 'local_audio_aec',
-    );
+    await _saveSettings(_settings.copyWith(localAudioAecEnabled: value), reason: 'local_audio_aec');
   }
 
   Future<void> _chooseLocalAudioAgcLevel() async {
-    final int? value = await _chooseLocalAudioProcessingLevel(
-      title: 'AGC',
-      currentValue: _settings.localAudioAgcLevel,
-    );
+    final int? value = await _chooseLocalAudioProcessingLevel(title: 'AGC', currentValue: _settings.localAudioAgcLevel);
     if (!mounted || value == null || !DemoExampleSettings.isValidLocalAudioProcessingLevel(value)) {
       return;
     }
-    await _saveSettings(
-      _settings.copyWith(localAudioAgcLevel: value),
-      reason: 'local_audio_agc',
-    );
+    await _saveSettings(_settings.copyWith(localAudioAgcLevel: value), reason: 'local_audio_agc');
   }
 
   Future<void> _chooseLocalAudioAnsLevel() async {
-    final int? value = await _chooseLocalAudioProcessingLevel(
-      title: 'ANS',
-      currentValue: _settings.localAudioAnsLevel,
-    );
+    final int? value = await _chooseLocalAudioProcessingLevel(title: 'ANS', currentValue: _settings.localAudioAnsLevel);
     if (!mounted || value == null || !DemoExampleSettings.isValidLocalAudioProcessingLevel(value)) {
       return;
     }
-    await _saveSettings(
-      _settings.copyWith(localAudioAnsLevel: value),
-      reason: 'local_audio_ans',
-    );
+    await _saveSettings(_settings.copyWith(localAudioAnsLevel: value), reason: 'local_audio_ans');
   }
 
-  Future<int?> _chooseLocalAudioProcessingLevel({
-    required String title,
-    required int currentValue,
-  }) {
+  Future<int?> _chooseLocalAudioProcessingLevel({required String title, required int currentValue}) {
     return showModalBottomSheet<int>(
       context: context,
       showDragHandle: true,
@@ -469,16 +387,10 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
   }
 
   Future<void> _setConsoleLogEnabled(bool value) async {
-    await _saveSettings(
-      _settings.copyWith(consoleLogEnabled: value),
-      reason: 'console_log_enabled',
-    );
+    await _saveSettings(_settings.copyWith(consoleLogEnabled: value), reason: 'console_log_enabled');
   }
 
-  Future<void> _saveSettings(
-    DemoExampleSettings nextSettings, {
-    required String reason,
-  }) async {
+  Future<void> _saveSettings(DemoExampleSettings nextSettings, {required String reason}) async {
     final DemoExampleSettings previousSettings = _settings;
     setState(() {
       _settings = nextSettings;
@@ -507,10 +419,7 @@ class _DemoSettingsPageState extends State<DemoSettingsPage> {
         _saving = false;
       });
     } on Object catch (error) {
-      TiRtcLogging.w(
-        'flutter_example',
-        'example_settings_save_failed reason=$reason error=$error',
-      );
+      TiRtcLogging.w('flutter_example', 'example_settings_save_failed reason=$reason error=$error');
       if (!mounted) {
         return;
       }

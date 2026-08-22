@@ -5,6 +5,7 @@ import 'package:flutter/widgets.dart';
 import 'package:tirtc_flutter/tirtc_flutter.dart';
 
 import 'demo_call_command.dart';
+import 'demo_downlink_support.dart';
 import 'widgets/downlink_metrics_overlay_model.dart';
 
 const int _tiRtcErrorInvalidArgument = 6000;
@@ -13,10 +14,10 @@ const int _tiRtcErrorInUse = 6026;
 
 final class DemoDownlinkSession {
   DemoDownlinkSession({TiRtcConn? connection})
-      : _connection = connection ?? TiRtcConn(),
-        _audioOutput = TiRtcAudioOutput(),
-        _videoOutput = TiRtcVideoOutput(),
-        _audioInput = TiRtcAudioInput();
+    : _connection = connection ?? TiRtcConn(),
+      _audioOutput = TiRtcAudioOutput(),
+      _videoOutput = TiRtcVideoOutput(),
+      _audioInput = TiRtcAudioInput();
 
   final TiRtcConn _connection;
   final TiRtcAudioOutput _audioOutput;
@@ -88,24 +89,17 @@ final class DemoDownlinkSession {
   }
 
   int setAudioOptions({required TiRtcOutputBufferStrategy bufferStrategy}) {
-    return _audioOutput.configure(
-      TiRtcAudioOutputOptions(bufferStrategy: bufferStrategy),
-    );
+    return _audioOutput.configure(TiRtcAudioOutputOptions(bufferStrategy: bufferStrategy));
   }
 
   int setAudioOutputVolume(int volumePercent) {
     return _audioOutput.setVolume(volumePercent);
   }
 
-  int setVideoOptions({
-    required int decoderPreference,
-    required TiRtcOutputBufferStrategy bufferStrategy,
-  }) {
+  int setVideoOptions({required int decoderPreference, required TiRtcOutputBufferStrategy bufferStrategy}) {
     return _videoOutput.setOptions(
       TiRtcVideoOutputOptions(
-        decoderPreference: _videoDecoderPreferenceFromNativeValue(
-          decoderPreference,
-        ),
+        decoderPreference: _videoDecoderPreferenceFromNativeValue(decoderPreference),
         bufferStrategy: bufferStrategy,
       ),
     );
@@ -129,39 +123,23 @@ final class DemoDownlinkSession {
     if (!command.valid) {
       return _tiRtcErrorInvalidArgument;
     }
-    return _connection.sendCommand(
-      commandId: demoCallCommandId,
-      data: command.encode(),
-    );
+    return _connection.sendCommand(commandId: demoCallCommandId, data: command.encode());
   }
 
   int sendCommand({required int commandId, required Uint8List payload}) {
     return _connection.sendCommand(commandId: commandId, data: payload);
   }
 
-  int sendStreamMessage({
-    required int streamId,
-    required Uint8List payload,
-    int timestampMs = 0,
-  }) {
-    return _connection.sendStreamMessage(
-      streamId: streamId,
-      timestampMs: timestampMs,
-      data: payload,
-    );
+  int sendStreamMessage({required int streamId, required Uint8List payload, int timestampMs = 0}) {
+    return _connection.sendStreamMessage(streamId: streamId, timestampMs: timestampMs, data: payload);
   }
 
-  Future<int> prepareLocalAudio({
-    TiRtcAudioInputOptions audioOptions = const TiRtcAudioInputOptions(),
-  }) {
+  Future<int> prepareLocalAudio({TiRtcAudioInputOptions audioOptions = const TiRtcAudioInputOptions()}) {
     return _audioInput.setOptions(audioOptions);
   }
 
   Future<int> attachLocalAudio({required int streamId}) async {
-    final int code = await _audioInput.attach(
-      connection: _connection,
-      streamId: streamId,
-    );
+    final int code = await _audioInput.attach(connection: _connection, streamId: streamId);
     if (code == 0) {
       _localAudioAttached = true;
     }
@@ -205,10 +183,7 @@ final class DemoDownlinkSession {
 
   bool get isRecording => _recordingTask != null;
 
-  Resp<TiRtcRecordingTask> startRecording({
-    required int videoStreamId,
-    required int audioStreamId,
-  }) {
+  Resp<TiRtcRecordingTask> startRecording({required int videoStreamId, required int audioStreamId}) {
     if (_recordingTask != null) {
       return const Resp<TiRtcRecordingTask>.failure(_tiRtcErrorInUse);
     }
@@ -245,17 +220,15 @@ final class DemoDownlinkSession {
     return result;
   }
 
-  Future<Resp<TiRtcGalleryAsset>> moveLatestMediaToGallery() {
+  Future<Resp<TiRtcGalleryAsset>> moveLatestMediaToGallery({String? fileName}) {
     final Object? mediaFile = _latestMediaFile;
     if (mediaFile is TiRtcRecordingFile) {
-      return _moveToGallery(mediaFile, mediaFile.moveToGallery);
+      return _moveToGallery(mediaFile, () => mediaFile.moveToGallery(fileName: fileName ?? demoGalleryFileName('mp4')));
     }
     if (mediaFile is TiRtcSnapshotFile) {
-      return _moveToGallery(mediaFile, mediaFile.moveToGallery);
+      return _moveToGallery(mediaFile, () => mediaFile.moveToGallery(fileName: fileName ?? demoGalleryFileName('jpg')));
     }
-    return Future<Resp<TiRtcGalleryAsset>>.value(
-      const Resp<TiRtcGalleryAsset>.failure(_tiRtcErrorInUse),
-    );
+    return Future<Resp<TiRtcGalleryAsset>>.value(const Resp<TiRtcGalleryAsset>.failure(_tiRtcErrorInUse));
   }
 
   Future<Resp<TiRtcGalleryAsset>> _moveToGallery(
@@ -379,9 +352,7 @@ final class DemoDownlinkSession {
     return firstError;
   }
 
-  DownlinkMetricsOverlayModel? readMetricsOverlay({
-    required int requestedDecoderPreference,
-  }) {
+  DownlinkMetricsOverlayModel? readMetricsOverlay({required int requestedDecoderPreference}) {
     final TiRtcConnMetricsResult connResult = _connection.getMetricsSnapshot();
     final TiRtcVideoOutputMetricsResult videoResult = _videoOutput.getMetricsSnapshot();
     final TiRtcAudioOutputMetricsResult audioResult = _audioOutput.getMetricsSnapshot();

@@ -38,6 +38,8 @@ import UIKit
           result(self.capturePermissionGranted(for: .audio))
         case "requestMicrophonePermission":
           self.requestCaptureAccessIfNeeded(for: .audio, result: result)
+        case "requestGalleryWritePermission":
+          self.requestPhotoLibraryAddAccessIfNeeded { granted in result(granted) }
         case "requestLocalNetworkPermission":
           self.requestLocalNetworkPermission(result: result)
         default:

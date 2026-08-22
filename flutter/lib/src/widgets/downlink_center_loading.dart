@@ -7,11 +7,7 @@ import '../app_theme.dart';
 enum DownlinkCenterIndicatorMode { loading, running, error }
 
 class DownlinkCenterLoading extends StatefulWidget {
-  const DownlinkCenterLoading({
-    super.key,
-    this.label = '加载中',
-    this.mode = DownlinkCenterIndicatorMode.loading,
-  });
+  const DownlinkCenterLoading({super.key, this.label = '加载中', this.mode = DownlinkCenterIndicatorMode.loading});
 
   final String label;
   final DownlinkCenterIndicatorMode mode;
@@ -26,10 +22,7 @@ class _DownlinkCenterLoadingState extends State<DownlinkCenterLoading> with Sing
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 1100),
-    );
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1100));
     _syncAnimationState();
   }
 
@@ -81,17 +74,9 @@ class _DownlinkCenterLoadingState extends State<DownlinkCenterLoading> with Sing
                 margin: EdgeInsets.only(right: index == 2 ? 0 : 7),
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Color.lerp(
-                    ExampleTheme.primary.withAlpha(214),
-                    Colors.white,
-                    alpha,
-                  ),
+                  color: Color.lerp(ExampleTheme.primary.withAlpha(214), Colors.white, alpha),
                   boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: Colors.white.withAlpha((alpha * 84).round()),
-                      blurRadius: 10,
-                      spreadRadius: 1.2,
-                    ),
+                    BoxShadow(color: Colors.white.withAlpha((alpha * 84).round()), blurRadius: 10, spreadRadius: 1.2),
                   ],
                 ),
                 transform: Matrix4.diagonal3Values(scale, scale, 1),
@@ -105,19 +90,11 @@ class _DownlinkCenterLoadingState extends State<DownlinkCenterLoading> with Sing
   }
 
   Widget _buildErrorIndicator() {
-    return const Icon(
-      Icons.error_outline_rounded,
-      size: 36,
-      color: ExampleTheme.failure,
-    );
+    return const Icon(Icons.error_outline_rounded, size: 36, color: ExampleTheme.failure);
   }
 
   Widget _buildRunningIndicator() {
-    return const Icon(
-      Icons.radio_button_checked_rounded,
-      size: 32,
-      color: ExampleTheme.primary,
-    );
+    return const Icon(Icons.radio_button_checked_rounded, size: 32, color: ExampleTheme.primary);
   }
 
   @override
@@ -131,11 +108,7 @@ class _DownlinkCenterLoadingState extends State<DownlinkCenterLoading> with Sing
           borderRadius: BorderRadius.circular(22),
           border: Border.all(color: Colors.white.withAlpha(28)),
           boxShadow: <BoxShadow>[
-            BoxShadow(
-              color: Colors.black.withAlpha(56),
-              blurRadius: 22,
-              offset: const Offset(0, 10),
-            ),
+            BoxShadow(color: Colors.black.withAlpha(56), blurRadius: 22, offset: const Offset(0, 10)),
           ],
         ),
         child: Padding(

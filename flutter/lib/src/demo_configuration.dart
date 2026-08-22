@@ -37,10 +37,7 @@ final class DemoExampleSettings {
     localAudioCodecOpus,
     localAudioCodecAmr,
   };
-  static const Set<int> validLocalAudioSampleRates = <int>{
-    localAudioSampleRate8k,
-    localAudioSampleRate16k,
-  };
+  static const Set<int> validLocalAudioSampleRates = <int>{localAudioSampleRate8k, localAudioSampleRate16k};
   static const Set<int> validLocalAudioProcessingLevels = <int>{0, 1, 2, 3};
 
   const DemoExampleSettings({

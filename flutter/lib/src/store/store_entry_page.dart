@@ -7,6 +7,7 @@ import '../app_theme.dart';
 import '../demo_configuration.dart';
 import '../demo_widget_keys.dart';
 import '../pages/qr_scanner_page.dart';
+import '../widgets/configure_page_widgets.dart';
 import '../widgets/token_acquisition_section.dart';
 import 'store_configuration_store.dart';
 import 'store_recordings_page.dart';
@@ -15,10 +16,14 @@ final class DemoStoreEntryPage extends StatefulWidget {
   const DemoStoreEntryPage({
     super.key,
     this.enabled = true,
+    this.uploadingLogs = false,
+    this.onUploadLogs,
     this.configurationStore = const DemoStoreConfigurationStore(),
   });
 
   final bool enabled;
+  final bool uploadingLogs;
+  final VoidCallback? onUploadLogs;
   final DemoStoreConfigurationStore configurationStore;
 
   @override
@@ -65,10 +70,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
             enabled: widget.enabled && !_loading,
             textInputAction: TextInputAction.next,
             style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(
-              labelText: 'app_id',
-              hintText: 'TiStore 应用标识，进入播放页前必须提供。',
-            ),
+            decoration: const InputDecoration(labelText: 'app_id', hintText: 'TiStore 应用标识，进入播放页前必须提供。'),
             validator: _validateAppId,
           ),
           const SizedBox(height: 16),
@@ -79,10 +81,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
             keyboardType: TextInputType.url,
             textInputAction: TextInputAction.next,
             style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(
-              labelText: 'endpoint',
-              hintText: '接入的云端环境，留空则使用默认环境。',
-            ),
+            decoration: const InputDecoration(labelText: 'endpoint', hintText: '接入的云端环境，留空则使用默认环境。'),
             validator: _validateEndpoint,
           ),
           const SizedBox(height: 16),
@@ -98,10 +97,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
                   autocorrect: false,
                   enableSuggestions: false,
                   style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(
-                    labelText: 'token',
-                    hintText: '粘贴云录像客户端 Token，或点右侧扫码。',
-                  ),
+                  decoration: const InputDecoration(labelText: 'token', hintText: '粘贴云录像客户端 Token，或点右侧扫码。'),
                   validator: _validateToken,
                 ),
               ),
@@ -125,10 +121,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
                   textInputAction: TextInputAction.next,
                   inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
                   style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(
-                    labelText: 'audio_channel_id',
-                    hintText: '音频 Channel，0..255',
-                  ),
+                  decoration: const InputDecoration(labelText: 'audio_channel_id', hintText: '音频 Channel，0..255'),
                   validator: _validateChannelId,
                 ),
               ),
@@ -142,10 +135,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
                   textInputAction: TextInputAction.done,
                   inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
                   style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(
-                    labelText: 'video_channel_id',
-                    hintText: '视频 Channel，0..255',
-                  ),
+                  decoration: const InputDecoration(labelText: 'video_channel_id', hintText: '视频 Channel，0..255'),
                   validator: _validateChannelId,
                 ),
               ),
@@ -157,6 +147,15 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
             onPressed: widget.enabled && !_loading ? _enterStore : null,
             child: const Text('播放云录像'),
           ),
+          if (widget.onUploadLogs != null) ...<Widget>[
+            const SizedBox(height: 2),
+            ConfigureLogUploadAction(
+              enabled: widget.enabled && !_loading,
+              uploading: widget.uploadingLogs,
+              onUpload: widget.onUploadLogs!,
+              buttonKey: DemoWidgetKeys.storeConfigureLogUploadButton,
+            ),
+          ],
         ],
       ),
     );
@@ -196,13 +195,14 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
     }
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
-        builder: (BuildContext context) => DemoStoreRecordingsPage(
-          appId: _appIdController.text.trim(),
-          endpoint: _endpointController.text.trim(),
-          token: _tokenController.text,
-          audioChannelId: int.parse(_audioChannelController.text),
-          videoChannelId: int.parse(_videoChannelController.text),
-        ),
+        builder:
+            (BuildContext context) => DemoStoreRecordingsPage(
+              appId: _appIdController.text.trim(),
+              endpoint: _endpointController.text.trim(),
+              token: _tokenController.text,
+              audioChannelId: int.parse(_audioChannelController.text),
+              videoChannelId: int.parse(_videoChannelController.text),
+            ),
       ),
     );
   }
@@ -214,9 +214,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
       return;
     }
     final DemoStoreScanPayload? payload = await Navigator.of(context).push<DemoStoreScanPayload>(
-      MaterialPageRoute<DemoStoreScanPayload>(
-        builder: (BuildContext context) => const DemoStoreQrScannerPage(),
-      ),
+      MaterialPageRoute<DemoStoreScanPayload>(builder: (BuildContext context) => const DemoStoreQrScannerPage()),
     );
     if (!mounted || payload == null) {
       return;

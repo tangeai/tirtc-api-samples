@@ -36,10 +36,7 @@ Future<void> showDemoCommandPanelSheet({
               height: MediaQuery.sizeOf(context).height / 2,
               decoration: const BoxDecoration(
                 color: ExampleTheme.background,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
+                borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),
               ),
               child: Column(
                 children: <Widget>[
@@ -60,10 +57,7 @@ Future<void> showDemoCommandPanelSheet({
                         IconButton(
                           key: DemoWidgetKeys.commandPanelCloseButton,
                           onPressed: () => Navigator.of(sheetContext).pop(),
-                          icon: const Icon(
-                            Icons.close_rounded,
-                            color: ExampleTheme.textHint,
-                          ),
+                          icon: const Icon(Icons.close_rounded, color: ExampleTheme.textHint),
                         ),
                       ],
                     ),

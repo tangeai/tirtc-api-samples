@@ -3,10 +3,7 @@ import 'package:flutter/material.dart';
 import '../demo_widget_keys.dart';
 
 class StreamMessageBubble extends StatelessWidget {
-  const StreamMessageBubble({
-    super.key,
-    required this.text,
-  });
+  const StreamMessageBubble({super.key, required this.text});
 
   final String text;
   static const double _tailWidth = 10;
@@ -25,19 +22,12 @@ class StreamMessageBubble extends StatelessWidget {
         duration: const Duration(milliseconds: 260),
         curve: Curves.easeOutCubic,
         builder: (BuildContext context, Offset offset, Widget? child) {
-          return FractionalTranslation(
-            translation: offset,
-            child: child,
-          );
+          return FractionalTranslation(translation: offset, child: child);
         },
         child: DecoratedBox(
           decoration: BoxDecoration(
             boxShadow: <BoxShadow>[
-              BoxShadow(
-                color: Colors.black.withAlpha(26),
-                blurRadius: 14,
-                offset: const Offset(0, 5),
-              ),
+              BoxShadow(color: Colors.black.withAlpha(26), blurRadius: 14, offset: const Offset(0, 5)),
             ],
           ),
           child: CustomPaint(

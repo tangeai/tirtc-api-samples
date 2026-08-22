@@ -114,17 +114,11 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
           setState(() {});
         }
       },
-      showResult: ({
-        required String title,
-        required String content,
-      }) {
+      showResult: ({required String title, required String content}) {
         if (!mounted) {
           return Future<void>.value();
         }
-        return context.showNoticeDialog(
-          title: title,
-          content: content,
-        );
+        return context.showNoticeDialog(title: title, content: content);
       },
     );
   }
@@ -145,16 +139,13 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     unawaited(
       _session.disposeAsync().then((int code) {
         if (code == 0) {
-          markerSink?.passed('smoke_dispose_completed', payload: <String, Object?>{
-            'dispose_result_observed': true,
-            'code': code,
-          });
+          markerSink?.passed(
+            'smoke_dispose_completed',
+            payload: <String, Object?>{'dispose_result_observed': true, 'code': code},
+          );
           return;
         }
-        TiRtcLogging.e(
-          'flutter_example',
-          'downlink_dispose_failed code=$code',
-        );
+        TiRtcLogging.e('flutter_example', 'downlink_dispose_failed code=$code');
       }),
     );
     super.dispose();
@@ -243,10 +234,11 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       sessionGeneration: generation,
       videoStreamId: videoStreamId,
       requestedPreference: requestedDecoderPreference,
-      applyOptions: () => _session.setVideoOptions(
-        decoderPreference: requestedDecoderPreference,
-        bufferStrategy: outputBufferStrategy,
-      ),
+      applyOptions:
+          () => _session.setVideoOptions(
+            decoderPreference: requestedDecoderPreference,
+            bufferStrategy: outputBufferStrategy,
+          ),
       attachVideo: () => _session.attachVideo(streamId: videoStreamId),
       log: (String message) => TiRtcLogging.i('flutter_example', message),
     );
@@ -307,11 +299,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   void _bindSessionCallbacks({required int generation}) {
     _session.bindCallbacks(
       onConnectionStateChanged: (TiRtcConnState state, int errorCode) {
-        _handleConnectionState(
-          generation: generation,
-          state: state,
-          errorCode: errorCode,
-        );
+        _handleConnectionState(generation: generation, state: state, errorCode: errorCode);
       },
       onAudioStateChanged: (TiRtcAudioOutputState state) {
         _handleAudioState(generation: generation, state: state);
@@ -338,19 +326,10 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         );
       },
       onCommand: (int commandId, Uint8List data) {
-        _handleCommand(
-          generation: generation,
-          commandId: commandId,
-          payload: data,
-        );
+        _handleCommand(generation: generation, commandId: commandId, payload: data);
       },
       onStreamMessage: (int streamId, int timestampMs, Uint8List data) {
-        _handleStreamMessage(
-          generation: generation,
-          streamId: streamId,
-          timestampMs: timestampMs,
-          payload: data,
-        );
+        _handleStreamMessage(generation: generation, streamId: streamId, timestampMs: timestampMs, payload: data);
       },
       onAudioInputStateChanged: (TiRtcInputState state) {
         _handleLocalAudioInputState(generation: generation, state: state);
@@ -453,13 +432,16 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       'stream_message_received stream_id=${event.streamId} timestamp_ms=${event.timestampMs} '
           'payload_epoch_seconds=${event.epochSeconds} count=${event.count}',
     );
-    widget.smokeMarkerSink?.passed('stream_message_received', payload: <String, Object?>{
-      'stream_id': event.streamId,
-      'payload_epoch_seconds': event.epochSeconds,
-      'payload_bytes': event.payloadBytes,
-      'payload_hash': event.payloadHash,
-      'received_count': event.count,
-    });
+    widget.smokeMarkerSink?.passed(
+      'stream_message_received',
+      payload: <String, Object?>{
+        'stream_id': event.streamId,
+        'payload_epoch_seconds': event.epochSeconds,
+        'payload_bytes': event.payloadBytes,
+        'payload_hash': event.payloadHash,
+        'received_count': event.count,
+      },
+    );
   }
 
   void _startMetricsPolling({required int generation}) {
@@ -521,19 +503,12 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     return '连接失败 · ${TiRtc.formatError(code)}';
   }
 
-  void _handleConnectionState({
-    required int generation,
-    required TiRtcConnState state,
-    required int errorCode,
-  }) {
+  void _handleConnectionState({required int generation, required TiRtcConnState state, required int errorCode}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
 
-    TiRtcLogging.i(
-      'flutter_example',
-      'connection_state generation=$generation state=$state errorCode=$errorCode',
-    );
+    TiRtcLogging.i('flutter_example', 'connection_state generation=$generation state=$state errorCode=$errorCode');
 
     if (state == TiRtcConnState.connecting) {
       if (_downlinkState == _DownlinkViewState.playing) {
@@ -597,11 +572,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     if (state == TiRtcConnState.disconnected) {
       _setCommandConnected(false);
       if (errorCode == 0) {
-        _handleFailure(
-          generation: generation,
-          label: '连接断开 #0',
-          summary: 'Remote session disconnected.',
-        );
+        _handleFailure(generation: generation, label: '连接断开 #0', summary: 'Remote session disconnected.');
       } else {
         _handleFailure(
           generation: generation,
@@ -612,10 +583,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
   }
 
-  void _handleAudioState({
-    required int generation,
-    required TiRtcAudioOutputState state,
-  }) {
+  void _handleAudioState({required int generation, required TiRtcAudioOutputState state}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
@@ -643,31 +611,21 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
   }
 
-  void _handleLocalAudioInputState({
-    required int generation,
-    required TiRtcInputState state,
-  }) {
+  void _handleLocalAudioInputState({required int generation, required TiRtcInputState state}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
     _localAudioController.handleInputState(state);
   }
 
-  void _handleLocalAudioInputError({
-    required int generation,
-    required int code,
-    String? message,
-  }) {
+  void _handleLocalAudioInputError({required int generation, required int code, String? message}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
     _localAudioController.handleInputError(code: code, message: message);
   }
 
-  void _handleVideoState({
-    required int generation,
-    required TiRtcVideoOutputState state,
-  }) {
+  void _handleVideoState({required int generation, required TiRtcVideoOutputState state}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
@@ -695,11 +653,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
   }
 
-  void _handleFailure({
-    required int generation,
-    required String label,
-    required String summary,
-  }) {
+  void _handleFailure({required int generation, required String label, required String summary}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
@@ -732,16 +686,8 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     widget.smokeMarkerSink?.passed(marker, payload: payload);
   }
 
-  void _smokeFail({
-    required String failureStage,
-    required String message,
-    int? errorCode,
-  }) {
-    widget.smokeMarkerSink?.failure(
-      failureStage: failureStage,
-      message: message,
-      errorCode: errorCode,
-    );
+  void _smokeFail({required String failureStage, required String message, int? errorCode}) {
+    widget.smokeMarkerSink?.failure(failureStage: failureStage, message: message, errorCode: errorCode);
   }
 
   void _markSmokeVideoRendering({required int generation}) {
@@ -758,9 +704,10 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         final TiRtcVideoOutputMetricsResult metrics = _session.videoMetrics();
         final int? firstOutputDurationMs = metrics.snapshot?.startup.timeToFirstOutputMs;
         if (metrics.code == 0 && firstOutputDurationMs != null && firstOutputDurationMs >= 0) {
-          widget.smokeMarkerSink?.passed('smoke_video_rendering', payload: <String, Object?>{
-            'first_frame_duration_ms': firstOutputDurationMs,
-          });
+          widget.smokeMarkerSink?.passed(
+            'smoke_video_rendering',
+            payload: <String, Object?>{'first_frame_duration_ms': firstOutputDurationMs},
+          );
           return;
         }
         await Future<void>.delayed(const Duration(milliseconds: 100));
@@ -791,21 +738,20 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         sessionGeneration: generation,
       );
       _smokeRenderWindowMarked = true;
-      widget.smokeMarkerSink?.passed('smoke_render_window_completed', payload: <String, Object?>{
-        ...markerPayload,
-        'audio_error_count': _smokeAudioErrorCount,
-        'video_error_count': _smokeVideoErrorCount,
-        'audio_state': _session.audioState.name,
-        'video_state': _session.videoState.name,
-      });
+      widget.smokeMarkerSink?.passed(
+        'smoke_render_window_completed',
+        payload: <String, Object?>{
+          ...markerPayload,
+          'audio_error_count': _smokeAudioErrorCount,
+          'video_error_count': _smokeVideoErrorCount,
+          'audio_state': _session.audioState.name,
+          'video_state': _session.videoState.name,
+        },
+      );
     }());
   }
 
-  void _handleCommand({
-    required int generation,
-    required int commandId,
-    required Uint8List payload,
-  }) {
+  void _handleCommand({required int generation, required int commandId, required Uint8List payload}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
@@ -837,10 +783,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   }
 
   Future<void> _showCommandPanel() {
-    return _commandController.showPanel(
-      context,
-      connected: () => _commandConnected,
-    );
+    return _commandController.showPanel(context, connected: () => _commandConnected);
   }
 
   @override
@@ -853,19 +796,12 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       appBar: AppBar(
         title: Text(
           widget.configuration.remoteId,
-          style: const TextStyle(
-            color: ExampleTheme.primary,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(color: ExampleTheme.primary, fontSize: 14, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          PlayerCommandButton(
-            key: DemoWidgetKeys.playerCommandButton,
-            onOpenCommands: _showCommandPanel,
-          ),
+          PlayerCommandButton(key: DemoWidgetKeys.playerCommandButton, onOpenCommands: _showCommandPanel),
           PlayerLogUploadButton(
-            key: DemoWidgetKeys.playerLogUploadButton,
+            buttonKey: DemoWidgetKeys.playerLogUploadButton,
             uploadingLogs: _logUploadController.uploading,
             onUploadLogs: () => _logUploadController.upload(remoteId: widget.configuration.remoteId),
           ),
@@ -906,9 +842,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                   if (_streamMessageOverlay.text != null)
                     Align(
                       alignment: Alignment.bottomRight,
-                      child: StreamMessageBubble(
-                        text: _streamMessageOverlay.text!,
-                      ),
+                      child: StreamMessageBubble(text: _streamMessageOverlay.text!),
                     ),
                   if (_streamMessageOverlay.text != null) const SizedBox(height: 12),
                   Align(
@@ -950,11 +884,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                           running: _localAudioController.running,
                           onPressed: _localAudioController.toggle,
                         ),
-                        DownlinkControlButton(
-                          connecting: connecting,
-                          playing: playing,
-                          onPressed: _toggleDownlink,
-                        ),
+                        DownlinkControlButton(connecting: connecting, playing: playing, onPressed: _toggleDownlink),
                       ],
                     ),
                   ),
@@ -969,13 +899,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
 
   void _toggleDownlink() {
     if (_downlinkState == _DownlinkViewState.playing) {
-      unawaited(
-        _stopDownlink(
-          reason: 'manual_stop',
-          clearIntent: true,
-          nextStatusSummary: 'Downlink stopped.',
-        ),
-      );
+      unawaited(_stopDownlink(reason: 'manual_stop', clearIntent: true, nextStatusSummary: 'Downlink stopped.'));
       return;
     }
 
@@ -988,11 +912,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     final int code = _session.setAudioOutputVolume(volumePercent);
     if (code != 0) {
       _showPlayerSnack('音量设置失败 · ${TiRtc.formatError(code)}');
-      _smokeFail(
-        failureStage: 'audio_output_volume',
-        message: 'audio output volume update failed',
-        errorCode: code,
-      );
+      _smokeFail(failureStage: 'audio_output_volume', message: 'audio output volume update failed', errorCode: code);
       return;
     }
     setState(() {
@@ -1000,10 +920,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     });
     widget.smokeMarkerSink?.passed(
       nextMuted ? 'smoke_audio_output_muted' : 'smoke_audio_output_restored',
-      payload: <String, Object?>{
-        'volume_percent': volumePercent,
-        'audio_state': _session.audioState.name,
-      },
+      payload: <String, Object?>{'volume_percent': volumePercent, 'audio_state': _session.audioState.name},
     );
   }
 

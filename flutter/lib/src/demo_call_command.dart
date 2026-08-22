@@ -71,10 +71,7 @@ final class DemoCallStreamIds {
     return enabled.toSet().length == enabled.length;
   }
 
-  Map<String, Object?> toJson({
-    required bool audioEnabled,
-    required bool videoEnabled,
-  }) {
+  Map<String, Object?> toJson({required bool audioEnabled, required bool videoEnabled}) {
     return <String, Object?>{
       if (audioEnabled) 'initiator_audio_stream_id': initiatorAudio,
       if (videoEnabled) 'initiator_video_stream_id': initiatorVideo,
@@ -136,10 +133,7 @@ final class DemoCallCommand {
     return Uint8List.fromList(utf8.encode(jsonEncode(payload)));
   }
 
-  static DemoCallCommand? tryDecode({
-    required int commandId,
-    required Uint8List data,
-  }) {
+  static DemoCallCommand? tryDecode({required int commandId, required Uint8List data}) {
     if (commandId != demoCallCommandId) {
       return null;
     }
@@ -166,11 +160,7 @@ final class DemoCallCommand {
     }
     if (action == DemoCallCommandAction.callReject) {
       final Object? reason = decoded['reason'];
-      return DemoCallCommand(
-        action: action,
-        requestId: rawRequestId,
-        reason: reason is String ? reason : null,
-      );
+      return DemoCallCommand(action: action, requestId: rawRequestId, reason: reason is String ? reason : null);
     }
     final Object? rawAudioEnabled = decoded['audio_enabled'];
     final Object? rawVideoEnabled = decoded['video_enabled'];

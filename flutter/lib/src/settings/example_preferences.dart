@@ -17,47 +17,29 @@ final class MethodChannelDemoExamplePreferences implements DemoExamplePreference
 
   @override
   Future<int> getInt({required String key, required int defaultValue}) async {
-    final int? value = await _channel.invokeMethod<int>(
-      'getPreferencesInt',
-      <String, Object?>{
-        'key': key,
-        'defaultValue': defaultValue,
-      },
-    );
+    final int? value = await _channel.invokeMethod<int>('getPreferencesInt', <String, Object?>{
+      'key': key,
+      'defaultValue': defaultValue,
+    });
     return value ?? defaultValue;
   }
 
   @override
   Future<void> putInt({required String key, required int value}) async {
-    await _channel.invokeMethod<void>(
-      'putPreferencesInt',
-      <String, Object?>{
-        'key': key,
-        'value': value,
-      },
-    );
+    await _channel.invokeMethod<void>('putPreferencesInt', <String, Object?>{'key': key, 'value': value});
   }
 
   @override
   Future<String> getString({required String key, required String defaultValue}) async {
-    final String? value = await _channel.invokeMethod<String>(
-      'getPreferencesString',
-      <String, Object?>{
-        'key': key,
-        'defaultValue': defaultValue,
-      },
-    );
+    final String? value = await _channel.invokeMethod<String>('getPreferencesString', <String, Object?>{
+      'key': key,
+      'defaultValue': defaultValue,
+    });
     return value ?? defaultValue;
   }
 
   @override
   Future<void> putString({required String key, required String value}) async {
-    await _channel.invokeMethod<void>(
-      'putPreferencesString',
-      <String, Object?>{
-        'key': key,
-        'value': value,
-      },
-    );
+    await _channel.invokeMethod<void>('putPreferencesString', <String, Object?>{'key': key, 'value': value});
   }
 }

@@ -21,9 +21,7 @@ final class DemoDownlinkConfigurationSnapshot {
 }
 
 final class DemoDownlinkConfigurationStore {
-  const DemoDownlinkConfigurationStore({
-    this.preferences = const MethodChannelDemoExamplePreferences(),
-  });
+  const DemoDownlinkConfigurationStore({this.preferences = const MethodChannelDemoExamplePreferences()});
 
   static const String appIdKey = 'tirtc_example.downlink.app_id';
   static const String endpointKey = 'tirtc_example.downlink.endpoint';
@@ -58,10 +56,7 @@ final class DemoDownlinkConfigurationStore {
     try {
       return await preferences.getString(key: key, defaultValue: '');
     } on Object catch (error) {
-      TiRtcLogging.w(
-        'flutter_example',
-        'downlink_preferences_read_failed key=$key error=$error',
-      );
+      TiRtcLogging.w('flutter_example', 'downlink_preferences_read_failed key=$key error=$error');
       return '';
     }
   }

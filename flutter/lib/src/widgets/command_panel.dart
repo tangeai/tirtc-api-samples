@@ -11,12 +11,7 @@ import 'command_panel_model.dart';
 typedef DemoCommandSender = FutureOr<int> Function(int commandId, Uint8List payload);
 
 class DemoCommandPanel extends StatefulWidget {
-  const DemoCommandPanel({
-    super.key,
-    required this.connected,
-    required this.events,
-    required this.onSendCommand,
-  });
+  const DemoCommandPanel({super.key, required this.connected, required this.events, required this.onSendCommand});
 
   final bool connected;
   final List<DemoCommandPanelEvent> events;
@@ -49,10 +44,7 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          Align(
-            alignment: Alignment.centerLeft,
-            child: _ConnectionPill(connected: widget.connected),
-          ),
+          Align(alignment: Alignment.centerLeft, child: _ConnectionPill(connected: widget.connected)),
           const SizedBox(height: 12),
           Row(
             children: <Widget>[
@@ -72,25 +64,20 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
               const SizedBox(width: 8),
               SegmentedButton<DemoCommandPayloadMode>(
                 segments: const <ButtonSegment<DemoCommandPayloadMode>>[
-                  ButtonSegment<DemoCommandPayloadMode>(
-                    value: DemoCommandPayloadMode.hex,
-                    label: Text('HEX'),
-                  ),
-                  ButtonSegment<DemoCommandPayloadMode>(
-                    value: DemoCommandPayloadMode.text,
-                    label: Text('文本'),
-                  ),
+                  ButtonSegment<DemoCommandPayloadMode>(value: DemoCommandPayloadMode.hex, label: Text('HEX')),
+                  ButtonSegment<DemoCommandPayloadMode>(value: DemoCommandPayloadMode.text, label: Text('文本')),
                 ],
                 selected: <DemoCommandPayloadMode>{_payloadMode},
                 showSelectedIcon: false,
-                onSelectionChanged: _sending
-                    ? null
-                    : (Set<DemoCommandPayloadMode> selected) {
-                        setState(() {
-                          _payloadMode = selected.single;
-                          _inputError = null;
-                        });
-                      },
+                onSelectionChanged:
+                    _sending
+                        ? null
+                        : (Set<DemoCommandPayloadMode> selected) {
+                          setState(() {
+                            _payloadMode = selected.single;
+                            _inputError = null;
+                          });
+                        },
               ),
             ],
           ),
@@ -110,10 +97,7 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
             ),
           ),
           const SizedBox(height: 10),
-          _CommonCommandPresetBar(
-            enabled: !_sending,
-            onSelected: _applyPreset,
-          ),
+          _CommonCommandPresetBar(enabled: !_sending, onSelected: _applyPreset),
           const SizedBox(height: 10),
           Align(
             alignment: Alignment.centerRight,
@@ -125,27 +109,25 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
                 minimumSize: const Size(96, 40),
                 textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
               ),
-              icon: _sending
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.send_rounded, size: 16),
+              icon:
+                  _sending
+                      ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send_rounded, size: 16),
               label: Text(_sending ? '发送中' : '发送'),
             ),
           ),
           const SizedBox(height: 10),
           Expanded(
-            child: events.isEmpty
-                ? const _EmptyCommandEvents()
-                : ListView.separated(
-                    itemCount: events.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 6),
-                    itemBuilder: (BuildContext context, int index) {
-                      return _CommandEventRow(event: events[index]);
-                    },
-                  ),
+            child:
+                events.isEmpty
+                    ? const _EmptyCommandEvents()
+                    : ListView.separated(
+                      itemCount: events.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 6),
+                      itemBuilder: (BuildContext context, int index) {
+                        return _CommandEventRow(event: events[index]);
+                      },
+                    ),
           ),
         ],
       ),
@@ -199,10 +181,7 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
 }
 
 class _CommonCommandPresetBar extends StatelessWidget {
-  const _CommonCommandPresetBar({
-    required this.enabled,
-    required this.onSelected,
-  });
+  const _CommonCommandPresetBar({required this.enabled, required this.onSelected});
 
   final bool enabled;
   final ValueChanged<DemoCommandPreset> onSelected;
@@ -214,24 +193,22 @@ class _CommonCommandPresetBar extends StatelessWidget {
       children: <Widget>[
         const Text(
           '常用命令',
-          style: TextStyle(
-            color: ExampleTheme.textSecondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(color: ExampleTheme.textSecondary, fontSize: 12, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 8),
         Wrap(
           spacing: 8,
           runSpacing: 8,
-          children: demoCommonCommandPresets.map((DemoCommandPreset preset) {
-            return ActionChip(
-              key: preset.commandId == demoCommandEchoPresetId ? DemoWidgetKeys.commandPanelEchoPreset : null,
-              label: Text(preset.label),
-              visualDensity: VisualDensity.compact,
-              onPressed: enabled ? () => onSelected(preset) : null,
-            );
-          }).toList(growable: false),
+          children: demoCommonCommandPresets
+              .map((DemoCommandPreset preset) {
+                return ActionChip(
+                  key: preset.commandId == demoCommandEchoPresetId ? DemoWidgetKeys.commandPanelEchoPreset : null,
+                  label: Text(preset.label),
+                  visualDensity: VisualDensity.compact,
+                  onPressed: enabled ? () => onSelected(preset) : null,
+                );
+              })
+              .toList(growable: false),
         ),
       ],
     );
@@ -256,11 +233,7 @@ class _ConnectionPill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         child: Text(
           connected ? '已连接' : '未连接',
-          style: TextStyle(
-            fontSize: 11,
-            color: color,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(fontSize: 11, color: color, fontWeight: FontWeight.w600),
         ),
       ),
     );
@@ -274,10 +247,7 @@ class _EmptyCommandEvents extends StatelessWidget {
   Widget build(BuildContext context) {
     return const Padding(
       padding: EdgeInsets.symmetric(vertical: 10),
-      child: Text(
-        '暂无命令记录',
-        style: TextStyle(fontSize: 12, color: ExampleTheme.textSecondary),
-      ),
+      child: Text('暂无命令记录', style: TextStyle(fontSize: 12, color: ExampleTheme.textSecondary)),
     );
   }
 }
@@ -293,10 +263,7 @@ class _CommandEventRow extends StatelessWidget {
     final Color color = sent ? ExampleTheme.primary : ExampleTheme.textPrimary;
     return DecoratedBox(
       key: DemoWidgetKeys.commandPanelEvent(sent ? 'sent' : 'received', event.commandIdLabel),
-      decoration: BoxDecoration(
-        color: color.withAlpha(18),
-        borderRadius: BorderRadius.circular(10),
-      ),
+      decoration: BoxDecoration(color: color.withAlpha(18), borderRadius: BorderRadius.circular(10)),
       child: Padding(
         padding: const EdgeInsets.all(8),
         child: Column(

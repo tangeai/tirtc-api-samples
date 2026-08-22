@@ -7,26 +7,17 @@ const Duration demoTokenRequestTimeout = Duration(seconds: 10);
 const String demoTokenServerPath = '/v1/tokens';
 
 final class DemoTokenAcquirer {
-  const DemoTokenAcquirer({
-    this.httpClient = demoDefaultTokenHttpClient,
-  });
+  const DemoTokenAcquirer({this.httpClient = demoDefaultTokenHttpClient});
 
   final DemoTokenHttpClient httpClient;
 
-  Future<String> resolve({
-    required String token,
-    String serverAddress = '',
-    String remoteId = '',
-  }) async {
+  Future<String> resolve({required String token, String serverAddress = '', String remoteId = ''}) async {
     if (token.trim().isNotEmpty) {
       return normalizeDemoConnectionToken(token);
     }
 
     final DemoTokenHttpResponse response = await httpClient(
-      DemoTokenHttpRequest(
-        uri: demoTokenServerUri(serverAddress),
-        jsonBody: <String, String>{'remote_id': remoteId},
-      ),
+      DemoTokenHttpRequest(uri: demoTokenServerUri(serverAddress), jsonBody: <String, String>{'remote_id': remoteId}),
     );
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw StateError('DevTools 服务返回 HTTP ${response.statusCode}');
@@ -36,20 +27,14 @@ final class DemoTokenAcquirer {
 }
 
 final class DemoTokenHttpRequest {
-  const DemoTokenHttpRequest({
-    required this.uri,
-    required this.jsonBody,
-  });
+  const DemoTokenHttpRequest({required this.uri, required this.jsonBody});
 
   final Uri uri;
   final Map<String, String> jsonBody;
 }
 
 final class DemoTokenHttpResponse {
-  const DemoTokenHttpResponse({
-    required this.statusCode,
-    required this.body,
-  });
+  const DemoTokenHttpResponse({required this.statusCode, required this.body});
 
   final int statusCode;
   final String body;
@@ -66,17 +51,13 @@ Future<DemoTokenHttpResponse> demoDefaultTokenHttpClient(DemoTokenHttpRequest re
     httpRequest.write(jsonEncode(request.jsonBody));
 
     final HttpClientResponse response = await httpRequest.close().timeout(demoTokenRequestTimeout);
-    final List<int> bytes = await response.take(demoTokenResponseByteLimit + 1).fold<List<int>>(
-      <int>[],
-      (List<int> result, List<int> chunk) => result..addAll(chunk),
-    );
+    final List<int> bytes = await response
+        .take(demoTokenResponseByteLimit + 1)
+        .fold<List<int>>(<int>[], (List<int> result, List<int> chunk) => result..addAll(chunk));
     if (bytes.length > demoTokenResponseByteLimit) {
       throw StateError('DevTools 服务响应过大');
     }
-    return DemoTokenHttpResponse(
-      statusCode: response.statusCode,
-      body: utf8.decode(bytes),
-    );
+    return DemoTokenHttpResponse(statusCode: response.statusCode, body: utf8.decode(bytes));
   } finally {
     client.close(force: true);
   }
@@ -84,21 +65,12 @@ Future<DemoTokenHttpResponse> demoDefaultTokenHttpClient(DemoTokenHttpRequest re
 
 String normalizeDemoTokenServerAddress(String rawValue) {
   final Uri uri = _parseDemoTokenServerAddress(rawValue);
-  return Uri(
-    scheme: uri.scheme,
-    host: uri.host,
-    port: uri.hasPort ? uri.port : null,
-  ).toString();
+  return Uri(scheme: uri.scheme, host: uri.host, port: uri.hasPort ? uri.port : null).toString();
 }
 
 Uri demoTokenServerUri(String rawValue) {
   final Uri uri = _parseDemoTokenServerAddress(rawValue);
-  return Uri(
-    scheme: uri.scheme,
-    host: uri.host,
-    port: uri.hasPort ? uri.port : null,
-    path: demoTokenServerPath,
-  );
+  return Uri(scheme: uri.scheme, host: uri.host, port: uri.hasPort ? uri.port : null, path: demoTokenServerPath);
 }
 
 Uri _parseDemoTokenServerAddress(String rawValue) {
@@ -154,12 +126,7 @@ bool demoStoreTokenLooksValid(String value) {
 }
 
 final class DemoScanPayload {
-  const DemoScanPayload({
-    required this.token,
-    this.appId,
-    this.remoteId,
-    this.endpoint,
-  });
+  const DemoScanPayload({required this.token, this.appId, this.remoteId, this.endpoint});
 
   final String token;
   final String? appId;
@@ -168,12 +135,7 @@ final class DemoScanPayload {
 
   bool get hasConnectionFields => appId != null && remoteId != null;
 
-  static const Set<String> _allowedPayloadKeys = <String>{
-    'app_id',
-    'remote_id',
-    'endpoint',
-    'token',
-  };
+  static const Set<String> _allowedPayloadKeys = <String>{'app_id', 'remote_id', 'endpoint', 'token'};
 
   static DemoScanPayload? tryParse(String rawValue) {
     final String text = rawValue.trim();
@@ -252,21 +214,13 @@ bool _validEndpoint(String text) {
 }
 
 final class DemoStoreScanPayload {
-  const DemoStoreScanPayload({
-    required this.token,
-    this.appId,
-    this.endpoint,
-  });
+  const DemoStoreScanPayload({required this.token, this.appId, this.endpoint});
 
   final String token;
   final String? appId;
   final String? endpoint;
 
-  static const Set<String> _allowedPayloadKeys = <String>{
-    'app_id',
-    'endpoint',
-    'token',
-  };
+  static const Set<String> _allowedPayloadKeys = <String>{'app_id', 'endpoint', 'token'};
 
   static DemoStoreScanPayload? tryParse(String rawValue) {
     final String text = rawValue.trim();

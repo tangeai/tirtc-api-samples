@@ -4,7 +4,6 @@ import android.Manifest
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
-import android.os.Bundle
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodCall
@@ -43,15 +42,6 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "requestLocalNetworkPermission" -> result.success(true)
-                else -> result.notImplemented()
-            }
-        }
-        MethodChannel(
-            flutterEngine.dartExecutor.binaryMessenger,
-            PERFORMANCE_CHANNEL_NAME,
-        ).setMethodCallHandler { call, result ->
-            when (call.method) {
-                "getInitialPerformanceLaunchConfig" -> result.success(initialPerformanceLaunchConfig())
                 else -> result.notImplemented()
             }
         }
@@ -139,32 +129,6 @@ class MainActivity : FlutterActivity() {
             checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED
     }
 
-    private fun initialPerformanceLaunchConfig(): Map<String, Any?>? {
-        val extras = intent?.extras ?: return null
-        val keys =
-            extras.keySet()
-                .filter { key -> key.startsWith(PERFORMANCE_EXTRA_PREFIX) }
-                .sorted()
-        if (keys.isEmpty()) {
-            return null
-        }
-        val config = mutableMapOf<String, Any?>()
-        for (key in keys) {
-            config[key.removePrefix(PERFORMANCE_EXTRA_PREFIX)] = supportedPerformanceExtraValue(extras, key)
-        }
-        return config
-    }
-
-    private fun supportedPerformanceExtraValue(extras: Bundle, key: String): Any? {
-        return when (val value = extras.get(key)) {
-            is String -> value
-            is Int -> value
-            is Boolean -> value
-            null -> null
-            else -> null
-        }
-    }
-
     override fun onRequestPermissionsResult(
         requestCode: Int,
         permissions: Array<out String>,
@@ -185,8 +149,6 @@ class MainActivity : FlutterActivity() {
     companion object {
         private const val PREFERENCES_CHANNEL_NAME = "tirtc_example/preferences"
         private const val PERMISSIONS_CHANNEL_NAME = "tirtc_example/permissions"
-        private const val PERFORMANCE_CHANNEL_NAME = "tirtc_example/performance"
-        private const val PERFORMANCE_EXTRA_PREFIX = "tirtc_perf_"
         private const val PREFERENCES_FILE_NAME = "tirtc_example_preferences"
         private const val CAPTURE_PERMISSION_REQUEST_CODE = 7610
     }

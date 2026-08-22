@@ -2,10 +2,7 @@ typedef DemoVideoAttachLogger = void Function(String message);
 typedef DemoVideoAttachAction = int Function();
 
 final class DemoVideoAttachResult {
-  const DemoVideoAttachResult({
-    required this.optionsCode,
-    required this.attachCode,
-  });
+  const DemoVideoAttachResult({required this.optionsCode, required this.attachCode});
 
   final int optionsCode;
   final int? attachCode;

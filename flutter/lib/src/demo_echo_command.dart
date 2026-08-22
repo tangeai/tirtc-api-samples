@@ -10,10 +10,7 @@ Uint8List demoEchoCommandPayload() {
   return Uint8List.fromList(utf8.encode(demoEchoCommandPayloadText));
 }
 
-bool isDemoEchoCommand({
-  required int commandId,
-  required Uint8List payload,
-}) {
+bool isDemoEchoCommand({required int commandId, required Uint8List payload}) {
   return commandId == demoEchoCommandId && _sameBytes(payload, demoEchoCommandPayload());
 }
 
@@ -31,11 +28,7 @@ int? echoDemoCommandIfNeeded({
 final class DemoEchoCommandResponder {
   int _pendingLocalEchoReplies = 0;
 
-  void trackLocalSend({
-    required int commandId,
-    required Uint8List payload,
-    required int resultCode,
-  }) {
+  void trackLocalSend({required int commandId, required Uint8List payload, required int resultCode}) {
     if (resultCode == 0 && isDemoEchoCommand(commandId: commandId, payload: payload)) {
       _pendingLocalEchoReplies += 1;
     }

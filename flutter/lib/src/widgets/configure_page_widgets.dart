@@ -5,12 +5,7 @@ import '../demo_widget_keys.dart';
 import 'token_acquisition_section.dart';
 
 class ConfigurePageBackground extends StatelessWidget {
-  const ConfigurePageBackground({
-    super.key,
-    required this.showBackdropOrbs,
-    required this.onTap,
-    required this.child,
-  });
+  const ConfigurePageBackground({super.key, required this.showBackdropOrbs, required this.onTap, required this.child});
 
   final bool showBackdropOrbs;
   final VoidCallback onTap;
@@ -23,17 +18,9 @@ class ConfigurePageBackground extends StatelessWidget {
       onTap: onTap,
       child: Stack(
         children: <Widget>[
-          Positioned.fill(
-            child: DecoratedBox(
-              decoration: ExampleTheme.pageBackgroundDecoration,
-            ),
-          ),
+          Positioned.fill(child: DecoratedBox(decoration: ExampleTheme.pageBackgroundDecoration)),
           if (showBackdropOrbs)
-            const Positioned(
-              top: -120,
-              right: -90,
-              child: _DecorativeOrb(size: 260, color: ExampleTheme.overlayGlow),
-            ),
+            const Positioned(top: -120, right: -90, child: _DecorativeOrb(size: 260, color: ExampleTheme.overlayGlow)),
           if (showBackdropOrbs)
             const Positioned(
               bottom: -110,
@@ -48,10 +35,7 @@ class ConfigurePageBackground extends StatelessWidget {
 }
 
 class ConfigureProductTabBar extends StatelessWidget {
-  const ConfigureProductTabBar({
-    super.key,
-    required this.controller,
-  });
+  const ConfigureProductTabBar({super.key, required this.controller});
 
   static const double _height = 44;
   static const double _inset = 3;
@@ -119,12 +103,7 @@ class ConfigureProductTabBar extends StatelessWidget {
 }
 
 class _ConfigureProductTab extends StatelessWidget {
-  const _ConfigureProductTab({
-    required this.tabKey,
-    required this.label,
-    required this.selected,
-    required this.onTap,
-  });
+  const _ConfigureProductTab({required this.tabKey, required this.label, required this.selected, required this.onTap});
 
   final Key tabKey;
   final String label;
@@ -157,11 +136,7 @@ class _ConfigureProductTab extends StatelessWidget {
 }
 
 class ConfigureHeader extends StatelessWidget {
-  const ConfigureHeader({
-    super.key,
-    required this.startingPlayer,
-    required this.onOpenSettings,
-  });
+  const ConfigureHeader({super.key, required this.startingPlayer, required this.onOpenSettings});
 
   final bool startingPlayer;
   final VoidCallback onOpenSettings;
@@ -183,19 +158,11 @@ class ConfigureHeader extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text(
-                'Ti RTC',
-                style: titleStyle,
-              ),
+              Text('Ti RTC', style: titleStyle),
               const SizedBox(height: 5),
               const Text(
                 'Based on Flutter',
-                style: TextStyle(
-                  color: ExampleTheme.textHint,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w500,
-                  height: 1.2,
-                ),
+                style: TextStyle(color: ExampleTheme.textHint, fontSize: 12, fontWeight: FontWeight.w500, height: 1.2),
               ),
             ],
           ),
@@ -209,15 +176,10 @@ class ConfigureHeader extends StatelessWidget {
             minimumSize: const Size(0, 40),
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(999),
-              side: BorderSide(
-                color: (startingPlayer ? ExampleTheme.textHint : ExampleTheme.primary).withAlpha(180),
-              ),
+              side: BorderSide(color: (startingPlayer ? ExampleTheme.textHint : ExampleTheme.primary).withAlpha(180)),
             ),
           ),
-          child: const Text(
-            '偏好设置',
-            style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-          ),
+          child: const Text('偏好设置', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
         ),
       ],
     );
@@ -317,18 +279,20 @@ class ConfigureLogUploadAction extends StatelessWidget {
     required this.enabled,
     required this.uploading,
     required this.onUpload,
+    this.buttonKey = DemoWidgetKeys.configureLogUploadButton,
   });
 
   final bool enabled;
   final bool uploading;
   final VoidCallback onUpload;
+  final Key buttonKey;
 
   @override
   Widget build(BuildContext context) {
     return Align(
       alignment: Alignment.centerRight,
       child: TextButton(
-        key: DemoWidgetKeys.configureLogUploadButton,
+        key: buttonKey,
         onPressed: enabled ? onUpload : null,
         style: TextButton.styleFrom(
           foregroundColor: ExampleTheme.textHint,
@@ -337,34 +301,32 @@ class ConfigureLogUploadAction extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
           tapTargetSize: MaterialTapTargetSize.padded,
         ),
-        child: uploading
-            ? const Row(
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  SizedBox(
-                    width: 12,
-                    height: 12,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 1.5,
-                      valueColor: AlwaysStoppedAnimation<Color>(ExampleTheme.textHint),
+        child:
+            uploading
+                ? const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    SizedBox(
+                      width: 12,
+                      height: 12,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.5,
+                        valueColor: AlwaysStoppedAnimation<Color>(ExampleTheme.textHint),
+                      ),
                     ),
+                    SizedBox(width: 6),
+                    Text('正在上传…', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400)),
+                  ],
+                )
+                : const Text(
+                  '上传日志',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w400,
+                    decoration: TextDecoration.underline,
+                    decorationThickness: 0.8,
                   ),
-                  SizedBox(width: 6),
-                  Text(
-                    '正在上传…',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w400),
-                  ),
-                ],
-              )
-            : const Text(
-                '上传日志',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w400,
-                  decoration: TextDecoration.underline,
-                  decorationThickness: 0.8,
                 ),
-              ),
       ),
     );
   }
@@ -388,11 +350,7 @@ class _EndpointAndAppIdFields extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _EndpointField(
-          controller: endpointController,
-          enabled: enabled,
-          validator: validateEndpoint,
-        ),
+        _EndpointField(controller: endpointController, enabled: enabled, validator: validateEndpoint),
         const SizedBox(height: 16),
         _AppIdField(controller: appIdController, enabled: enabled),
       ],
@@ -401,11 +359,7 @@ class _EndpointAndAppIdFields extends StatelessWidget {
 }
 
 class _EndpointField extends StatelessWidget {
-  const _EndpointField({
-    required this.controller,
-    required this.enabled,
-    required this.validator,
-  });
+  const _EndpointField({required this.controller, required this.enabled, required this.validator});
 
   final TextEditingController controller;
   final bool enabled;
@@ -420,20 +374,14 @@ class _EndpointField extends StatelessWidget {
       keyboardType: TextInputType.url,
       textInputAction: TextInputAction.next,
       style: ExampleTheme.inputTextStyle,
-      decoration: const InputDecoration(
-        labelText: 'endpoint',
-        hintText: '接入的云端环境，留空则使用默认环境。',
-      ),
+      decoration: const InputDecoration(labelText: 'endpoint', hintText: '接入的云端环境，留空则使用默认环境。'),
       validator: validator,
     );
   }
 }
 
 class _AppIdField extends StatelessWidget {
-  const _AppIdField({
-    required this.controller,
-    required this.enabled,
-  });
+  const _AppIdField({required this.controller, required this.enabled});
 
   final TextEditingController controller;
   final bool enabled;
@@ -446,10 +394,7 @@ class _AppIdField extends StatelessWidget {
       enabled: enabled,
       textInputAction: TextInputAction.next,
       style: ExampleTheme.inputTextStyle,
-      decoration: const InputDecoration(
-        labelText: 'app_id',
-        hintText: 'TiRTC 应用标识，进入播放页前必须提供。',
-      ),
+      decoration: const InputDecoration(labelText: 'app_id', hintText: 'TiRTC 应用标识，进入播放页前必须提供。'),
       validator: (String? value) {
         if ((value ?? '').trim().isEmpty) {
           return 'app_id 为必填项。';
@@ -461,10 +406,7 @@ class _AppIdField extends StatelessWidget {
 }
 
 class _RemoteIdField extends StatelessWidget {
-  const _RemoteIdField({
-    required this.controller,
-    required this.enabled,
-  });
+  const _RemoteIdField({required this.controller, required this.enabled});
 
   final TextEditingController controller;
   final bool enabled;
@@ -477,10 +419,7 @@ class _RemoteIdField extends StatelessWidget {
       enabled: enabled,
       textInputAction: TextInputAction.next,
       style: ExampleTheme.inputTextStyle,
-      decoration: const InputDecoration(
-        labelText: 'remote_id',
-        hintText: '待连接的设备 ID',
-      ),
+      decoration: const InputDecoration(labelText: 'remote_id', hintText: '待连接的设备 ID'),
       validator: (String? value) {
         if ((value ?? '').trim().isEmpty) {
           return 'remote_id 为必填项。';
@@ -516,10 +455,7 @@ class _StreamIdRow extends StatelessWidget {
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.next,
             style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(
-              labelText: 'audio_stream_id',
-              hintText: '音频流 ID，默认 10',
-            ),
+            decoration: const InputDecoration(labelText: 'audio_stream_id', hintText: '音频流 ID，默认 10'),
             validator: validator,
           ),
         ),
@@ -532,10 +468,7 @@ class _StreamIdRow extends StatelessWidget {
             keyboardType: TextInputType.number,
             textInputAction: TextInputAction.next,
             style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(
-              labelText: 'video_stream_id',
-              hintText: '视频流 ID，默认 11',
-            ),
+            decoration: const InputDecoration(labelText: 'video_stream_id', hintText: '视频流 ID，默认 11'),
             validator: validator,
           ),
         ),
@@ -587,9 +520,7 @@ class _DecorativeOrb extends StatelessWidget {
         height: size,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          gradient: RadialGradient(
-            colors: <Color>[color, color.withAlpha(0)],
-          ),
+          gradient: RadialGradient(colors: <Color>[color, color.withAlpha(0)]),
         ),
       ),
     );

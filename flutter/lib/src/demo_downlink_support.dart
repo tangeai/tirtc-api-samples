@@ -3,10 +3,15 @@ import 'dart:io';
 
 import 'package:tirtc_flutter/tirtc_flutter.dart';
 
-typedef DemoLogResultDialog = Future<void> Function({
-  required String title,
-  required String content,
-});
+typedef DemoLogResultDialog = Future<void> Function({required String title, required String content});
+
+String demoGalleryFileName(String extension, {DateTime? now}) {
+  final DateTime value = (now ?? DateTime.now()).toLocal();
+  String part(int number, int width) => number.toString().padLeft(width, '0');
+  return '客厅角落摄像头-${part(value.year, 4)}-${part(value.month, 2)}-${part(value.day, 2)}-'
+      '${part(value.hour, 2)}-${part(value.minute, 2)}-${part(value.second, 2)}-'
+      '${part(value.millisecond, 3)}.$extension';
+}
 
 final class DemoDownlinkAudioSession {
   bool _retained = false;
@@ -24,10 +29,7 @@ final class DemoDownlinkAudioSession {
       return 0;
     }
 
-    TiRtcLogging.w(
-      'flutter_example',
-      'downlink_audio_session_retain_failed code=$code',
-    );
+    TiRtcLogging.w('flutter_example', 'downlink_audio_session_retain_failed code=$code');
     return code;
   }
 
@@ -37,20 +39,14 @@ final class DemoDownlinkAudioSession {
     }
 
     _retained = false;
-    TiRtcLogging.i(
-      'flutter_example',
-      'downlink_audio_session_release_requested reason=$reason',
-    );
+    TiRtcLogging.i('flutter_example', 'downlink_audio_session_release_requested reason=$reason');
     unawaited(() async {
       final int code = await TiRtcHostPlatformApi.instance.releaseOutputAudioSession();
       if (code == 0) {
         TiRtcLogging.i('flutter_example', 'downlink_audio_session_release_succeeded reason=$reason');
         return;
       }
-      TiRtcLogging.w(
-        'flutter_example',
-        'downlink_audio_session_release_failed reason=$reason code=$code',
-      );
+      TiRtcLogging.w('flutter_example', 'downlink_audio_session_release_failed reason=$reason code=$code');
     }());
   }
 }
@@ -61,10 +57,7 @@ final class DemoLogUploader {
     required bool Function() isActive,
     required DemoLogResultDialog showResult,
   }) async {
-    TiRtcLogging.i(
-      'flutter_example',
-      'log_upload_requested remoteId=$remoteId',
-    );
+    TiRtcLogging.i('flutter_example', 'log_upload_requested remoteId=$remoteId');
 
     try {
       final ({int code, String? logId}) result = await TiRtcLogging.upload();
@@ -74,38 +67,20 @@ final class DemoLogUploader {
       if (result.code == 0) {
         final String message =
             (result.logId?.isNotEmpty ?? false) ? '日志 ID: ${result.logId}\n将此编号提供给开发人员排查' : '日志上传成功。';
-        TiRtcLogging.i(
-          'flutter_example',
-          'log_upload_succeeded logId=${result.logId ?? ''}',
-        );
-        unawaited(showResult(
-          title: '日志上传成功',
-          content: message,
-        ));
+        TiRtcLogging.i('flutter_example', 'log_upload_succeeded logId=${result.logId ?? ''}');
+        unawaited(showResult(title: '日志上传成功', content: message));
         return result;
       }
 
-      TiRtcLogging.i(
-        'flutter_example',
-        'log_upload_failed code=${result.code}',
-      );
-      unawaited(showResult(
-        title: '日志上传失败',
-        content: 'code ${result.code}。',
-      ));
+      TiRtcLogging.i('flutter_example', 'log_upload_failed code=${result.code}');
+      unawaited(showResult(title: '日志上传失败', content: 'code ${result.code}。'));
       return result;
     } catch (error) {
-      TiRtcLogging.w(
-        'flutter_example',
-        'log_upload_failed unexpected=$error',
-      );
+      TiRtcLogging.w('flutter_example', 'log_upload_failed unexpected=$error');
       if (!isActive()) {
         return null;
       }
-      unawaited(showResult(
-        title: '日志上传失败',
-        content: '请重试。',
-      ));
+      unawaited(showResult(title: '日志上传失败', content: '请重试。'));
       return null;
     }
   }

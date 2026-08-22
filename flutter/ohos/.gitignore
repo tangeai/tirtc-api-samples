@@ -6,6 +6,7 @@ oh-package-lock.json5
 local.properties
 build-profile.local.json5
 entry/build/
+entry/libs/
 entry/src/main/resources/rawfile/flutter_assets/
 entry/oh-package-lock.json5
 har/

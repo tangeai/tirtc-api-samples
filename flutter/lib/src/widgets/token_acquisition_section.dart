@@ -32,11 +32,7 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Expanded(
-              child: _TokenField(
-                controller: tokenController,
-                enabled: enabled,
-                validator: validateOneTimeToken,
-              ),
+              child: _TokenField(controller: tokenController, enabled: enabled, validator: validateOneTimeToken),
             ),
             const SizedBox(width: 10),
             ConfigureScanButton(
@@ -51,11 +47,7 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
           child: Text(
             '或',
             textAlign: TextAlign.center,
-            style: TextStyle(
-              color: ExampleTheme.textHint,
-              fontSize: 12,
-              fontWeight: FontWeight.w600,
-            ),
+            style: TextStyle(color: ExampleTheme.textHint, fontSize: 12, fontWeight: FontWeight.w600),
           ),
         ),
         TextFormField(
@@ -65,10 +57,7 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
           keyboardType: TextInputType.url,
           textInputAction: TextInputAction.done,
           style: ExampleTheme.inputTextStyle,
-          decoration: const InputDecoration(
-            labelText: 'TiRTC DevTools 服务地址',
-            hintText: '例如 http://192.168.1.10:8966',
-          ),
+          decoration: const InputDecoration(labelText: 'TiRTC DevTools 服务地址', hintText: '例如 http://192.168.1.10:8966'),
           validator: validateTokenServerAddress,
         ),
       ],
@@ -77,11 +66,7 @@ class ConfigureTokenAcquisitionSection extends StatelessWidget {
 }
 
 class _TokenField extends StatelessWidget {
-  const _TokenField({
-    required this.controller,
-    required this.enabled,
-    required this.validator,
-  });
+  const _TokenField({required this.controller, required this.enabled, required this.validator});
 
   final TextEditingController controller;
   final bool enabled;
@@ -96,22 +81,14 @@ class _TokenField extends StatelessWidget {
       keyboardType: TextInputType.text,
       textInputAction: TextInputAction.done,
       style: ExampleTheme.inputTextStyle,
-      decoration: const InputDecoration(
-        labelText: '一次性连接 Token',
-        hintText: '粘贴 v1.xxx 一次性 Token，或点右侧扫码。',
-      ),
+      decoration: const InputDecoration(labelText: '一次性连接 Token', hintText: '粘贴 v1.xxx 一次性 Token，或点右侧扫码。'),
       validator: validator,
     );
   }
 }
 
 class ConfigureScanButton extends StatelessWidget {
-  const ConfigureScanButton({
-    super.key,
-    required this.buttonKey,
-    required this.enabled,
-    required this.onPressed,
-  });
+  const ConfigureScanButton({super.key, required this.buttonKey, required this.enabled, required this.onPressed});
 
   final Key buttonKey;
   final bool enabled;
@@ -132,14 +109,9 @@ class ConfigureScanButton extends StatelessWidget {
           minimumSize: const Size(56, ExampleTheme.inputControlHeight),
           tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           visualDensity: VisualDensity.standard,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(ExampleTheme.inputRadius),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(ExampleTheme.inputRadius)),
         ),
-        child: const Text(
-          '扫码',
-          style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-        ),
+        child: const Text('扫码', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700)),
       ),
     );
   }

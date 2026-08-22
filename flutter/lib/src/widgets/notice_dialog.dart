@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../app_theme.dart';
+import '../demo_widget_keys.dart';
 
 class NoticeDialog extends StatelessWidget {
   const NoticeDialog({
@@ -40,16 +41,10 @@ class NoticeDialog extends StatelessWidget {
       actionsPadding: const EdgeInsets.fromLTRB(24, 0, 24, 20),
       title: Text(
         title,
-        style: textTheme.titleMedium?.copyWith(
-          color: ExampleTheme.textPrimary,
-          fontWeight: FontWeight.w700,
-        ),
+        style: textTheme.titleMedium?.copyWith(color: ExampleTheme.textPrimary, fontWeight: FontWeight.w700),
       ),
       content: ConstrainedBox(
-        constraints: BoxConstraints(
-          maxWidth: contentMaxWidth ?? 360,
-          maxHeight: maxContentHeight,
-        ),
+        constraints: BoxConstraints(maxWidth: contentMaxWidth ?? 360, maxHeight: maxContentHeight),
         child: SingleChildScrollView(
           child: Text(
             content,
@@ -63,15 +58,14 @@ class NoticeDialog extends StatelessWidget {
       ),
       actions: <Widget>[
         TextButton(
+          key: DemoWidgetKeys.noticeDialogConfirmButton,
           onPressed: () {
             Navigator.of(context).pop();
             onConfirm?.call();
           },
           style: TextButton.styleFrom(
             foregroundColor: ExampleTheme.primary,
-            textStyle: textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            textStyle: textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w600),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             minimumSize: const Size(0, 0),
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,

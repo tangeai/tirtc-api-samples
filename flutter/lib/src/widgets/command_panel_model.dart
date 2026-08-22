@@ -8,21 +8,12 @@ const int _maxCommandId = 0xffffffff;
 const int demoCommandEchoPresetId = demoEchoCommandId;
 const String demoCommandEchoPresetPayload = demoEchoCommandPayloadText;
 
-enum DemoCommandPayloadMode {
-  hex,
-  text,
-}
+enum DemoCommandPayloadMode { hex, text }
 
-enum DemoCommandEventDirection {
-  sent,
-  received,
-}
+enum DemoCommandEventDirection { sent, received }
 
 final class DemoCommandParseResult<T> {
-  const DemoCommandParseResult._({
-    required this.value,
-    required this.error,
-  });
+  const DemoCommandParseResult._({required this.value, required this.error});
 
   const DemoCommandParseResult.success(T value) : this._(value: value, error: null);
 

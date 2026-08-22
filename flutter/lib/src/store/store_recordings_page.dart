@@ -3,16 +3,20 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:tirtc_flutter/tirtc_flutter.dart';
+import 'package:timezone/data/latest.dart' as tz_data;
+import 'package:timezone/timezone.dart' as tz;
 
 import '../app_theme.dart';
 import '../demo_downlink_support.dart';
 import '../demo_permissions.dart';
+import '../demo_route_lifecycle.dart';
 import '../demo_test_hooks.dart';
 import '../demo_widget_keys.dart';
 import '../pages/player_log_upload_controller.dart';
 import '../widgets/downlink_center_loading.dart';
 import '../widgets/notice_dialog.dart';
 import '../widgets/player_page_widgets.dart';
+import 'store_recording_calendar.dart';
 
 List<TiStoreRecordingRange> _newestFirstRecordingRanges(Iterable<TiStoreRecordingRange> ranges) {
   final List<TiStoreRecordingRange> sorted = ranges.toList();
@@ -45,7 +49,8 @@ final class DemoStoreRecordingsPage extends StatefulWidget {
 
 enum _LatestStoreMedia { recording, snapshot }
 
-final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage> {
+final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
+    with WidgetsBindingObserver, ExampleRouteLifecycleState<DemoStoreRecordingsPage> {
   final DemoDownlinkAudioSession _audioSession = DemoDownlinkAudioSession();
   TiStore? _store;
   TiStoreReplay? _replay;
@@ -58,33 +63,51 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   TiStoreSnapshotFile? _latestSnapshot;
   _LatestStoreMedia? _latestMedia;
   List<TiStoreRecordingRange> _recordings = <TiStoreRecordingRange>[];
+  List<TiStoreRecordingDay> _recordingDays = <TiStoreRecordingDay>[];
   TiStoreRecordingRange? _selected;
-  DateTime _selectedDate = DateTime.now();
+  static const String _timeZoneId = 'Asia/Shanghai';
+  late final tz.Location _timeZone;
+  late tz.TZDateTime _selectedDate;
+  late DateTime _visibleMonth;
   late final DemoPlayerLogUploadController _logUploadController;
   StateSetter? _sheetSetState;
   Future<void>? _queryFuture;
+  Future<void>? _calendarQueryFuture;
   double? _seekPreview;
   int? _initCode;
   int? _lastCode;
   int? _queryCode;
+  int? _calendarCode;
+  int _calendarGeneration = 0;
+  int _queryGeneration = 0;
   bool _querying = false;
+  bool _queryQueued = false;
+  bool _calendarQuerying = false;
   bool _sheetOpen = false;
   bool _paused = false;
+  bool _pausedByLifecycle = false;
   bool _audioMuted = false;
   bool _mediaFileBusy = false;
   bool _cleaning = false;
+  bool _uiActive = true;
+
+  bool get _canUpdateUi => _uiActive && mounted;
 
   @override
   void initState() {
     super.initState();
+    tz_data.initializeTimeZones();
+    _timeZone = tz.getLocation(_timeZoneId);
+    _selectedDate = tz.TZDateTime.now(_timeZone);
+    _visibleMonth = DateTime.utc(_selectedDate.year, _selectedDate.month);
     _logUploadController = DemoPlayerLogUploadController(
-      isMounted: () => mounted,
+      isMounted: () => _canUpdateUi,
       markerSink: () => DemoExampleSmokeHooks.current?.markerSink,
       onChanged: () {
-        if (mounted) setState(() {});
+        if (_canUpdateUi) setState(() {});
       },
       showResult: ({required String title, required String content}) {
-        if (!mounted) return Future<void>.value();
+        if (!_canUpdateUi) return Future<void>.value();
         return context.showNoticeDialog(title: title, content: content);
       },
     );
@@ -92,7 +115,24 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   @override
+  void onRouteInactive(String reason) {
+    if (_paused || _replay == null || _selected == null) {
+      return;
+    }
+    unawaited(_pauseForLifecycle());
+  }
+
+  @override
+  void onRouteActive(String reason) {
+    if (!_pausedByLifecycle || _replay == null) {
+      return;
+    }
+    unawaited(_resumeFromLifecycle());
+  }
+
+  @override
   void dispose() {
+    _uiActive = false;
     _logUploadController.reset(notify: false);
     unawaited(_cleanup());
     super.dispose();
@@ -107,11 +147,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       appBar: AppBar(
         title: const Text(
           '云录像',
-          style: TextStyle(
-            color: ExampleTheme.primary,
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
+          style: TextStyle(color: ExampleTheme.primary, fontSize: 14, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
           IconButton(
@@ -121,6 +157,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
             icon: const Icon(Icons.calendar_month_outlined),
           ),
           PlayerLogUploadButton(
+            buttonKey: DemoWidgetKeys.playerLogUploadButton,
             uploadingLogs: _logUploadController.uploading,
             onUploadLogs: () => _logUploadController.upload(remoteId: 'tistore'),
           ),
@@ -144,10 +181,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
               right: 16,
               child: SafeArea(
                 bottom: false,
-                child: _ErrorBanner(
-                  label: _initCode != 0 ? '初始化失败' : '操作失败',
-                  code: _visibleErrorCode!,
-                ),
+                child: _ErrorBanner(label: _initCode != 0 ? '初始化失败' : '操作失败', code: _visibleErrorCode!),
               ),
             ),
           SafeArea(
@@ -172,18 +206,17 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
 
   Widget _buildSeekPanel(TiStoreRecordingRange range) {
     final int maximum = range.endTimeMs - 1;
-    final int current =
-        (_seekPreview?.round() ?? _replay?.currentTimeMs ?? range.startTimeMs).clamp(range.startTimeMs, maximum);
+    final int current = (_seekPreview?.round() ?? _replay?.currentTimeMs ?? range.startTimeMs).clamp(
+      range.startTimeMs,
+      maximum,
+    );
     return Container(
       constraints: const BoxConstraints(maxWidth: 620),
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 8),
       decoration: ExampleTheme.videoPanelDecoration,
       child: Row(
         children: <Widget>[
-          Text(
-            _formatClock(current),
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
+          Text(_formatClock(current), style: const TextStyle(color: Colors.white70, fontSize: 12)),
           Expanded(
             child: Slider(
               key: DemoWidgetKeys.storeSeekSlider,
@@ -198,18 +231,15 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
                   _lastCode = code == 0 ? null : code;
                 });
                 if (code == 0) {
-                  DemoExampleSmokeHooks.current?.markerSink
-                      .passed('tistore_smoke_seek_completed', payload: <String, Object?>{
-                    'time_ms': value.round(),
-                  });
+                  DemoExampleSmokeHooks.current?.markerSink.passed(
+                    'tistore_smoke_seek_completed',
+                    payload: <String, Object?>{'time_ms': value.round()},
+                  );
                 }
               },
             ),
           ),
-          Text(
-            _formatClock(range.endTimeMs),
-            style: const TextStyle(color: Colors.white70, fontSize: 12),
-          ),
+          Text(_formatClock(range.endTimeMs), style: const TextStyle(color: Colors.white70, fontSize: 12)),
         ],
       ),
     );
@@ -255,29 +285,20 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
                 dropdownColor: ExampleTheme.videoBackground,
                 iconEnabledColor: Colors.white,
                 style: const TextStyle(color: Colors.white),
-                items: TiStoreReplaySpeed.values
-                    .map(
-                      (TiStoreReplaySpeed speed) => DropdownMenuItem<TiStoreReplaySpeed>(
-                        value: speed,
-                        child: Text(speed.name),
-                      ),
-                    )
-                    .toList(),
-                onChanged: !playing
-                    ? null
-                    : (TiStoreReplaySpeed? speed) {
-                        if (speed == null) return;
-                        final int code = _replay?.setSpeed(speed) ?? kTiStoreErrorNotStarted;
-                        setState(() {
-                          _lastCode = code == 0 ? null : code;
-                        });
-                        if (code == 0) {
-                          DemoExampleSmokeHooks.current?.markerSink
-                              .passed('tistore_smoke_speed_changed', payload: <String, Object?>{
-                            'speed': speed.name,
-                          });
-                        }
-                      },
+                items:
+                    TiStoreReplaySpeed.values
+                        .map(
+                          (TiStoreReplaySpeed speed) =>
+                              DropdownMenuItem<TiStoreReplaySpeed>(value: speed, child: Text(speed.name)),
+                        )
+                        .toList(),
+                onChanged:
+                    !playing
+                        ? null
+                        : (TiStoreReplaySpeed? speed) {
+                          if (speed == null) return;
+                          unawaited(_setReplaySpeed(speed));
+                        },
               ),
             ),
           ),
@@ -293,11 +314,8 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _initialize() async {
-    final int code = await TiStore.init(
-      appId: widget.appId,
-      endpoint: widget.endpoint,
-    );
-    if (!mounted) {
+    final int code = await TiStore.init(appId: widget.appId, endpoint: widget.endpoint);
+    if (!_canUpdateUi) {
       if (code == 0) TiStore.shutdown();
       return;
     }
@@ -307,22 +325,80 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     });
     if (code == 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) unawaited(_showRecordingsSheet(query: true));
+        if (_canUpdateUi) unawaited(_showRecordingsSheet(query: true));
       });
     }
   }
 
+  Future<void> _queryMonth() {
+    final Future<void>? active = _calendarQueryFuture;
+    if (active != null) return active;
+    final Future<void> started = _runMonthQuery();
+    _calendarQueryFuture = started;
+    return started.whenComplete(() {
+      if (identical(_calendarQueryFuture, started)) _calendarQueryFuture = null;
+    });
+  }
+
+  Future<void> _runMonthQuery() async {
+    final TiStore? store = _store;
+    if (store == null) return;
+    final int generation = ++_calendarGeneration;
+    final int lastDay = DateTime.utc(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
+    final String startDate = _dateText(_visibleMonth.year, _visibleMonth.month, 1);
+    final String endDate = _dateText(_visibleMonth.year, _visibleMonth.month, lastDay);
+    setState(() {
+      _calendarQuerying = true;
+      _calendarCode = null;
+      _recordingDays = <TiStoreRecordingDay>[];
+    });
+    _refreshSheet();
+    final Resp<List<TiStoreRecordingDay>> result = await store.listRecordingDays(
+      startDate: startDate,
+      endDate: endDate,
+      timeZoneId: _timeZoneId,
+    );
+    if (!_canUpdateUi || generation != _calendarGeneration) return;
+    setState(() {
+      _calendarQuerying = false;
+      _calendarCode = result.code;
+      _recordingDays = result.data ?? <TiStoreRecordingDay>[];
+    });
+    _refreshSheet();
+    DemoExampleSmokeHooks.current?.markerSink.passed(
+      'tistore_smoke_recording_days_completed',
+      payload: <String, Object?>{
+        'code': result.success ? kTiStoreErrorOk : result.code ?? kTiStoreErrorIoFailed,
+        'month': _monthText(_visibleMonth),
+        'available_day_count': _recordingDays.where((TiStoreRecordingDay day) => day.hasRecording).length,
+      },
+    );
+  }
+
+  Future<void> _queryMonthAndSelectedDay() async {
+    await Future.wait<void>(<Future<void>>[_queryMonth(), _query()]);
+  }
+
   Future<void> _query() {
+    _queryGeneration += 1;
+    _queryQueued = true;
     final Future<void>? active = _queryFuture;
     if (active != null) return active;
-    final Future<void> started = _runQuery();
+    final Future<void> started = _drainQueries();
     _queryFuture = started;
     return started.whenComplete(() {
       if (identical(_queryFuture, started)) _queryFuture = null;
     });
   }
 
-  Future<void> _runQuery() async {
+  Future<void> _drainQueries() async {
+    while (_queryQueued) {
+      _queryQueued = false;
+      await _runQuery(_queryGeneration);
+    }
+  }
+
+  Future<void> _runQuery(int generation) async {
     final TiStore? store = _store;
     if (store == null) return;
     final ({int start, int end}) bounds = _selectedDayBounds;
@@ -336,31 +412,34 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       startTimeMs: bounds.start,
       endTimeMs: bounds.end,
     );
-    if (!mounted) return;
+    if (!_canUpdateUi || generation != _queryGeneration) return;
     setState(() {
       _querying = false;
       _recordings = _newestFirstRecordingRanges(result.data ?? <TiStoreRecordingRange>[]);
       _queryCode = result.code;
     });
     _refreshSheet();
-    DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_query_completed', payload: <String, Object?>{
-      'code': result.code ?? kTiStoreErrorIoFailed,
-      'recording_count': result.data?.length ?? 0,
-      'start_time_ms': bounds.start,
-      'end_time_ms': bounds.end,
-    });
+    DemoExampleSmokeHooks.current?.markerSink.passed(
+      'tistore_smoke_query_completed',
+      payload: <String, Object?>{
+        'code': result.success ? kTiStoreErrorOk : result.code ?? kTiStoreErrorIoFailed,
+        'recording_count': result.data?.length ?? 0,
+        'start_time_ms': bounds.start,
+        'end_time_ms': bounds.end,
+      },
+    );
   }
 
   Future<void> _play(TiStoreRecordingRange range) async {
     await _stopActiveRecording(keepFile: true);
-    if (!mounted) return;
+    if (!_canUpdateUi) return;
 
     TiStoreReplay? replay = _replay;
     if (replay == null) {
       final TiStore? store = _store;
       if (store == null) return;
       final int audioSessionCode = await _audioSession.retainIfNeeded();
-      if (!mounted) {
+      if (!_canUpdateUi) {
         _audioSession.releaseIfNeeded(reason: 'store_page_unmounted');
         return;
       }
@@ -373,15 +452,15 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       final TiStoreAudioOutput audio = TiStoreAudioOutput();
       final TiStoreVideoOutput video = TiStoreVideoOutput();
       replay.onTimeChanged = (_) {
-        if (mounted) setState(() {});
+        if (_canUpdateUi) setState(() {});
       };
       replay.onError = (int code) {
-        if (!mounted) return;
+        if (!_canUpdateUi) return;
         setState(() => _lastCode = code);
         _reportSmokeFailure('tistore_replay', code);
       };
       replay.onCompleted = () {
-        if (mounted) {
+        if (_canUpdateUi) {
           setState(() {});
           DemoExampleSmokeHooks.current?.markerSink.passed(
             'tistore_smoke_replay_completed',
@@ -390,7 +469,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         }
       };
       video.onStateChanged = (TiStoreVideoOutputState state) {
-        if (!mounted) return;
+        if (!_canUpdateUi) return;
         setState(() {});
         DemoExampleSmokeHooks.current?.markerSink.passed(
           'tistore_smoke_video_state',
@@ -398,23 +477,23 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         );
         if (video.state == TiStoreVideoOutputState.rendering) {
           final Size? size = video.renderSize;
-          DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_video_rendering', payload: <String, Object?>{
-            'width': size?.width.round() ?? 0,
-            'height': size?.height.round() ?? 0,
-          });
+          DemoExampleSmokeHooks.current?.markerSink.passed(
+            'tistore_smoke_video_rendering',
+            payload: <String, Object?>{'width': size?.width.round() ?? 0, 'height': size?.height.round() ?? 0},
+          );
         }
       };
       video.onRenderSizeChanged = (Size size) {
-        DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_video_size', payload: <String, Object?>{
-          'width': size.width.round(),
-          'height': size.height.round(),
-        });
+        DemoExampleSmokeHooks.current?.markerSink.passed(
+          'tistore_smoke_video_size',
+          payload: <String, Object?>{'width': size.width.round(), 'height': size.height.round()},
+        );
       };
       audio.onError = (int code) {
-        if (mounted) setState(() => _lastCode = code);
+        if (_canUpdateUi) setState(() => _lastCode = code);
       };
       video.onError = (int code) {
-        if (mounted) setState(() => _lastCode = code);
+        if (_canUpdateUi) setState(() => _lastCode = code);
       };
       int code = video.attach(replay: replay, channelId: widget.videoChannelId);
       final bool videoAttached = code == 0;
@@ -437,20 +516,21 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     }
 
     final int code = replay.play(startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs);
-    if (!mounted) return;
+    if (!_canUpdateUi) return;
     setState(() {
       if (code == 0) {
         _selected = range;
         _paused = false;
+        _pausedByLifecycle = false;
         _seekPreview = null;
       }
       _lastCode = code == 0 ? null : code;
     });
     if (code == 0) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_play_started', payload: <String, Object?>{
-        'start_time_ms': range.startTimeMs,
-        'end_time_ms': range.endTimeMs,
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_play_started',
+        payload: <String, Object?>{'start_time_ms': range.startTimeMs, 'end_time_ms': range.endTimeMs},
+      );
     } else {
       _reportSmokeFailure('tistore_play', code);
     }
@@ -460,14 +540,14 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     if (_recordingTask != null) {
       setState(() => _mediaFileBusy = true);
       await _stopActiveRecording(keepFile: true);
-      if (mounted) setState(() => _mediaFileBusy = false);
+      if (_canUpdateUi) setState(() => _mediaFileBusy = false);
       return;
     }
     final Resp<TiStoreRecordingTask>? result = _replay?.startRecording(
       videoChannelId: widget.videoChannelId,
       audioChannelId: widget.audioChannelId,
     );
-    if (!mounted) return;
+    if (!_canUpdateUi) return;
     setState(() {
       _recordingTask = result?.data;
       _lastCode = result?.code;
@@ -483,20 +563,21 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     final TiStoreRecordingTask? task = _recordingTask;
     if (task == null) return kTiStoreErrorOk;
     _recordingTask = null;
-    if (mounted) setState(() {});
+    if (_canUpdateUi) setState(() {});
     final Resp<TiStoreRecordingFile> result = await task.stop();
     final TiStoreRecordingFile? file = result.data;
-    if (!keepFile || !mounted) {
+    if (!keepFile || !_canUpdateUi) {
       final int deleteCode = await file?.delete() ?? kTiStoreErrorOk;
       return _firstError(result.code ?? kTiStoreErrorOk, deleteCode);
     }
     if (file != null) await _replaceLatestRecording(file);
-    if (!mounted) return result.code ?? kTiStoreErrorOk;
+    if (!_canUpdateUi) return result.code ?? kTiStoreErrorOk;
     setState(() => _lastCode = result.code);
     if (result.success && file != null) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_recording_completed', payload: <String, Object?>{
-        'duration_ms': file.duration.inMilliseconds,
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_recording_completed',
+        payload: <String, Object?>{'duration_ms': file.duration.inMilliseconds},
+      );
       await _saveLatestMediaToGallery();
     } else {
       _reportSmokeFailure('tistore_recording_stop', result.code);
@@ -515,13 +596,13 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       videoChannelId: widget.videoChannelId,
       audioChannelId: widget.audioChannelId,
       onProgress: (_) {
-        if (mounted) {
+        if (_canUpdateUi) {
           setState(() {});
           _refreshSheet();
         }
       },
     );
-    if (!mounted) {
+    if (!_canUpdateUi) {
       await started.data?.stop();
       return;
     }
@@ -538,7 +619,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     _refreshSheet();
     final Resp<TiStoreRecordingFile>? result = await started.data?.result;
     if (result == null) {
-      if (mounted) {
+      if (_canUpdateUi) {
         setState(() {
           _exportTask = null;
           _exportingRange = null;
@@ -548,7 +629,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       return;
     }
     final TiStoreRecordingFile? file = result.data;
-    if (!mounted) {
+    if (!_canUpdateUi) {
       await file?.delete();
       return;
     }
@@ -560,9 +641,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     _refreshSheet();
     if (file != null) await _replaceLatestRecording(file);
     if (result.success && file != null) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_export_completed', payload: <String, Object?>{
-        'duration_ms': file.duration.inMilliseconds,
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_export_completed',
+        payload: <String, Object?>{'duration_ms': file.duration.inMilliseconds},
+      );
       await _saveLatestMediaToGallery();
     } else {
       _reportSmokeFailure('tistore_export', result.code);
@@ -573,13 +655,13 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     setState(() => _mediaFileBusy = true);
     DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_snapshot_started');
     final Resp<TiStoreSnapshotFile>? result = await _videoOutput?.takeSnapshot();
-    if (!mounted || result == null) {
+    if (!_canUpdateUi || result == null) {
       await result?.data?.delete();
-      if (mounted) setState(() => _mediaFileBusy = false);
+      if (_canUpdateUi) setState(() => _mediaFileBusy = false);
       return;
     }
     if (result.data != null) await _replaceLatestSnapshot(result.data!);
-    if (!mounted) return;
+    if (!_canUpdateUi) return;
     setState(() => _lastCode = result.code);
     if (result.success && result.data != null) {
       DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_snapshot_completed');
@@ -587,13 +669,13 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     } else {
       _reportSmokeFailure('tistore_snapshot', result.code);
     }
-    if (mounted) setState(() => _mediaFileBusy = false);
+    if (_canUpdateUi) setState(() => _mediaFileBusy = false);
   }
 
   Future<void> _saveLatestMediaToGallery() async {
     if (_latestMedia == null) return;
     if (!await const DemoExamplePermissions().requestGalleryWritePermissionIfNeeded()) {
-      if (mounted) {
+      if (_canUpdateUi) {
         _showMessage('保存失败 · 未获得相册写入权限');
       }
       _reportSmokeFailure('tistore_gallery_permission', kTiStoreErrorPermissionDenied);
@@ -601,10 +683,12 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     }
     final _LatestStoreMedia kind = _latestMedia!;
     final String sourcePath = kind == _LatestStoreMedia.recording ? _latestRecording!.path : _latestSnapshot!.path;
-    final Resp<TiStoreGalleryAsset> result = kind == _LatestStoreMedia.recording
-        ? await _latestRecording!.moveToGallery()
-        : await _latestSnapshot!.moveToGallery();
-    if (!mounted) return;
+    final String fileName = demoGalleryFileName(kind == _LatestStoreMedia.recording ? 'mp4' : 'jpg');
+    final Resp<TiStoreGalleryAsset> result =
+        kind == _LatestStoreMedia.recording
+            ? await _latestRecording!.moveToGallery(fileName: fileName)
+            : await _latestSnapshot!.moveToGallery(fileName: fileName);
+    if (!_canUpdateUi) return;
     setState(() {
       _lastCode = result.code;
       if (result.success) {
@@ -617,10 +701,14 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       }
     });
     if (result.success && result.data != null) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_gallery_saved', payload: <String, Object?>{
-        'uri': result.data!.uri.toString(),
-        'source_deleted': !File(sourcePath).existsSync(),
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_gallery_saved',
+        payload: <String, Object?>{
+          'uri': result.data!.uri.toString(),
+          'file_name': fileName,
+          'source_deleted': !File(sourcePath).existsSync(),
+        },
+      );
     } else {
       _reportSmokeFailure('tistore_gallery', result.code);
     }
@@ -647,17 +735,80 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     await other?.delete();
   }
 
-  void _togglePause() {
-    final int code =
-        _paused ? _replay?.resume() ?? kTiStoreErrorNotStarted : _replay?.pause() ?? kTiStoreErrorNotStarted;
+  Future<int> _retryReplayAction(int Function() action) async {
+    final Stopwatch deadline = Stopwatch()..start();
+    int code = action();
+    while (code == kTiStoreErrorInUse && deadline.elapsed < const Duration(seconds: 2)) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      code = action();
+    }
+    return code;
+  }
+
+  Future<void> _pauseForLifecycle() async {
+    final int code = await _retryReplayAction(() => _replay?.pause() ?? kTiStoreErrorNotStarted);
+    if (!_canUpdateUi) return;
     setState(() {
-      if (code == 0) _paused = !_paused;
+      if (code == 0) {
+        _paused = true;
+        _pausedByLifecycle = true;
+        _lastCode = null;
+      } else {
+        _lastCode = code;
+      }
+    });
+  }
+
+  Future<void> _resumeFromLifecycle() async {
+    final int code = await _retryReplayAction(() => _replay?.resume() ?? kTiStoreErrorNotStarted);
+    if (!_canUpdateUi) return;
+    setState(() {
+      _pausedByLifecycle = false;
+      if (code == 0) {
+        _paused = false;
+        _lastCode = null;
+      } else {
+        _lastCode = code;
+      }
+    });
+  }
+
+  Future<void> _setReplaySpeed(TiStoreReplaySpeed speed) async {
+    final int code = _replay?.setSpeed(speed) ?? kTiStoreErrorNotStarted;
+    if (!_canUpdateUi) return;
+    setState(() {
       _lastCode = code == 0 ? null : code;
     });
     if (code == 0) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_pause_changed', payload: <String, Object?>{
-        'paused': _paused,
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_speed_changed',
+        payload: <String, Object?>{'speed': speed.name},
+      );
+    }
+  }
+
+  void _togglePause() {
+    unawaited(_togglePauseAsync());
+  }
+
+  Future<void> _togglePauseAsync() async {
+    final bool resume = _paused;
+    final int code = await _retryReplayAction(
+      () => resume ? _replay?.resume() ?? kTiStoreErrorNotStarted : _replay?.pause() ?? kTiStoreErrorNotStarted,
+    );
+    if (!_canUpdateUi) return;
+    setState(() {
+      if (code == 0) {
+        _paused = !resume;
+        _pausedByLifecycle = false;
+      }
+      _lastCode = code == 0 ? null : code;
+    });
+    if (code == 0) {
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_pause_changed',
+        payload: <String, Object?>{'paused': _paused},
+      );
     }
   }
 
@@ -669,27 +820,29 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       _lastCode = code == 0 ? null : code;
     });
     if (code == 0) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_audio_volume_changed', payload: <String, Object?>{
-        'muted': nextMuted,
-      });
+      DemoExampleSmokeHooks.current?.markerSink.passed(
+        'tistore_smoke_audio_volume_changed',
+        payload: <String, Object?>{'muted': nextMuted},
+      );
     }
   }
 
   Future<void> _showRecordingsSheet({bool query = false}) async {
-    if (_sheetOpen || !mounted) return;
+    if (_sheetOpen || !_canUpdateUi) return;
     _sheetOpen = true;
     final Future<void> sheet = showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
-      builder: (BuildContext sheetContext) => StatefulBuilder(
-        builder: (BuildContext context, StateSetter setSheetState) {
-          _sheetSetState = setSheetState;
-          return _buildRecordingSheet(sheetContext);
-        },
-      ),
+      builder:
+          (BuildContext sheetContext) => StatefulBuilder(
+            builder: (BuildContext context, StateSetter setSheetState) {
+              _sheetSetState = setSheetState;
+              return _buildRecordingSheet(sheetContext);
+            },
+          ),
     );
-    if (query) unawaited(_query());
+    if (query) unawaited(_queryMonthAndSelectedDay());
     await sheet;
     _sheetSetState = null;
     _sheetOpen = false;
@@ -698,22 +851,23 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   Widget _buildRecordingSheet(BuildContext sheetContext) {
     return SafeArea(
       child: SizedBox(
-        height: MediaQuery.sizeOf(sheetContext).height * 0.72,
+        height: MediaQuery.sizeOf(sheetContext).height * 0.88,
         child: Column(
           children: <Widget>[
             ListTile(
               key: DemoWidgetKeys.storeDatePickerButton,
               leading: const Icon(Icons.calendar_today_outlined),
-              title: Text(_formatDate(_selectedDate)),
-              subtitle: const Text('按设备所在本地日期查询'),
+              title: const Text('选择录像日期'),
+              subtitle: Text('自然日按 $_timeZoneId 计算 · ${_formatDate(_selectedDate)}'),
               trailing: IconButton(
                 key: DemoWidgetKeys.storeQueryButton,
-                tooltip: '重新查询',
-                onPressed: _querying ? null : _query,
+                tooltip: '刷新月份和当天录像',
+                onPressed: _querying || _calendarQuerying ? null : _queryMonthAndSelectedDay,
                 icon: const Icon(Icons.refresh),
               ),
-              onTap: _pickDate,
             ),
+            const Divider(height: 1),
+            _buildCalendar(),
             const Divider(height: 1),
             Expanded(child: _buildRecordingSheetBody(sheetContext)),
           ],
@@ -722,7 +876,26 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     );
   }
 
+  Widget _buildCalendar() {
+    final tz.TZDateTime today = tz.TZDateTime.now(_timeZone);
+    return DemoStoreRecordingCalendar(
+      visibleMonth: _visibleMonth,
+      selectedDate: _selectedDate,
+      today: today,
+      days: _recordingDays,
+      loading: _calendarQuerying,
+      errorCode: _calendarCode,
+      onPreviousMonth: () => _changeMonth(-1),
+      onNextMonth: () => _changeMonth(1),
+      onRetry: _queryMonth,
+      onSelectDay: _selectDate,
+    );
+  }
+
   Widget _buildRecordingSheetBody(BuildContext sheetContext) {
+    if (_selectedDate.year != _visibleMonth.year || _selectedDate.month != _visibleMonth.month) {
+      return const Center(child: Text('请选择有录像的日期'));
+    }
     if (_querying) {
       return const Center(child: CircularProgressIndicator());
     }
@@ -733,11 +906,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
           children: <Widget>[
             Text('查询失败 · ${TiStore.errorToString(_queryCode!)} ($_queryCode)'),
             const SizedBox(height: 12),
-            FilledButton(
-              key: DemoWidgetKeys.storeQueryRetryButton,
-              onPressed: _query,
-              child: const Text('重试'),
-            ),
+            FilledButton(key: DemoWidgetKeys.storeQueryRetryButton, onPressed: _query, child: const Text('重试')),
           ],
         ),
       );
@@ -749,10 +918,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
           children: <Widget>[
             const Text('当天没有可用录像'),
             const SizedBox(height: 12),
-            OutlinedButton(
-              onPressed: _query,
-              child: const Text('重新查询'),
-            ),
+            OutlinedButton(onPressed: _query, child: const Text('重新查询')),
           ],
         ),
       );
@@ -778,7 +944,8 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Widget _exportAction(TiStoreRecordingRange range) {
-    final bool exportingThis = _exportingRange != null &&
+    final bool exportingThis =
+        _exportingRange != null &&
         _exportingRange!.startTimeMs == range.startTimeMs &&
         _exportingRange!.endTimeMs == range.endTimeMs;
     return OutlinedButton(
@@ -792,30 +959,35 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       ),
-      child: exportingThis
-          ? SizedBox(
-              width: 16,
-              height: 16,
-              child: CircularProgressIndicator(
-                strokeWidth: 2,
-                value: _exportTask?.progress,
-              ),
-            )
-          : const Text('下载'),
+      child:
+          exportingThis
+              ? SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, value: _exportTask?.progress),
+              )
+              : const Text('下载'),
     );
   }
 
-  Future<void> _pickDate() async {
-    final DateTime? date = await showDatePicker(
-      context: context,
-      initialDate: _selectedDate,
-      firstDate: DateTime.now().subtract(const Duration(days: 3650)),
-      lastDate: DateTime.now(),
-    );
-    if (date == null || !mounted) return;
-    setState(() => _selectedDate = date);
+  void _changeMonth(int amount) {
+    setState(() {
+      _visibleMonth = DateTime.utc(_visibleMonth.year, _visibleMonth.month + amount);
+      _recordings = <TiStoreRecordingRange>[];
+      _queryCode = null;
+    });
     _refreshSheet();
-    await _query();
+    unawaited(_queryMonth());
+  }
+
+  void _selectDate(int day) {
+    setState(() {
+      _selectedDate = tz.TZDateTime(_timeZone, _visibleMonth.year, _visibleMonth.month, day);
+      _recordings = <TiStoreRecordingRange>[];
+      _queryCode = null;
+    });
+    _refreshSheet();
+    unawaited(_query());
   }
 
   Future<void> _cleanup() async {
@@ -828,6 +1000,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     _exportTask = null;
     _exportingRange = null;
     await _queryFuture;
+    await _calendarQueryFuture;
     cleanupCode = _firstError(cleanupCode, await _releasePlayback());
     cleanupCode = _firstError(cleanupCode, await _latestRecording?.delete() ?? kTiStoreErrorOk);
     cleanupCode = _firstError(cleanupCode, await _latestSnapshot?.delete() ?? kTiStoreErrorOk);
@@ -858,9 +1031,11 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       _audioOutput = null;
       _videoOutput = null;
       _replay = null;
+      _paused = false;
+      _pausedByLifecycle = false;
     }
 
-    if (mounted) {
+    if (_canUpdateUi) {
       setState(clearPlayback);
       await WidgetsBinding.instance.endOfFrame;
     } else {
@@ -872,7 +1047,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     cleanupCode = _firstError(cleanupCode, video?.detach() ?? kTiStoreErrorOk);
     cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(audio?.dispose));
     final int videoCode = await _disposeAfterDeferredCallbacks(video?.dispose);
-    if (videoCode != 0 && mounted) setState(() => _lastCode = videoCode);
+    if (videoCode != 0 && _canUpdateUi) setState(() => _lastCode = videoCode);
     cleanupCode = _firstError(cleanupCode, videoCode);
     cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(replay?.dispose));
     _audioSession.releaseIfNeeded(reason: 'store_playback_released');
@@ -883,10 +1058,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     if (dispose == null) return kTiStoreErrorOk;
     final Stopwatch deadline = Stopwatch()..start();
     int code = dispose();
-    while (code == kTiStoreErrorInUse && deadline.elapsed < const Duration(seconds: 1)) {
-      // The Runtime rejects destruction while an asynchronous Dart callback still owns the C
-      // handle. Yield to this isolate's event loop, then retry after that callback has returned.
-      await Future<void>.delayed(Duration.zero);
+    while (code == kTiStoreErrorInUse && deadline.elapsed < const Duration(seconds: 5)) {
+      // Runtime callback tasks arrive through NativeCallable.listener. A timer turn lets the Dart
+      // event queue complete each accepted task before the next checked destruction attempt.
+      await Future<void>.delayed(const Duration(milliseconds: 10));
       code = dispose();
     }
     return code;
@@ -898,7 +1073,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   void _showMessage(String message) {
-    if (!mounted) return;
+    if (!_canUpdateUi) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
   }
 
@@ -912,12 +1087,8 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   ({int start, int end}) get _selectedDayBounds {
-    final ({int startTimeMs, int endTimeMs})? smokeWindow = DemoExampleSmokeHooks.current?.storeQueryWindow;
-    if (smokeWindow != null) {
-      return (start: smokeWindow.startTimeMs, end: smokeWindow.endTimeMs);
-    }
-    final DateTime start = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day);
-    final DateTime end = DateTime(_selectedDate.year, _selectedDate.month, _selectedDate.day + 1);
+    final tz.TZDateTime start = tz.TZDateTime(_timeZone, _selectedDate.year, _selectedDate.month, _selectedDate.day);
+    final tz.TZDateTime end = tz.TZDateTime(_timeZone, _selectedDate.year, _selectedDate.month, _selectedDate.day + 1);
     return (start: start.millisecondsSinceEpoch, end: end.millisecondsSinceEpoch);
   }
 
@@ -968,8 +1139,14 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   static String _formatDate(DateTime value) =>
       '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
 
-  static String _formatClock(int milliseconds) {
-    final DateTime value = DateTime.fromMillisecondsSinceEpoch(milliseconds);
+  static String _dateText(int year, int month, int day) =>
+      '${year.toString().padLeft(4, '0')}-${month.toString().padLeft(2, '0')}-${day.toString().padLeft(2, '0')}';
+
+  static String _monthText(DateTime value) =>
+      '${value.year.toString().padLeft(4, '0')}-${value.month.toString().padLeft(2, '0')}';
+
+  String _formatClock(int milliseconds) {
+    final tz.TZDateTime value = tz.TZDateTime.fromMillisecondsSinceEpoch(_timeZone, milliseconds);
     return '${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}:${value.second.toString().padLeft(2, '0')}';
   }
 
@@ -991,10 +1168,10 @@ final class _ErrorBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialBanner(
-        backgroundColor: ExampleTheme.surface.withAlpha(235),
-        content: Text('$label：${TiStore.errorToString(code)} ($code)'),
-        actions: const <Widget>[SizedBox.shrink()],
-      );
+    backgroundColor: ExampleTheme.surface.withAlpha(235),
+    content: Text('$label：${TiStore.errorToString(code)} ($code)'),
+    actions: const <Widget>[SizedBox.shrink()],
+  );
 }
 
 final class _StoreMediaActionButton extends StatelessWidget {

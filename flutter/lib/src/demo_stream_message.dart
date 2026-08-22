@@ -61,11 +61,7 @@ final class DemoStreamMessageSendEvent {
 }
 
 final class DemoStreamMessageSender {
-  DemoStreamMessageSender({
-    required this.streamId,
-    this.period = demoStreamMessagePeriod,
-    this.onSent,
-  });
+  DemoStreamMessageSender({required this.streamId, this.period = demoStreamMessagePeriod, this.onSent});
 
   final int streamId;
   final Duration period;
@@ -142,9 +138,7 @@ final class DemoStreamMessageReceiveEvent {
 }
 
 final class DemoStreamMessageOverlayController {
-  DemoStreamMessageOverlayController({
-    this.bubbleDuration = demoStreamMessageBubbleDuration,
-  });
+  DemoStreamMessageOverlayController({this.bubbleDuration = demoStreamMessageBubbleDuration});
 
   final Duration bubbleDuration;
   Timer? _hideTimer;

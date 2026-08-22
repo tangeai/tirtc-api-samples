@@ -13,7 +13,7 @@ final class DemoExamplePermissions {
   Future<bool> requestMicrophonePermission() => _requestPermission('requestMicrophonePermission', 'microphone');
 
   Future<bool> requestGalleryWritePermissionIfNeeded() async {
-    if (!Platform.isAndroid) {
+    if (!Platform.isAndroid && !Platform.isIOS) {
       return true;
     }
     return _requestPermission('requestGalleryWritePermission', 'gallery_write');

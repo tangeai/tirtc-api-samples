@@ -6,35 +6,22 @@ import 'demo_echo_command.dart';
 abstract interface class DemoAutomationMarkerSink {
   void passed(String marker, {Map<String, Object?> payload = const <String, Object?>{}});
 
-  void failure({
-    required String failureStage,
-    required String message,
-    int? errorCode,
-  });
+  void failure({required String failureStage, required String message, int? errorCode});
 }
 
 abstract interface class DemoPerformanceMarkerSink {
   void passed(String marker, {Map<String, Object?> payload = const <String, Object?>{}});
 
-  void failure({
-    required String errorStage,
-    required String errorCode,
-    required String errorMessage,
-  });
+  void failure({required String errorStage, required String errorCode, required String errorMessage});
 }
 
 final class DemoExampleSmokeHooks {
-  const DemoExampleSmokeHooks({
-    required this.markerSink,
-    required this.renderWindowSeconds,
-    this.storeQueryWindow,
-  });
+  const DemoExampleSmokeHooks({required this.markerSink, required this.renderWindowSeconds});
 
   static DemoExampleSmokeHooks? current;
 
   final DemoAutomationMarkerSink markerSink;
   final int renderWindowSeconds;
-  final ({int startTimeMs, int endTimeMs})? storeQueryWindow;
 }
 
 const int automationCommandEchoId = demoEchoCommandId;
@@ -43,10 +30,7 @@ const Duration automationCommandEchoTimeout = Duration(seconds: 15);
 const int automationCommandSendRetryLimit = 120;
 const Duration automationCommandSendRetryInterval = Duration(milliseconds: 100);
 
-typedef AutomationCommandSend = int Function({
-  required int commandId,
-  required Uint8List payload,
-});
+typedef AutomationCommandSend = int Function({required int commandId, required Uint8List payload});
 
 final class AutomationCommandProbeResult {
   const AutomationCommandProbeResult._({
@@ -97,9 +81,7 @@ final class AutomationCommandProbeResult {
 }
 
 final class AutomationCommandProbe {
-  AutomationCommandProbe()
-      : payloadText = automationCommandEchoPayload,
-        _payload = demoEchoCommandPayload();
+  AutomationCommandProbe() : payloadText = automationCommandEchoPayload, _payload = demoEchoCommandPayload();
 
   final String payloadText;
   final Uint8List _payload;
@@ -121,10 +103,7 @@ final class AutomationCommandProbe {
   }) async {
     int sendCode = -1;
     for (int attempt = 0; attempt < automationCommandSendRetryLimit; attempt += 1) {
-      sendCode = sendCommand(
-        commandId: automationCommandEchoId,
-        payload: Uint8List.fromList(_payload),
-      );
+      sendCode = sendCommand(commandId: automationCommandEchoId, payload: Uint8List.fromList(_payload));
       if (sendCode == 0) {
         break;
       }

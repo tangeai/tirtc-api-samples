@@ -24,18 +24,13 @@ extension DownlinkMetricsOverlayMarkerPayloads on DownlinkMetricsOverlayModel {
       'latency_metrics_ok': latencyMetricsValid,
       'latency_metrics_available': latencyReady,
       'period_summary_available': periodSummaryAvailable,
-      'period_summary_required_rows': <String, Object?>{
-        'stutter': stutterReady,
-        'latency_stats': latencyReady,
-      },
+      'period_summary_required_rows': <String, Object?>{'stutter': stutterReady, 'latency_stats': latencyReady},
       'av_output_health_ok': avOutputHealthOk,
       'runtime_focus_log': 'logs/runtime-focus.log',
     };
   }
 
-  Map<String, Object?> smokeDebugMarkerPayload({
-    required int sessionGeneration,
-  }) {
+  Map<String, Object?> smokeDebugMarkerPayload({required int sessionGeneration}) {
     return <String, Object?>{
       'session_generation': sessionGeneration,
       'video_width': videoWidth,
@@ -47,9 +42,7 @@ extension DownlinkMetricsOverlayMarkerPayloads on DownlinkMetricsOverlayModel {
     };
   }
 
-  Map<String, Object?> smokeRenderWindowMarkerPayload({
-    required int sessionGeneration,
-  }) {
+  Map<String, Object?> smokeRenderWindowMarkerPayload({required int sessionGeneration}) {
     return <String, Object?>{
       'session_generation': sessionGeneration,
       ..._currentStatsPayload(),
@@ -58,10 +51,7 @@ extension DownlinkMetricsOverlayMarkerPayloads on DownlinkMetricsOverlayModel {
       'latency_metrics_ok': latencyMetricsValid,
       'latency_metrics_available': latencyReady,
       'period_summary_available': periodSummaryAvailable,
-      'period_summary_required_rows': <String, Object?>{
-        'stutter': stutterReady,
-        'latency_stats': latencyReady,
-      },
+      'period_summary_required_rows': <String, Object?>{'stutter': stutterReady, 'latency_stats': latencyReady},
       'av_output_health_ok': avOutputHealthOk,
       'runtime_focus_log': 'logs/runtime-focus.log',
     };

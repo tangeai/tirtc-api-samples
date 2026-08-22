@@ -1,6 +1,6 @@
 # TiRTC Flutter API 示例
 
-这是一个可以独立运行的 Flutter 工程，支持 Android、iOS、macOS 和 OHOS。工程从 TiRTC 主仓的 `tirtc_flutter` Example 生成，并固定引用已经公开发布的 `tirtc_flutter: 2.4.0-alpha.2`。
+这是一个可以独立运行的 Flutter 工程，支持 Android、iOS、macOS 和 OHOS。工程从 TiRTC 主仓的 `tirtc_flutter` Example 生成，并固定引用已经公开发布的 `tirtc_flutter: 2.4.0-alpha.3`。
 
 ## 运行
 
