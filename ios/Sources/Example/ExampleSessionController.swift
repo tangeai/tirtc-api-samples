@@ -1,6 +1,7 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import Photos
 import TiRTC
 
 @MainActor
@@ -48,7 +49,10 @@ final class ExampleSessionController: NSObject, ObservableObject {
                 && !shouldShutdownRuntime
         }
 
+        // Both cleanup entry points run off the main actor: an in-flight iOS frame may be waiting
+        // to present on the main thread while detachView waits for that frame to finish.
         func stopStreamingForConfigureRoute() {
+            _ = videoOutput?.detachView()
             if let conn {
                 _ = localAudioInput?.detach(connection: conn)
             }
@@ -66,6 +70,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
         }
 
         func cleanUp() {
+            _ = videoOutput?.detachView()
             if let conn {
                 _ = localAudioInput?.detach(connection: conn)
             }
@@ -142,6 +147,9 @@ final class ExampleSessionController: NSObject, ObservableObject {
     @Published var sessionStutterPeakSummary = "--"
     @Published var pendingSummary = "pending unavailable"
     @Published var isClientQRCodeScannerPresented = false
+    @Published var isMediaFileBusy = false
+    @Published var isRecording = false
+    @Published var hasLatestMedia = false
 
     let statusLogURL: URL?
     let settingsStore: ExampleSettingsStore
@@ -151,6 +159,12 @@ final class ExampleSessionController: NSObject, ObservableObject {
     var clientLocalAudioInput: TiRtcAudioInput?
     var audioOutput: TiRtcAudioOutput?
     var videoOutput: TiRtcVideoOutput?
+    var recordingTask: TiRtcRecordingTask?
+    private var latestRecordingFile: TiRtcRecordingFile?
+    private var latestSnapshotFile: TiRtcSnapshotFile?
+    private var ownedRecordingFiles: [TiRtcRecordingFile] = []
+    private var ownedSnapshotFiles: [TiRtcSnapshotFile] = []
+    private var mediaOperationTask: Task<Void, Never>?
     weak var platformVideoView: TiRtcPlatformView?
     weak var attachedVideoOutput: TiRtcVideoOutput?
     weak var attachedVideoView: TiRtcPlatformView?
@@ -298,12 +312,24 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func restartClient() {
-        disconnect()
-        startClient()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.cleanUpLocalMediaFiles()
+            await self.finishDisconnect()
+            self.startClient()
+        }
     }
 
     func stopClient() {
         setStatus("teardown_requested flow=client")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.cleanUpLocalMediaFiles()
+            self.finishStopClient()
+        }
+    }
+
+    private func finishStopClient() {
         let resources = takeClientCleanupResources(shouldShutdownRuntime: false)
         if let resources {
             retiredClientCleanupResources.append(resources)
@@ -379,6 +405,128 @@ final class ExampleSessionController: NSObject, ObservableObject {
         audioOutputMuteStartedAt = nil
         audioOutputMuteStartDurationMs = nil
         audioOutputMuteStartStatsMs = nil
+    }
+
+    func toggleRecording() {
+        guard !isMediaFileBusy else { return }
+        if let task = recordingTask {
+            isMediaFileBusy = true
+            mediaOperationTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                let result = await task.stop()
+                self.recordingTask = nil
+                self.isRecording = false
+                self.isMediaFileBusy = false
+                if result.code == 0 {
+                    self.latestRecordingFile = result.file
+                    self.latestSnapshotFile = nil
+                    self.hasLatestMedia = result.file != nil
+                    if let file = result.file {
+                        self.ownedRecordingFiles.append(file)
+                    }
+                }
+                self.setStatus(
+                    result.code == 0
+                        ? "本地保存完成 · \(result.file?.path ?? "")"
+                        : "本地保存失败 · code=\(result.code)")
+                self.appendStatusLogLine(
+                    "media_recording_stop code=\(result.code) duration_ms=\(result.file?.durationMs ?? -1)")
+                self.mediaOperationTask = nil
+            }
+            return
+        }
+        guard let conn, let configuration = activeClientConfiguration else {
+            setStatus("开始本地保存失败 · 播放未就绪")
+            return
+        }
+        let result = conn.startRecording(
+            videoStreamId: Int32(configuration.videoStreamId),
+            audioStreamId: NSNumber(value: configuration.audioStreamId))
+        guard result.code == 0, let task = result.task else {
+            setStatus("开始本地保存失败 · code=\(result.code)")
+            return
+        }
+        recordingTask = task
+        isRecording = true
+        setStatus("正在本地保存")
+        appendStatusLogLine("media_recording_start code=0")
+    }
+
+    func takeSnapshot() {
+        guard !isMediaFileBusy, let videoOutput else { return }
+        isMediaFileBusy = true
+        mediaOperationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await videoOutput.takeSnapshot()
+            guard result.code == 0, let file = result.file else {
+                self.isMediaFileBusy = false
+                self.setStatus("截图失败 · code=\(result.code)")
+                self.appendStatusLogLine("media_snapshot_complete code=\(result.code)")
+                self.mediaOperationTask = nil
+                return
+            }
+            self.latestSnapshotFile = file
+            self.latestRecordingFile = nil
+            self.hasLatestMedia = true
+            self.ownedSnapshotFiles.append(file)
+            self.isMediaFileBusy = false
+            self.setStatus("截图完成 · \(file.path)")
+            self.appendStatusLogLine("media_snapshot_complete code=0")
+            self.mediaOperationTask = nil
+        }
+    }
+
+    func saveLatestToGallery() {
+        guard !isMediaFileBusy else { return }
+        let recording = latestRecordingFile
+        let snapshot = latestSnapshotFile
+        guard let path = recording?.path ?? snapshot?.path else { return }
+        isMediaFileBusy = true
+        mediaOperationTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            let publishCode = await Self.publishToPhotos(path: path, isVideo: recording != nil)
+            let deleteCode: Int32
+            if publishCode == 0 {
+                deleteCode = recording != nil ? await recording!.delete() : await snapshot!.delete()
+            } else {
+                deleteCode = publishCode
+            }
+            if deleteCode == 0 {
+                self.ownedRecordingFiles.removeAll { $0.path == path }
+                self.ownedSnapshotFiles.removeAll { $0.path == path }
+                self.latestRecordingFile = nil
+                self.latestSnapshotFile = nil
+                self.hasLatestMedia = false
+            }
+            self.isMediaFileBusy = false
+            self.setStatus(deleteCode == 0 ? "已保存到系统相册" : "保存到相册失败 · code=\(deleteCode)")
+            self.appendStatusLogLine("media_gallery_save code=\(deleteCode)")
+            self.mediaOperationTask = nil
+        }
+    }
+
+    nonisolated private static func publishToPhotos(path: String, isVideo: Bool) async -> Int32 {
+        var authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
+        if authorization == .notDetermined {
+            authorization = await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .addOnly) {
+                    continuation.resume(returning: $0)
+                }
+            }
+        }
+        guard authorization == .authorized || authorization == .limited else { return -1 }
+        return await withCheckedContinuation { continuation in
+            PHPhotoLibrary.shared().performChanges {
+                let url = URL(fileURLWithPath: path)
+                if isVideo {
+                    _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                } else {
+                    _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                }
+            } completionHandler: { success, _ in
+                continuation.resume(returning: success ? 0 : -1)
+            }
+        }
     }
 
     private func startClientLocalAudio() {
@@ -507,14 +655,28 @@ final class ExampleSessionController: NSObject, ObservableObject {
 
     func disconnect() {
         appendStatusLogLine("teardown_requested flow=client")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.cleanUpLocalMediaFiles()
+            await self.finishDisconnect()
+        }
+    }
+
+    private func finishDisconnect() async {
         let resources = takeClientCleanupResources(shouldShutdownRuntime: initialized)
-        resources?.cleanUp()
+        if let resources {
+            await withCheckedContinuation { continuation in
+                Self.clientCleanupQueue.async {
+                    resources.cleanUp()
+                    continuation.resume()
+                }
+            }
+        }
         clearUserFacingError()
         setStatus("cleaned")
     }
 
     private func takeClientCleanupResources(shouldShutdownRuntime: Bool) -> ClientCleanupResources? {
-        _ = videoOutput?.detachView()
         attachedVideoOutput = nil
         attachedVideoView = nil
         conn?.delegate = nil
@@ -540,6 +702,43 @@ final class ExampleSessionController: NSObject, ObservableObject {
             initialized = false
         }
         return resources.isEmpty ? nil : resources
+    }
+
+    private func cleanUpLocalMediaFiles() async {
+        if let activeOperation = mediaOperationTask {
+            await activeOperation.value
+        }
+        isMediaFileBusy = true
+        if let task = recordingTask {
+            recordingTask = nil
+            isRecording = false
+            let result = await task.stop()
+            if let file = result.file {
+                ownedRecordingFiles.append(file)
+            }
+            appendStatusLogLine(
+                "media_recording_teardown code=\(result.code) duration_ms=\(result.file?.durationMs ?? -1)")
+        }
+        var remainingRecordingFiles: [TiRtcRecordingFile] = []
+        for file in ownedRecordingFiles {
+            if await file.delete() != 0 {
+                remainingRecordingFiles.append(file)
+            }
+        }
+        ownedRecordingFiles = remainingRecordingFiles
+        var remainingSnapshotFiles: [TiRtcSnapshotFile] = []
+        for file in ownedSnapshotFiles {
+            if await file.delete() != 0 {
+                remainingSnapshotFiles.append(file)
+            }
+        }
+        ownedSnapshotFiles = remainingSnapshotFiles
+        if ownedRecordingFiles.isEmpty && ownedSnapshotFiles.isEmpty {
+            latestRecordingFile = nil
+            latestSnapshotFile = nil
+            hasLatestMedia = false
+        }
+        isMediaFileBusy = false
     }
 
     private func scheduleClientStop(_ resources: ClientCleanupResources?) {

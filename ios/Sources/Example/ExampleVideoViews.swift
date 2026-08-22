@@ -38,32 +38,7 @@ struct ExampleClientPlayer: View {
                 }
             },
             bottomAction: {
-                HStack(spacing: 12) {
-                    ExampleLocalAudioControlButton(
-                        enabled: session.conn?.state == .connected,
-                        busy: session.isClientLocalAudioBusy,
-                        running: session.isClientLocalAudioRunning
-                    ) {
-                        session.toggleClientLocalAudio()
-                    }
-                    .accessibilityIdentifier("client.local_audio")
-                    .accessibilityValue(session.clientLocalAudioStatus)
-                    ExampleAudioOutputVolumeButton(
-                        enabled: session.conn?.state == .connected,
-                        muted: session.isAudioOutputMuted
-                    ) {
-                        session.toggleAudioOutputVolume()
-                    }
-                    .accessibilityIdentifier("client.audio_output_volume")
-                    .accessibilityValue(session.audioOutputVolumeStatus)
-                    ExampleDownlinkControlButton(
-                        connecting: session.isClientConnecting,
-                        playing: session.isClientVideoRendering
-                    ) {
-                        session.stopClient()
-                    }
-                    .accessibilityIdentifier("client.stop")
-                }
+                ExamplePlayerControls(session: session)
             },
             showBottomSafeArea: true,
             statusValue: session.statusText,
@@ -74,7 +49,111 @@ struct ExampleClientPlayer: View {
         )
         .sheet(isPresented: $session.isCommandPanelPresented) {
             ExampleCommandPanel(session: session)
+                .modifier(ExampleCommandPanelDetentModifier())
         }
+    }
+}
+
+private struct ExamplePlayerControls: View {
+    @ObservedObject var session: ExampleSessionController
+
+    var body: some View {
+        if #available(macOS 13.0, iOS 16.0, *) {
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 12) { controls }
+                VStack(alignment: .trailing, spacing: 12) {
+                    HStack(spacing: 12) { mediaControls }
+                    HStack(spacing: 12) { playbackControls }
+                }
+            }
+        } else {
+            VStack(alignment: .trailing, spacing: 12) {
+                HStack(spacing: 12) { mediaControls }
+                HStack(spacing: 12) { playbackControls }
+            }
+        }
+    }
+
+    @ViewBuilder private var controls: some View {
+        mediaControls
+        playbackControls
+    }
+
+    @ViewBuilder private var mediaControls: some View {
+        ExampleMediaIconButton(
+            systemImage: session.isRecording ? "stop.circle" : "record.circle",
+            enabled: session.isClientVideoRendering && !session.isMediaFileBusy,
+            accessibilityLabel: session.isRecording ? "停止本地保存" : "开始本地保存"
+        ) { session.toggleRecording() }
+        .accessibilityIdentifier("client.recording")
+        ExampleMediaIconButton(
+            systemImage: "camera",
+            enabled: session.isClientVideoRendering && !session.isMediaFileBusy,
+            accessibilityLabel: "截图"
+        ) { session.takeSnapshot() }
+        .accessibilityIdentifier("client.snapshot")
+        ExampleMediaIconButton(
+            systemImage: "photo.on.rectangle.angled",
+            enabled: session.hasLatestMedia && !session.isMediaFileBusy,
+            accessibilityLabel: "保存到系统相册"
+        ) { session.saveLatestToGallery() }
+        .accessibilityIdentifier("client.gallery")
+    }
+
+    @ViewBuilder private var playbackControls: some View {
+        ExampleAudioOutputVolumeButton(
+            enabled: session.conn?.state == .connected,
+            muted: session.isAudioOutputMuted
+        ) { session.toggleAudioOutputVolume() }
+        .accessibilityIdentifier("client.audio_output_volume")
+        .accessibilityValue(session.audioOutputVolumeStatus)
+        ExampleLocalAudioControlButton(
+            enabled: session.conn?.state == .connected,
+            busy: session.isClientLocalAudioBusy,
+            running: session.isClientLocalAudioRunning
+        ) { session.toggleClientLocalAudio() }
+        .accessibilityIdentifier("client.local_audio")
+        .accessibilityValue(session.clientLocalAudioStatus)
+        ExampleDownlinkControlButton(
+            connecting: session.isClientConnecting,
+            playing: session.isClientVideoRendering
+        ) { session.stopClient() }
+        .accessibilityIdentifier("client.stop")
+    }
+}
+
+private struct ExampleCommandPanelDetentModifier: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        if #available(iOS 16.0, macOS 13.0, *) {
+            content
+                .presentationDetents([.fraction(0.5)])
+                .presentationDragIndicator(.visible)
+        } else {
+            content
+        }
+    }
+}
+
+private struct ExampleMediaIconButton: View {
+    let systemImage: String
+    let enabled: Bool
+    let accessibilityLabel: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: systemImage)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(ExampleColors.primary)
+                .frame(width: 48, height: 48)
+                .background(ExampleColors.primary.opacity(0.16))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .opacity(enabled ? 1 : 0.55)
+        .accessibilityLabel(accessibilityLabel)
     }
 }
 
@@ -311,90 +390,89 @@ private struct ExampleCenterLoading: View {
 
 private struct ExampleMetricsOverlay: View {
     @ObservedObject var session: ExampleSessionController
+    @State private var expanded = true
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ExampleStateProbe(identifier: "client.metrics.overlay", value: session.metricsSummary)
-            ExampleStateProbe(identifier: "client.metrics.debug_snapshot", value: session.debugSummary)
-            Text("播放调试信息")
-                .font(.system(size: 10, weight: .heavy))
-                .foregroundColor(.white)
-                .underline()
-                .padding(.bottom, 10)
-            ExampleMetricLine(
-                identifier: "client.metrics.media_parameters",
-                label: "音视频参数",
-                value: session.mediaParameterSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.video_receive",
-                label: "视频接收",
-                value: session.videoReceiveSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.audio_receive",
-                label: "音频接收",
-                value: session.audioReceiveSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.audio_stutter",
-                label: "音频卡顿",
-                value: session.audioStutterSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.video_output_latency",
-                label: "视频输出延迟",
-                value: session.videoOutputLatencySummary,
-                maxLines: 2)
-            ExampleMetricLine(
-                identifier: "client.metrics.audio_output_latency",
-                label: "音频输出延迟",
-                value: session.audioOutputLatencySummary,
-                maxLines: 2)
-            ExampleMetricLine(
-                identifier: "client.metrics.connection_duration",
-                label: "连接耗时",
-                value: session.connectionDurationSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.first_frame_duration",
-                label: "首帧耗时",
-                value: session.firstFrameDurationSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.session_stutter_ratio",
-                label: "本次播放卡顿占比",
-                value: session.sessionStutterRatioSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.session_stutter_count",
-                label: "本次播放卡顿次数",
-                value: session.sessionStutterCountSummary)
-            ExampleMetricLine(
-                identifier: "client.metrics.session_stutter_peak",
-                label: "本次播放最长卡顿",
-                value: session.sessionStutterPeakSummary)
-            HStack {
-                Spacer()
-                Button(action: {
-                    session.refreshDiagnostics()
-                    session.isMetricsExplanationPresented = true
-                }) {
-                    Image(systemName: "questionmark.circle")
-                        .font(.system(size: 18))
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.white)
-                .frame(width: 24, height: 24)
+        if !expanded {
+            Button(action: { expanded = true }) {
+                Label("即时统计", systemImage: "chart.bar.fill")
+                    .font(.system(size: 10, weight: .heavy))
+                    .foregroundColor(Color(red: 0.31, green: 0.53, blue: 0.85))
+                    .padding(.horizontal, 12)
+                    .frame(height: 26)
+                    .background(Color.white)
+                    .clipShape(Capsule())
+                    .shadow(color: Color.black.opacity(0.14), radius: 10, y: 3)
             }
-            .padding(.top, 4)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 10)
-        .background(Color.black.opacity(0.8))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .shadow(color: Color.black.opacity(0.27), radius: 12, y: 4)
-        .padding(.horizontal, 18)
-        .alert(isPresented: $session.isMetricsExplanationPresented) {
-            Alert(
-                title: Text("调试信息"),
-                message: Text(session.metricsSummary + "\n" + session.debugSummary),
-                dismissButton: .default(Text("OK"))
-            )
+            .buttonStyle(.plain)
+        } else {
+            VStack(alignment: .leading, spacing: 0) {
+                ExampleStateProbe(identifier: "client.metrics.overlay", value: session.metricsSummary)
+                ExampleStateProbe(identifier: "client.metrics.debug_snapshot", value: session.debugSummary)
+                HStack(spacing: 6) {
+                    Text("即时统计")
+                        .font(.system(size: 11, weight: .black))
+                        .foregroundColor(Color.black.opacity(0.87))
+                    Spacer()
+                    Button(action: { session.isMetricsExplanationPresented = true }) {
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 16))
+                            .foregroundColor(ExampleColors.primary)
+                    }
+                    .buttonStyle(.plain)
+                    Button(action: { expanded = false }) {
+                        Label("收起", systemImage: "chevron.up")
+                            .font(.system(size: 10, weight: .heavy))
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 8)
+                            .frame(height: 18)
+                            .background(Color(red: 0.31, green: 0.53, blue: 0.85))
+                            .clipShape(Capsule())
+                    }
+                    .buttonStyle(.plain)
+                }
+                .padding(.bottom, 6)
+                ExampleMetricLine(
+                    identifier: "client.metrics.media_parameters",
+                    label: "媒体参数",
+                    value: session.mediaParameterSummary)
+                ExampleMetricLine(
+                    identifier: "client.metrics.video_receive",
+                    label: "视频接收",
+                    value: session.videoReceiveSummary)
+                ExampleMetricLine(
+                    identifier: "client.metrics.audio_receive",
+                    label: "音频接收",
+                    value: session.audioReceiveSummary)
+                ExampleMetricLine(
+                    identifier: "client.metrics.latency", label: "估算延迟",
+                    value: "视频 \(session.videoOutputLatencySummary) · 音频 \(session.audioOutputLatencySummary)")
+                ExampleMetricLine(
+                    identifier: "client.metrics.startup", label: "启动耗时",
+                    value: "连接 \(session.connectionDurationSummary) · 首帧 \(session.firstFrameDurationSummary)")
+                ExampleMetricLine(
+                    identifier: "client.metrics.stutter", label: "卡顿统计",
+                    value:
+                        "视频比例 \(session.sessionStutterRatioSummary) · \(session.sessionStutterCountSummary) / 最长 \(session.sessionStutterPeakSummary) · 音频 \(session.audioStutterSummary)",
+                    maxLines: 2
+                )
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .frame(maxWidth: 430)
+            .background(Color.white)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .shadow(color: Color.black.opacity(0.16), radius: 14, y: 5)
+            .alert(isPresented: $session.isMetricsExplanationPresented) {
+                Alert(
+                    title: Text("指标说明"),
+                    message: Text(
+                        "连接耗时表示连接建立用时；首帧等待从连接成功统计到首个视频帧显示。播放卡顿从首帧成功显示后统计，接收码率、视频 FPS 与音频 PPS 来自 Runtime 最近采样窗口；估算延迟来自当前输出延迟估算。"
+                    ),
+                    dismissButton: .default(Text("OK"))
+                )
+            }
         }
     }
 }
@@ -407,14 +485,14 @@ private struct ExampleMetricLine: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 0) {
-            Text("[\(label)] ")
+            Text("\(label)：")
                 .font(.system(size: 10, weight: .heavy))
-                .foregroundColor(.white)
+                .foregroundColor(ExampleColors.primary)
                 .lineLimit(1)
                 .fixedSize()
             Text(value)
                 .font(.system(size: 10, weight: .medium))
-                .foregroundColor(.white)
+                .foregroundColor(Color.black.opacity(0.8))
                 .lineLimit(maxLines)
                 .truncationMode(.tail)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -422,7 +500,7 @@ private struct ExampleMetricLine: View {
                 .accessibilityLabel(value)
                 .accessibilityValue(value)
         }
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
     }
 }
 
@@ -498,7 +576,7 @@ private struct ExampleLocalAudioControlButton: View {
             }
             .foregroundColor(running ? .white : ExampleColors.primary)
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(running ? Color.orange.opacity(0.95) : ExampleColors.surface)
             .clipShape(Capsule())
         }
@@ -516,13 +594,13 @@ private struct ExampleAudioOutputVolumeButton: View {
     var body: some View {
         Button(action: action) {
             Label(
-                muted ? "恢复声音" : "静音播放",
+                muted ? "恢复声音" : "静音",
                 systemImage: muted ? "speaker.wave.2.fill" : "speaker.slash.fill"
             )
             .font(.system(size: 14, weight: .semibold))
             .foregroundColor(muted ? .white : ExampleColors.primary)
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 16)
             .background(muted ? Color.orange.opacity(0.95) : ExampleColors.surface)
             .clipShape(Capsule())
         }

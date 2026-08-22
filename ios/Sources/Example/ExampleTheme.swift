@@ -9,7 +9,7 @@ enum ExampleTheme {
     static let brandTextHex = "#767676"
     static let textPrimaryHex = "#666666"
     static let textSecondaryHex = "#848282"
-    static let inputSurfaceHex = "#F4F1EA"
+    static let inputSurfaceHex = "#FFFFFF"
     static let inputBorderHex = "#E1DBCF"
     static let videoBackgroundHex = "#252525"
     static let failureHex = "#B42318"

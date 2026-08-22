@@ -2,6 +2,26 @@ import SwiftUI
 
 struct ExampleClientConfigure: View {
     @ObservedObject var session: ExampleSessionController
+    @State private var isStorePresented = false
+    @State private var selectedProduct = "rtc"
+    @State private var storeAppId: String
+    @State private var storeEndpoint: String
+    @State private var storeToken: String
+    @State private var storeAudioChannelId: String
+    @State private var storeVideoChannelId: String
+    @State private var resolvedStoreToken = ""
+    @State private var storeOpening = false
+    @State private var storeOpenStatus = ""
+    @State private var isStoreQRCodeScannerPresented = false
+
+    init(session: ExampleSessionController) {
+        self.session = session
+        _storeAppId = State(initialValue: session.appId)
+        _storeEndpoint = State(initialValue: session.endpoint)
+        _storeToken = State(initialValue: session.token)
+        _storeAudioChannelId = State(initialValue: session.audioStreamId)
+        _storeVideoChannelId = State(initialValue: session.videoStreamId)
+    }
 
     var body: some View {
         #if os(iOS)
@@ -10,6 +30,12 @@ struct ExampleClientConfigure: View {
                     ExampleQRCodeScanner { payload in
                         session.isClientQRCodeScannerPresented = false
                         session.applyClientQRCodePayload(payload)
+                    }
+                }
+                .sheet(isPresented: $isStoreQRCodeScannerPresented) {
+                    ExampleQRCodeScanner { payload in
+                        isStoreQRCodeScannerPresented = false
+                        applyStoreQRCodePayload(payload)
                     }
                 }
         #else
@@ -21,79 +47,135 @@ struct ExampleClientConfigure: View {
         ExampleConfigureBackground {
             VStack(spacing: 0) {
                 ExampleConfigureHeader(
-                    scanSupported: ExamplePlatform.scanSupported,
                     primaryAction: {
                         session.isSettingsPresented.toggle()
-                    },
-                    scanAction: {
-                        session.isClientQRCodeScannerPresented = true
                     }
                 )
-                .padding(.bottom, 20)
+                .padding(.bottom, 16)
 
+                ExampleProductTabs(selectedProduct: $selectedProduct)
+                    .padding(.bottom, 20)
+                    .accessibilityIdentifier("product.tabs")
                 ExampleConfigureCard {
                     VStack(spacing: 16) {
-                        ExampleTextInput(
-                            "app_id",
-                            hint: "TiRTC 应用标识，进入播放页前必须提供。",
-                            text: $session.appId,
-                            accessibilityIdentifier: "client.app_id"
-                        )
-                        ExampleTextInput(
-                            "endpoint",
-                            hint: "接入的云端环境，留空则使用默认环境。",
-                            text: $session.endpoint,
-                            accessibilityIdentifier: "client.endpoint"
-                        )
-                        ExampleTextInput(
-                            "remote_id",
-                            hint: "待连接的远端目标 ID",
-                            text: $session.remoteId,
-                            accessibilityIdentifier: "client.remote_id"
-                        )
-                        HStack(spacing: 16) {
+                        if selectedProduct == "rtc" {
                             ExampleTextInput(
-                                "audio_stream_id",
-                                hint: "音频流 ID，默认 10",
-                                text: $session.audioStreamId,
-                                accessibilityIdentifier: "client.audio_stream_id"
+                                "endpoint",
+                                hint: "接入的云端环境，留空则使用默认环境。",
+                                text: $session.endpoint,
+                                accessibilityIdentifier: "client.endpoint"
                             )
                             ExampleTextInput(
-                                "video_stream_id",
-                                hint: "视频流 ID，默认 11",
-                                text: $session.videoStreamId,
-                                accessibilityIdentifier: "client.video_stream_id"
+                                "app_id",
+                                hint: "TiRTC 应用标识，进入播放页前必须提供。",
+                                text: $session.appId,
+                                accessibilityIdentifier: "client.app_id"
                             )
-                        }
-                        ExampleSegmentedField("token_source") {
-                            Picker("token_source", selection: $session.tokenSource) {
-                                Text("Issuer").tag(ExampleTokenSource.issuer.rawValue)
-                                Text("One-time").tag(ExampleTokenSource.oneTime.rawValue)
+                            ExampleTextInput(
+                                "remote_id",
+                                hint: "待连接的远端目标 ID",
+                                text: $session.remoteId,
+                                accessibilityIdentifier: "client.remote_id"
+                            )
+                            HStack(spacing: 16) {
+                                ExampleTextInput(
+                                    "audio_stream_id",
+                                    hint: "音频流 ID，默认 10",
+                                    text: $session.audioStreamId,
+                                    accessibilityIdentifier: "client.audio_stream_id"
+                                )
+                                ExampleTextInput(
+                                    "video_stream_id",
+                                    hint: "视频流 ID，默认 11",
+                                    text: $session.videoStreamId,
+                                    accessibilityIdentifier: "client.video_stream_id"
+                                )
                             }
-                            .pickerStyle(.segmented)
-                            .accessibilityIdentifier("client.token_source")
-                        }
-                        if (ExampleTokenSource(rawValue: session.tokenSource) ?? .oneTime) == .issuer {
+                            HStack(alignment: .top, spacing: 10) {
+                                ExampleTextInput(
+                                    "一次性连接 Token",
+                                    hint: "粘贴 v1.xxx 一次性 Token，或点右侧扫码。",
+                                    text: $session.token,
+                                    accessibilityIdentifier: "client.token"
+                                )
+                                ExampleInlineScanButton(
+                                    enabled: ExamplePlatform.scanSupported,
+                                    action: { session.isClientQRCodeScannerPresented = true }
+                                )
+                            }
+                            Text("或")
+                                .font(.system(size: 12, weight: .semibold))
+                                .foregroundColor(ExampleColors.textSecondary)
+                                .frame(maxWidth: .infinity)
                             ExampleTextInput(
-                                "token_issuer_base_url",
-                                hint: "Token issuer 地址；根路径会请求 /v1/tokens。",
+                                "TiRTC DevTools 服务地址",
+                                hint: "例如 http://192.168.1.10:8966",
                                 text: $session.tokenIssuerBaseUrl,
                                 accessibilityIdentifier: "client.token_issuer_base_url"
                             )
+                            ExamplePrimaryButton(title: "开始连接、拉流播放") {
+                                session.tokenSource =
+                                    session.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    ? ExampleTokenSource.issuer.rawValue : ExampleTokenSource.oneTime.rawValue
+                                session.startClient()
+                            }
+                            .padding(.top, 4)
+                            .accessibilityIdentifier("client.enter_player")
                         } else {
                             ExampleTextInput(
-                                "one_time_token",
-                                hint: "进行一次连接所需的有效 token",
-                                text: $session.token,
-                                minHeight: 110,
-                                accessibilityIdentifier: "client.token"
+                                "app_id",
+                                hint: "TiStore 应用标识，进入播放页前必须提供。",
+                                text: $storeAppId,
+                                accessibilityIdentifier: "store.app_id"
                             )
+                            ExampleTextInput(
+                                "endpoint",
+                                hint: "接入的云端环境，留空则使用默认环境。",
+                                text: $storeEndpoint,
+                                accessibilityIdentifier: "store.endpoint"
+                            )
+                            HStack(alignment: .top, spacing: 10) {
+                                ExampleTextInput(
+                                    "token",
+                                    hint: "粘贴云录像客户端 Token，或点右侧扫码。",
+                                    text: $storeToken,
+                                    secure: true,
+                                    accessibilityIdentifier: "store.token"
+                                )
+                                ExampleInlineScanButton(
+                                    enabled: ExamplePlatform.scanSupported,
+                                    action: { isStoreQRCodeScannerPresented = true }
+                                )
+                            }
+                            HStack(spacing: 16) {
+                                ExampleTextInput(
+                                    "audio_channel_id",
+                                    hint: "音频 Channel，0..255",
+                                    text: $storeAudioChannelId,
+                                    accessibilityIdentifier: "store.audio_channel_id"
+                                )
+                                ExampleTextInput(
+                                    "video_channel_id",
+                                    hint: "视频 Channel，0..255",
+                                    text: $storeVideoChannelId,
+                                    accessibilityIdentifier: "store.video_channel_id"
+                                )
+                            }
+                            if !storeOpenStatus.isEmpty {
+                                Text(storeOpenStatus)
+                                    .font(.system(size: 12))
+                                    .foregroundColor(ExampleColors.textSecondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .accessibilityIdentifier("store.configure.status")
+                            }
+                            ExamplePrimaryButton(title: storeOpening ? "连接中…" : "播放云录像") {
+                                openStore()
+                            }
+                            .padding(.top, 4)
+                            .accessibilityIdentifier("store.enter_player")
+                            .disabled(!storeConfigurationValid || storeOpening)
+                            .opacity(storeConfigurationValid && !storeOpening ? 1 : 0.55)
                         }
-                        ExamplePrimaryButton(title: "进入播放页面") {
-                            session.startClient()
-                        }
-                        .padding(.top, 4)
-                        .accessibilityIdentifier("client.enter_player")
                     }
                 }
             }
@@ -103,6 +185,101 @@ struct ExampleClientConfigure: View {
         .sheet(isPresented: $session.isSettingsPresented) {
             ExampleSettingsSheet(session: session)
         }
+        .sheet(isPresented: $isStorePresented) {
+            TiStoreExampleView(
+                appId: storeAppId,
+                endpoint: storeEndpoint,
+                token: resolvedStoreToken,
+                audioChannelId: UInt8(storeAudioChannelId) ?? ExampleSessionController.StreamDefaults.audio,
+                videoChannelId: UInt8(storeVideoChannelId) ?? ExampleSessionController.StreamDefaults.video
+            )
+        }
+    }
+
+    private var storeConfigurationValid: Bool {
+        !storeAppId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !storeToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && UInt8(storeAudioChannelId) != nil
+            && UInt8(storeVideoChannelId) != nil
+    }
+
+    private func openStore() {
+        guard storeConfigurationValid, !storeOpening else { return }
+        storeOpening = true
+        storeOpenStatus = ""
+        Task { @MainActor in
+            defer { storeOpening = false }
+            do {
+                resolvedStoreToken = try await resolveStoreToken(storeToken)
+                isStorePresented = true
+            } catch {
+                #if DEBUG
+                    let diagnostic = error as NSError
+                    storeOpenStatus =
+                        "Token 获取失败，请检查地址与网络（\(diagnostic.domain):\(diagnostic.code)）"
+                #else
+                    storeOpenStatus = "Token 获取失败，请检查地址与网络"
+                #endif
+            }
+        }
+    }
+
+    private func resolveStoreToken(_ candidate: String) async throws -> String {
+        let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
+            scheme == "http" || scheme == "https"
+        else {
+            return trimmed
+        }
+        for attempt in 0..<20 {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                guard let response = response as? HTTPURLResponse,
+                    (200..<300).contains(response.statusCode),
+                    let object = try JSONSerialization.jsonObject(with: data) as? [String: String],
+                    let token = object["token"]?.trimmingCharacters(in: .whitespacesAndNewlines),
+                    !token.isEmpty
+                else {
+                    throw URLError(.cannotParseResponse)
+                }
+                return token
+            } catch let error as URLError
+                where attempt < 19
+                && [
+                    URLError.notConnectedToInternet,
+                    .networkConnectionLost,
+                    .cannotConnectToHost,
+                    .timedOut,
+                    .dataNotAllowed,
+                ].contains(error.code)
+            {
+                try await Task<Never, Never>.sleep(nanoseconds: 500_000_000)
+            }
+        }
+        throw URLError(.cannotConnectToHost)
+    }
+
+    private func applyStoreQRCodePayload(_ payload: String) {
+        let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard trimmed.first == "{" else {
+            storeToken = trimmed
+            storeOpenStatus = "云录像 Token 已由扫码填入"
+            return
+        }
+        guard let data = trimmed.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            Set(object.keys).isSubset(of: ["app_id", "endpoint", "token"]),
+            let token = object["token"] as? String,
+            !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else {
+            storeOpenStatus = "二维码内容无效，请使用云录像客户端 Token"
+            return
+        }
+        storeToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let appId = object["app_id"] as? String, !appId.isEmpty { storeAppId = appId }
+        if let endpoint = object["endpoint"] as? String { storeEndpoint = endpoint }
+        storeOpenStatus = "云录像配置已由扫码填入"
     }
 }
 
@@ -163,31 +340,72 @@ private struct ExampleConfigureCard<Content: View>: View {
 }
 
 private struct ExampleConfigureHeader: View {
-    let scanSupported: Bool
     let primaryAction: () -> Void
-    let scanAction: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Text("Ti RTC")
-                .font(.system(size: 22, weight: .bold))
-                .foregroundColor(ExampleColors.brandText)
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Ti RTC")
+                    .font(.system(size: 22, weight: .bold))
+                    .foregroundColor(ExampleColors.brandText)
+                Text("Based on Darwin")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(ExampleColors.textSecondary)
+            }
             Spacer()
             Button(action: primaryAction) {
-                Image(systemName: "gearshape.fill")
-                    .font(.system(size: 16, weight: .semibold))
-                    .frame(width: 40, height: 40)
+                Text("偏好设置")
+                    .font(.system(size: 13, weight: .medium))
+                    .padding(.horizontal, 14)
+                    .frame(height: 40)
             }
-            .buttonStyle(ExamplePillIconButtonStyle())
-            if scanSupported {
-                Button(action: scanAction) {
-                    Label("扫一扫", systemImage: "qrcode.viewfinder")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(height: 40)
-                }
-                .buttonStyle(ExamplePillButtonStyle())
-            }
+            .buttonStyle(ExamplePillButtonStyle())
         }
+    }
+}
+
+private struct ExampleProductTabs: View {
+    @Binding var selectedProduct: String
+
+    var body: some View {
+        HStack(spacing: 0) {
+            tab("RTC", value: "rtc")
+            tab("云录像", value: "store")
+        }
+        .padding(3)
+        .frame(height: 44)
+        .background(ExampleColors.inputSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 20))
+    }
+
+    private func tab(_ title: String, value: String) -> some View {
+        Button(action: { selectedProduct = value }) {
+            Text(title)
+                .font(.system(size: 14, weight: selectedProduct == value ? .bold : .semibold))
+                .foregroundColor(selectedProduct == value ? .white : ExampleColors.textSecondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(selectedProduct == value ? ExampleColors.primary : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: 17))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct ExampleInlineScanButton: View {
+    let enabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button("扫码", action: action)
+            .buttonStyle(.plain)
+            .font(.system(size: 13, weight: .bold))
+            .foregroundColor(enabled ? ExampleColors.primary : ExampleColors.textSecondary)
+            .padding(.horizontal, 16)
+            .frame(minWidth: 56, minHeight: 56)
+            .background(ExampleColors.inputSurface)
+            .clipShape(RoundedRectangle(cornerRadius: 20))
+            .disabled(!enabled)
+            .opacity(enabled ? 1 : 0.55)
     }
 }
 
@@ -214,19 +432,22 @@ private struct ExampleTextInput: View {
     let title: String
     let hint: String
     @Binding var text: String
-    var minHeight: CGFloat = 58
+    var minHeight: CGFloat = 56
+    var secure = false
     let accessibilityIdentifier: String
 
     init(
         _ title: String,
         hint: String,
         text: Binding<String>,
-        minHeight: CGFloat = 58,
+        minHeight: CGFloat = 56,
+        secure: Bool = false,
         accessibilityIdentifier: String
     ) {
         self.title = title
         self.hint = hint
         self.minHeight = minHeight
+        self.secure = secure
         self.accessibilityIdentifier = accessibilityIdentifier
         _text = text
     }
@@ -245,11 +466,17 @@ private struct ExampleTextInput: View {
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                TextField("", text: $text)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundColor(ExampleColors.textPrimary)
-                    .accessibilityIdentifier(accessibilityIdentifier)
+                Group {
+                    if secure {
+                        SecureField("", text: $text)
+                    } else {
+                        TextField("", text: $text)
+                    }
+                }
+                .textFieldStyle(.plain)
+                .font(.system(size: 13))
+                .foregroundColor(ExampleColors.textPrimary)
+                .accessibilityIdentifier(accessibilityIdentifier)
             }
         }
         .padding(.horizontal, 20)
@@ -363,13 +590,14 @@ private struct ExampleSettingsSheet: View {
 private struct ExamplePrimaryButton: View {
     let title: String
     var background = ExampleColors.primary
+    var foreground = Color.white
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             Text(title)
                 .font(.system(size: 16, weight: .semibold))
-                .foregroundColor(.white)
+                .foregroundColor(foreground)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 18)
                 .padding(.horizontal, 24)

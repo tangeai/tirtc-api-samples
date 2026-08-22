@@ -13,15 +13,8 @@
     {
       "target": {
         "containerPath": "container:Example.xcodeproj",
-        "identifier": "66B5A8829C0E9AE001FC0DA6",
+        "identifier": "60060015292AE31D74FC7101",
         "name": "ExampleIOSUITests"
-      }
-    },
-    {
-      "target": {
-        "containerPath": "container:Example.xcodeproj",
-        "identifier": "EA3CAEFDDB9912005DDB9C1D",
-        "name": "ExampleMacOSUITests"
       }
     }
   ],

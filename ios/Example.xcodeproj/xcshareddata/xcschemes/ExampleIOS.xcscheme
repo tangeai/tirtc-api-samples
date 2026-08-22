@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "11E486029D4C5107E52807A2"
+   BlueprintIdentifier = "6386A0DC3DEB7219CD9B3C70"
    BuildableName = "Example.app"
    BlueprintName = "ExampleIOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -29,7 +29,7 @@
             buildForAnalyzing = "NO">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "66B5A8829C0E9AE001FC0DA6"
+   BlueprintIdentifier = "60060015292AE31D74FC7101"
    BuildableName = "ExampleIOSUITests.xctest"
    BlueprintName = "ExampleIOSUITests"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -57,7 +57,7 @@
             skipped = "NO">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "66B5A8829C0E9AE001FC0DA6"
+   BlueprintIdentifier = "60060015292AE31D74FC7101"
    BuildableName = "ExampleIOSUITests.xctest"
    BlueprintName = "ExampleIOSUITests"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -67,7 +67,7 @@
       <MacroExpansion>
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "11E486029D4C5107E52807A2"
+   BlueprintIdentifier = "6386A0DC3DEB7219CD9B3C70"
    BuildableName = "Example.app"
    BlueprintName = "ExampleIOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -88,7 +88,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "11E486029D4C5107E52807A2"
+   BlueprintIdentifier = "6386A0DC3DEB7219CD9B3C70"
    BuildableName = "Example.app"
    BlueprintName = "ExampleIOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -105,7 +105,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "11E486029D4C5107E52807A2"
+   BlueprintIdentifier = "6386A0DC3DEB7219CD9B3C70"
    BuildableName = "Example.app"
    BlueprintName = "ExampleIOS"
    ReferencedContainer = "container:Example.xcodeproj">

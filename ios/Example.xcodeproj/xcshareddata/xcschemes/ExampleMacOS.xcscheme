@@ -15,7 +15,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "803F046876826122B986F7A4"
+   BlueprintIdentifier = "D43567483AA836AF29427CAE"
    BuildableName = "Example.app"
    BlueprintName = "ExampleMacOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -29,7 +29,7 @@
             buildForAnalyzing = "NO">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "EA3CAEFDDB9912005DDB9C1D"
+   BlueprintIdentifier = "F786B6C0D1E0E902541AF0E7"
    BuildableName = "ExampleMacOSUITests.xctest"
    BlueprintName = "ExampleMacOSUITests"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -44,16 +44,8 @@
       shouldUseLaunchSchemeArgsEnv = "YES">
       <TestPlans>
          <TestPlanReference
-   reference = "container:DarwinIntegration.xctestplan"
-   default = "YES">
-</TestPlanReference>
-<TestPlanReference
-   reference = "container:DarwinExampleSmoke.xctestplan"
-   default = "NO">
-</TestPlanReference>
-<TestPlanReference
    reference = "container:DarwinIntegrationMacOS.xctestplan"
-   default = "NO">
+   default = "YES">
 </TestPlanReference>
 <TestPlanReference
    reference = "container:DarwinExampleSmokeMacOS.xctestplan"
@@ -65,7 +57,7 @@
             skipped = "NO">
             <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "EA3CAEFDDB9912005DDB9C1D"
+   BlueprintIdentifier = "F786B6C0D1E0E902541AF0E7"
    BuildableName = "ExampleMacOSUITests.xctest"
    BlueprintName = "ExampleMacOSUITests"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -75,7 +67,7 @@
       <MacroExpansion>
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "803F046876826122B986F7A4"
+   BlueprintIdentifier = "D43567483AA836AF29427CAE"
    BuildableName = "Example.app"
    BlueprintName = "ExampleMacOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -96,7 +88,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "803F046876826122B986F7A4"
+   BlueprintIdentifier = "D43567483AA836AF29427CAE"
    BuildableName = "Example.app"
    BlueprintName = "ExampleMacOS"
    ReferencedContainer = "container:Example.xcodeproj">
@@ -113,7 +105,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
    BuildableIdentifier = "primary"
-   BlueprintIdentifier = "803F046876826122B986F7A4"
+   BlueprintIdentifier = "D43567483AA836AF29427CAE"
    BuildableName = "Example.app"
    BlueprintName = "ExampleMacOS"
    ReferencedContainer = "container:Example.xcodeproj">

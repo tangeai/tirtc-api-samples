@@ -49,13 +49,13 @@ extension ExampleSessionController {
         debugSummary =
             "audio=\(audioDebug.code) audio_codec=\(audioSnapshot?.codec ?? 0) audio_sample_rate_hz=\(audioSnapshot?.sampleRate ?? 0) audio_channels=\(audioSnapshot?.channels ?? 0) video=\(videoDebug.code) video_codec=\(videoDebugSnapshot?.codec ?? 0) width=\(videoDebugSnapshot?.width ?? 0) height=\(videoDebugSnapshot?.height ?? 0) decoder_backend=\(videoDebugSnapshot?.resolvedDecoderBackend ?? 0)"
         mediaParameterSummary =
-            "分辨率 \(displayVideoSize(videoDebugSnapshot)) / 视频 \(displayVideoCodec(videoDebugSnapshot?.codec)) / 音频 \(displayAudioCodec(audioSnapshot?.codec)) / \(displayVideoDecoder(videoDebugSnapshot))"
+            "\(displayVideoSize(videoDebugSnapshot)) · \(displayVideoCodec(videoDebugSnapshot?.codec)) · \(displayAudioCodec(audioSnapshot?.codec)) · \(displayVideoDecoder(videoDebugSnapshot))"
         videoReceiveSummary =
-            "码率 \(formatKbps(videoMetricsSnapshot?.videoInputBitrateKbps)) / 接收 \(formatRate(videoMetricsSnapshot?.videoInputFps, suffix: "帧/秒")) / 渲染 \(formatRate(videoMetricsSnapshot?.videoRenderFps, suffix: "帧/秒"))"
+            "码率 \(formatKbps(videoMetricsSnapshot?.videoInputBitrateKbps)) · 接收 \(formatRate(videoMetricsSnapshot?.videoInputFps, suffix: "FPS"))"
         audioReceiveSummary =
-            "码率 \(formatKbps(audioMetricsSnapshot?.audioInputBitrateKbps)) / 音频包 \(formatRate(audioMetricsSnapshot?.audioInputPacketRate, suffix: "个/秒"))"
+            "码率 \(formatKbps(audioMetricsSnapshot?.audioInputBitrateKbps)) · PPS \(formatRate(audioMetricsSnapshot?.audioInputPacketRate, suffix: "/s"))"
         audioStutterSummary =
-            "累计 \(formatCount(audioMetricsSnapshot?.stutter.stutterCount)) / 总时长 \(formatDuration(audioMetricsSnapshot?.stutter.stutterTotalMs)) / 最长 \(formatDuration(audioMetricsSnapshot?.stutter.stutterPeakMs)) / \(audioOutputHealthText(audioMetricsSnapshot))"
+            "\(formatCount(audioMetricsSnapshot?.stutter.stutterCount)) / 最长 \(formatDuration(audioMetricsSnapshot?.stutter.stutterPeakMs))"
         videoOutputLatencySummary =
             formatOutputLatency(videoMetricsSnapshot?.estimatedOutputLatencyMs)
         audioOutputLatencySummary =
