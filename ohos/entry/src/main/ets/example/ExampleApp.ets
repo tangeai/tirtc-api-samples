@@ -35,6 +35,7 @@ import {
 } from './ExampleConfig';
 import { DownlinkRoleSession } from './DownlinkRoleSession';
 import { requestMicrophonePermission } from './ExamplePermissions';
+import { saveMediaFileToGallery } from './ExampleMediaGallery';
 import { ExampleRouteHost } from './ExampleRouteHost';
 import {
   DemoTokenSource,
@@ -43,6 +44,7 @@ import {
   parseDemoTokenSource,
   resolveDemoConnectionToken,
   tryParseDemoScanPayload,
+  tryParseDemoStoreScanPayload,
 } from './ExampleTokenAcquisition';
 
 @Component
@@ -54,10 +56,16 @@ export struct ExampleApp {
   @State private endpoint: string = appStorageString('tirtc.endpoint');
   @State private remoteId: string = appStorageString('tirtc.remote_id');
   @State private token: string = appStorageString('tirtc.token');
+  @State private storeAppId: string = appStorageString('tistore.app_id');
+  @State private storeEndpoint: string = appStorageString('tistore.endpoint');
+  @State private storeToken: string = appStorageString('tistore.app_token');
+  @State private storeAudioChannelId: string = appStorageString('tistore.audio_channel_id') || '10';
+  @State private storeVideoChannelId: string = appStorageString('tistore.video_channel_id') || '11';
   @State private tokenIssuerBaseUrl: string = appStorageString('tirtc.token_issuer_base_url');
   @State private tokenSource: DemoTokenSource = parseDemoTokenSource(appStorageString('tirtc.token_source'));
   @State private qrPayloadText: string = '';
   @State private qrErrorText: string = '';
+  @State private qrForStore: boolean = false;
   @State private audioStreamId: string = appStorageString('tirtc.audio_stream_id');
   @State private videoStreamId: string = appStorageString('tirtc.video_stream_id');
   @State private videoDecoderPreference: TiRtcVideoDecoderPreference =
@@ -74,7 +82,7 @@ export struct ExampleApp {
   @State private audioAnsLevel: TiRtcAudioAnsLevel = parseAudioAnsLevel(appStorageString('tirtc.audio_ans_level'));
   @State private consoleLogEnabled: boolean = parseConsoleLogEnabled(appStorageString('tirtc.console_log_enabled'));
   @State private statusLabel: string = '加载中';
-  @State private detailLabel: string = '填写参数后进入播放页面';
+  @State private detailLabel: string = '填写参数后开始连接';
   @State private connecting: boolean = false;
   @State private playing: boolean = false;
   @State private lastError: string = '';
@@ -83,6 +91,8 @@ export struct ExampleApp {
   @State private videoState: TiRtcVideoOutputState = TiRtcVideoOutputState.idle;
   @State private localAudioStarted: boolean = false;
   @State private audioOutputMuted: boolean = false;
+  @State private recording: boolean = false;
+  @State private mediaAvailable: boolean = false;
   @State private metricsLabel: string = '';
   @State private commandStatus: string = '';
   @State private streamMessageStatus: string = '';
@@ -102,10 +112,16 @@ export struct ExampleApp {
         appId: this.appId,
         remoteId: this.remoteId,
         token: this.token,
+        storeAppId: this.storeAppId,
+        storeEndpoint: this.storeEndpoint,
+        storeToken: this.storeToken,
+        storeAudioChannelId: this.storeAudioChannelId,
+        storeVideoChannelId: this.storeVideoChannelId,
         tokenIssuerBaseUrl: this.tokenIssuerBaseUrl,
         tokenSource: this.tokenSource,
         qrPayloadText: this.qrPayloadText,
         qrErrorText: this.qrErrorText,
+        qrForStore: this.qrForStore,
         audioStreamId: this.audioStreamId,
         videoStreamId: this.videoStreamId,
         videoDecoderPreference: this.videoDecoderPreference,
@@ -127,6 +143,8 @@ export struct ExampleApp {
         videoState: this.videoState,
         localAudioStarted: this.localAudioStarted,
         audioOutputMuted: this.audioOutputMuted,
+        recording: this.recording,
+        mediaAvailable: this.mediaAvailable,
         metricsLabel: this.metricsLabel,
         commandStatus: this.commandStatus,
         streamMessageStatus: this.streamMessageStatus,
@@ -153,10 +171,32 @@ export struct ExampleApp {
         },
         onTokenChanged: (value: string): void => {
           this.token = value;
+          if (value.trim().length > 0) this.tokenSource = DemoTokenSource.oneTime;
           writeAppStorageString('tirtc.token', value);
+        },
+        onStoreAppIdChanged: (value: string): void => {
+          this.storeAppId = value;
+          writeAppStorageString('tistore.app_id', value);
+        },
+        onStoreEndpointChanged: (value: string): void => {
+          this.storeEndpoint = value;
+          writeAppStorageString('tistore.endpoint', value);
+        },
+        onStoreTokenChanged: (value: string): void => {
+          this.storeToken = value;
+          writeAppStorageString('tistore.app_token', value);
+        },
+        onStoreAudioChannelIdChanged: (value: string): void => {
+          this.storeAudioChannelId = value;
+          writeAppStorageString('tistore.audio_channel_id', value);
+        },
+        onStoreVideoChannelIdChanged: (value: string): void => {
+          this.storeVideoChannelId = value;
+          writeAppStorageString('tistore.video_channel_id', value);
         },
         onTokenIssuerBaseUrlChanged: (value: string): void => {
           this.tokenIssuerBaseUrl = value;
+          if (value.trim().length > 0) this.tokenSource = DemoTokenSource.issuer;
           writeAppStorageString('tirtc.token_issuer_base_url', value);
         },
         onTokenSourceChanged: (value: DemoTokenSource): void => {
@@ -164,6 +204,13 @@ export struct ExampleApp {
           writeAppStorageString('tirtc.token_source', demoTokenSourceStorageValue(value));
         },
         onOpenQrScanner: (): void => {
+          this.qrForStore = false;
+          this.qrPayloadText = '';
+          this.qrErrorText = '';
+          this.view = ExampleView.qrScanner;
+        },
+        onOpenStoreQrScanner: (): void => {
+          this.qrForStore = true;
           this.qrPayloadText = '';
           this.qrErrorText = '';
           this.view = ExampleView.qrScanner;
@@ -189,6 +236,21 @@ export struct ExampleApp {
         },
         onOpenPlayer: (): void => {
           void this.openPlayer();
+        },
+        onOpenStore: (): void => {
+          const audioChannelId = parseStreamId(this.storeAudioChannelId, -1);
+          const videoChannelId = parseStreamId(this.storeVideoChannelId, -1);
+          if (this.storeAppId.trim().length === 0 || this.storeToken.length === 0 ||
+            this.storeToken !== this.storeToken.trim() || audioChannelId < 0 || audioChannelId > 255 ||
+            videoChannelId < 0 || videoChannelId > 255) {
+            this.lastError = '请补全云录像参数；Token 首尾不能有空白，Channel ID 必须为 0..255。';
+            return;
+          }
+          this.lastError = '';
+          this.view = ExampleView.store;
+        },
+        onStoreBack: (): void => {
+          this.view = ExampleView.configure;
         },
         onSettingsBack: (): void => {
           this.setSystemBarContentColor('#000000');
@@ -243,6 +305,15 @@ export struct ExampleApp {
         },
         onPlayerAudioOutputVolumeToggle: (): void => {
           this.toggleDownlinkAudioOutputVolume();
+        },
+        onPlayerRecordingToggle: (): void => {
+          void this.toggleDownlinkRecording();
+        },
+        onPlayerSnapshot: (): void => {
+          void this.takeDownlinkSnapshot();
+        },
+        onPlayerSaveMedia: (): void => {
+          void this.saveDownlinkMedia();
         },
         onSendDownlinkCommand: (commandId: number, payload: Uint8Array): number => {
           return this.sendDownlinkControlMessage(commandId, payload);
@@ -328,6 +399,27 @@ export struct ExampleApp {
   }
 
   private applyQrPayload(): void {
+    if (this.qrForStore) {
+      const payload = tryParseDemoStoreScanPayload(this.qrPayloadText);
+      if (payload === undefined) {
+        this.qrErrorText = '二维码内容不是有效的云录像 Token。';
+        return;
+      }
+      this.storeToken = payload.token;
+      writeAppStorageString('tistore.app_token', payload.token);
+      if (payload.appId !== undefined) {
+        this.storeAppId = payload.appId;
+        writeAppStorageString('tistore.app_id', payload.appId);
+      }
+      if (payload.endpoint !== undefined) {
+        this.storeEndpoint = payload.endpoint;
+        writeAppStorageString('tistore.endpoint', payload.endpoint);
+      }
+      this.qrPayloadText = '';
+      this.qrErrorText = '';
+      this.view = ExampleView.configure;
+      return;
+    }
     const payload = tryParseDemoScanPayload(this.qrPayloadText);
     if (payload === undefined) {
       this.qrErrorText = '二维码内容无效，请检查必填字段与字段格式。';
@@ -422,8 +514,36 @@ export struct ExampleApp {
 
   private async stopDownlink(reason: string): Promise<void> {
     await this.downlinkSession.stop(reason);
+    this.recording = false;
+    this.mediaAvailable = false;
     this.localAudioStarted = false;
     this.audioOutputMuted = false;
+  }
+
+  private async toggleDownlinkRecording(): Promise<void> {
+    this.statusLabel = await this.downlinkSession.toggleRecording();
+    this.recording = this.downlinkSession.isRecording();
+    this.mediaAvailable = this.downlinkSession.latestMediaPath().length > 0;
+  }
+
+  private async takeDownlinkSnapshot(): Promise<void> {
+    const path = await this.downlinkSession.takeSnapshot();
+    if (path.length === 0) {
+      this.statusLabel = '截图失败';
+      return;
+    }
+    this.statusLabel = `截图完成 · ${path}`;
+    this.mediaAvailable = true;
+  }
+
+  private async saveDownlinkMedia(): Promise<void> {
+    const context = getContext(this) as common.UIAbilityContext;
+    const saved = await saveMediaFileToGallery(
+      context,
+      this.downlinkSession.latestMediaPath(),
+      this.downlinkSession.latestMediaKind(),
+    );
+    this.statusLabel = saved ? '已保存到系统相册' : '保存到系统相册失败';
   }
 
   private async toggleDownlinkLocalAudio(): Promise<void> {

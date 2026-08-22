@@ -15,6 +15,9 @@ import {
   TiRtcConnState,
   TiRtcInputState,
   TiRtcLogging,
+  TiRtcRecordingTask,
+  TiRtcRecordingFile,
+  TiRtcSnapshotFile,
   TiRtcOutputBufferStrategy,
   TiRtcVideoDecoderPreference,
   TiRtcVideoOutput,
@@ -111,6 +114,10 @@ export class DownlinkRoleSession {
   private audioOutputMuteStartedAtMs: number = 0;
   private audioOutputMuteStartDurationMs: number = -1;
   private metricsRefreshTimer: number = -1;
+  private recordingTask?: TiRtcRecordingTask;
+  private latestRecordingFile?: TiRtcRecordingFile;
+  private latestSnapshotFile?: TiRtcSnapshotFile;
+  private readonly ownedMediaFiles: Set<TiRtcRecordingFile | TiRtcSnapshotFile> = new Set();
 
   videoOutputViewModel(): TiRtcVideoOutput {
     return this.videoOutput;
@@ -130,7 +137,7 @@ export class DownlinkRoleSession {
       options.token.length,
       options.token.startsWith('v1.') ? 'v1' : 'other');
 
-    let code = await TiRtc.initialize({
+    let code = await TiRtc.init({
       context: options.context,
       appId: options.appId,
       endpoint: options.endpoint,
@@ -141,20 +148,6 @@ export class DownlinkRoleSession {
       return code;
     }
 
-    code = this.conn.connect({
-      remoteId: options.remoteId,
-      token: options.token,
-    });
-    if (code !== 0) {
-      this.fail(`连接失败 #${code}`, code);
-      return code;
-    }
-    const connected = await waitConnected(this.conn, CONNECT_WAIT_TIMEOUT_MS);
-    if (!connected) {
-      this.fail('连接超时', null);
-      return 6001;
-    }
-    this.connectedAtMs = Date.now();
     this.activeAudioStreamId = options.audioStreamId;
     this.activeVideoStreamId = options.videoStreamId;
     this.selectedDecoderPreference = options.videoDecoderPreference;
@@ -162,27 +155,35 @@ export class DownlinkRoleSession {
 
     code = this.audioOutput.configure({ bufferStrategy: options.outputBufferStrategy });
     if (code !== 0) {
-      this.fail(`音频配置失败 #${code}`, code);
-      return code;
-    }
-    code = this.audioOutput.attach({ connection: this.conn, streamId: options.audioStreamId });
-    if (code !== 0) {
-      this.fail(`音频输出失败 #${code}`, code);
-      return code;
+      return await this.failStart(`音频配置失败 #${code}`, code, code);
     }
     code = this.videoOutput.setOptions({
       decoderPreference: options.videoDecoderPreference,
       bufferStrategy: options.outputBufferStrategy,
     });
     if (code !== 0) {
-      this.fail(`视频设置失败 #${code}`, code);
-      return code;
+      return await this.failStart(`视频设置失败 #${code}`, code, code);
+    }
+    code = this.audioOutput.attach({ connection: this.conn, streamId: options.audioStreamId });
+    if (code !== 0) {
+      return await this.failStart(`音频输出失败 #${code}`, code, code);
     }
     code = this.videoOutput.attach({ connection: this.conn, streamId: options.videoStreamId });
     if (code !== 0) {
-      this.fail(`视频输出失败 #${code}`, code);
-      return code;
+      return await this.failStart(`视频输出失败 #${code}`, code, code);
     }
+    code = this.conn.connect({
+      remoteId: options.remoteId,
+      token: options.token,
+    });
+    if (code !== 0) {
+      return await this.failStart(`连接失败 #${code}`, code, code);
+    }
+    const connected = await waitConnected(this.conn, CONNECT_WAIT_TIMEOUT_MS);
+    if (!connected) {
+      return await this.failStart('连接超时', null, 6001);
+    }
+    this.connectedAtMs = Date.now();
     const audioSubscribeCode = this.conn.subscribeAudio({ streamId: options.audioStreamId });
     const videoSubscribeCode = this.conn.subscribeVideo({ streamId: options.videoStreamId });
     hilog.info(LOG_DOMAIN, LOG_TAG,
@@ -190,8 +191,11 @@ export class DownlinkRoleSession {
       audioSubscribeCode, videoSubscribeCode, options.audioStreamId, options.videoStreamId);
     if (audioSubscribeCode !== 0 || videoSubscribeCode !== 0) {
       const subscribeCode = audioSubscribeCode !== 0 ? audioSubscribeCode : videoSubscribeCode;
-      this.fail(`订阅失败：音频 #${audioSubscribeCode}，视频 #${videoSubscribeCode}`, subscribeCode);
-      return subscribeCode;
+      return await this.failStart(
+        `订阅失败：音频 #${audioSubscribeCode}，视频 #${videoSubscribeCode}`,
+        subscribeCode,
+        subscribeCode,
+      );
     }
     const hasRenderSize = await waitVideoRenderSize(this.videoOutput, VIDEO_SIZE_WAIT_TIMEOUT_MS,
       (width: number, height: number): void => {
@@ -199,8 +203,7 @@ export class DownlinkRoleSession {
       },
       (): boolean => this.videoRenderWidth > 0 && this.videoRenderHeight > 0);
     if (!hasRenderSize) {
-      this.fail('视频尺寸未就绪', null);
-      return 6001;
+      return await this.failStart('视频尺寸未就绪', null, 6001);
     }
 
     this.running = true;
@@ -224,22 +227,107 @@ export class DownlinkRoleSession {
     this.stopMetricsRefresh();
     this.callbacks.onConnectingChanged?.(false);
     this.callbacks.onPlayingChanged?.(false);
-    await this.releaseLocalAudioInput();
+    if (this.recordingTask !== undefined) {
+      const recordingResult = await this.recordingTask.stop();
+      if (recordingResult.success && recordingResult.data !== null) {
+        this.ownedMediaFiles.add(recordingResult.data);
+      }
+      this.recordingTask = undefined;
+    }
+    await this.deleteLatestMediaFiles();
+    const localAudioDisposeCode = await this.releaseLocalAudioInput();
     const videoDetachCode = this.videoOutput.detach();
     this.resetVideoRenderSize();
     const audioDetachCode = this.audioOutput.detach();
     const videoUnsubscribeCode = this.conn.unsubscribeVideo({ streamId: this.activeVideoStreamId });
     const audioUnsubscribeCode = this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
-    this.conn.disconnect();
-    this.videoOutput.dispose();
-    this.audioOutput.dispose();
-    this.conn.dispose();
+    const disconnectCode = this.conn.disconnect();
+    const videoDisposeCode = this.videoOutput.dispose();
+    const audioDisposeCode = this.audioOutput.dispose();
+    const connDisposeCode = this.conn.dispose();
+    if (localAudioDisposeCode !== 0 || videoDisposeCode !== 0 || audioDisposeCode !== 0 ||
+      connDisposeCode !== 0) {
+      const disposeCode = localAudioDisposeCode !== 0 ? localAudioDisposeCode :
+        (videoDisposeCode !== 0 ? videoDisposeCode :
+          (audioDisposeCode !== 0 ? audioDisposeCode : connDisposeCode));
+      this.fail(`停止失败 #${disposeCode}`, disposeCode);
+      hilog.error(LOG_DOMAIN, LOG_TAG,
+        'TIRTC_downlink_dispose_failed reason=%{public}s local_audio=%{public}d video=%{public}d audio=%{public}d conn=%{public}d',
+        reason, localAudioDisposeCode, videoDisposeCode, audioDisposeCode, connDisposeCode);
+      return;
+    }
     const shutdownCode = TiRtc.shutdown();
+    if (shutdownCode !== 0) {
+      this.fail(`停止失败 #${shutdownCode}`, shutdownCode);
+      return;
+    }
     this.resetObjects();
     this.callbacks.onStatusChanged?.(reason === 'manual_stop' ? '已停止' : '加载中', 'Downlink stopped.');
     hilog.info(LOG_DOMAIN, LOG_TAG,
-      'TIRTC_downlink_stop_done reason=%{public}s video_detach=%{public}d audio_detach=%{public}d video_unsubscribe=%{public}d audio_unsubscribe=%{public}d shutdown=%{public}d',
-      reason, videoDetachCode, audioDetachCode, videoUnsubscribeCode, audioUnsubscribeCode, shutdownCode);
+      'TIRTC_downlink_stop_done reason=%{public}s video_detach=%{public}d audio_detach=%{public}d video_unsubscribe=%{public}d audio_unsubscribe=%{public}d disconnect=%{public}d local_audio_dispose=%{public}d video_dispose=%{public}d audio_dispose=%{public}d conn_dispose=%{public}d shutdown=%{public}d',
+      reason, videoDetachCode, audioDetachCode, videoUnsubscribeCode, audioUnsubscribeCode, disconnectCode,
+      localAudioDisposeCode, videoDisposeCode, audioDisposeCode, connDisposeCode, shutdownCode);
+  }
+
+  public async toggleRecording(): Promise<string> {
+    if (this.recordingTask !== undefined) {
+      const result = await this.recordingTask.stop();
+      this.recordingTask = undefined;
+      if (result.success && result.data !== null) {
+        await this.deleteLatestMediaFiles();
+        this.latestRecordingFile = result.data;
+        this.latestSnapshotFile = undefined;
+        this.ownedMediaFiles.add(result.data);
+      }
+      return result.success ? `本地保存完成 · ${result.data?.path ?? ''}` : `本地保存失败 #${result.code ?? 0}`;
+    }
+    const result = this.conn.startRecording({
+      videoStreamId: this.activeVideoStreamId,
+      audioStreamId: this.activeAudioStreamId,
+    });
+    if (!result.success || result.data === null) {
+      return `开始本地保存失败 #${result.code ?? 0}`;
+    }
+    this.recordingTask = result.data;
+    return '正在本地保存';
+  }
+
+  public isRecording(): boolean {
+    return this.recordingTask !== undefined;
+  }
+
+  public async takeSnapshot(): Promise<string> {
+    const result = await this.videoOutput.takeSnapshot();
+    if (result.success && result.data !== null) {
+      await this.deleteLatestMediaFiles();
+      this.latestSnapshotFile = result.data;
+      this.latestRecordingFile = undefined;
+      this.ownedMediaFiles.add(result.data);
+      return result.data.path;
+    }
+    return '';
+  }
+
+  public latestMediaPath(): string {
+    return this.latestSnapshotFile?.path ?? this.latestRecordingFile?.path ?? '';
+  }
+
+  public latestMediaKind(): string {
+    if (this.latestSnapshotFile !== undefined) return 'snapshot';
+    if (this.latestRecordingFile !== undefined) return 'recording';
+    return '';
+  }
+
+  private async deleteLatestMediaFiles(): Promise<void> {
+    for (const file of this.ownedMediaFiles) {
+      if (await file.delete() === 0) this.ownedMediaFiles.delete(file);
+    }
+    if (this.latestRecordingFile !== undefined && !this.ownedMediaFiles.has(this.latestRecordingFile)) {
+      this.latestRecordingFile = undefined;
+    }
+    if (this.latestSnapshotFile !== undefined && !this.ownedMediaFiles.has(this.latestSnapshotFile)) {
+      this.latestSnapshotFile = undefined;
+    }
   }
 
   toggleAudioOutputVolume(): number {
@@ -470,16 +558,22 @@ export class DownlinkRoleSession {
     return 0;
   }
 
-  private async releaseLocalAudioInput(): Promise<void> {
+  private async releaseLocalAudioInput(): Promise<number> {
     if (this.localAudioStarted) {
-      await this.stopLocalAudio(true);
+      const stopCode = await this.stopLocalAudio(true);
+      if (stopCode !== 0) {
+        return stopCode;
+      }
     } else if (this.localAudioAttached) {
-      await this.localAudioInput.detach({ connection: this.conn });
+      const detachCode = await this.localAudioInput.detach({ connection: this.conn });
+      if (detachCode !== 0) {
+        return detachCode;
+      }
       this.localAudioAttached = false;
       this.localAudioStreamId = -1;
       this.callbacks.onLocalAudioStartedChanged?.(false);
     }
-    await this.localAudioInput.dispose();
+    return this.localAudioInput.dispose();
   }
 
   private refreshMetrics(): void {
@@ -501,7 +595,7 @@ export class DownlinkRoleSession {
         `${this.formatVideoDecoder(videoInfo?.resolvedDecoderBackend)}`,
       `视频接收：码率 ${this.formatKbps(video?.videoInputBitrateKbps)} · 接收 ${this.formatRate(video?.videoInputFps, 'fps')}`,
       `音频接收：码率 ${this.formatKbps(audio?.audioInputBitrateKbps)} · PPS ${this.formatRate(audio?.audioInputPacketRate, '/s')}`,
-      `预计输出延迟：视频 ${this.formatDuration(video?.estimatedOutputLatencyMs)} · ` +
+      `估算延迟：视频 ${this.formatDuration(video?.estimatedOutputLatencyMs)} · ` +
         `音频 ${this.formatDuration(audio?.estimatedOutputLatencyMs)}`,
       `启动耗时：${this.formatStartup(connectDurationMs, firstFrameDurationMs)}`,
       `卡顿统计：视频 ${this.formatCount(video?.stutter.stutterCount)} / ` +
@@ -630,6 +724,38 @@ export class DownlinkRoleSession {
     this.callbacks.onLastErrorChanged?.(message);
     hilog.error(LOG_DOMAIN, LOG_TAG, 'TIRTC_downlink_failed message=%{public}s code=%{public}d',
       message, code ?? 0);
+  }
+
+  private async failStart(message: string, code: number | null, resultCode: number): Promise<number> {
+    await this.releaseFailedStart();
+    this.fail(message, code);
+    return resultCode;
+  }
+
+  private async releaseFailedStart(): Promise<void> {
+    const videoDetachCode = this.videoOutput.detach();
+    const audioDetachCode = this.audioOutput.detach();
+    const videoUnsubscribeCode = this.conn.unsubscribeVideo({ streamId: this.activeVideoStreamId });
+    const audioUnsubscribeCode = this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
+    const disconnectCode = this.conn.disconnect();
+    const localAudioDisposeCode = await this.localAudioInput.dispose();
+    const videoDisposeCode = this.videoOutput.dispose();
+    const audioDisposeCode = this.audioOutput.dispose();
+    const connDisposeCode = this.conn.dispose();
+    const shutdownCode = TiRtc.shutdown();
+    const released = localAudioDisposeCode === 0 && videoDisposeCode === 0 &&
+      audioDisposeCode === 0 && connDisposeCode === 0 && shutdownCode === 0;
+    if (released) {
+      this.resetObjects();
+      hilog.info(LOG_DOMAIN, LOG_TAG,
+        'TIRTC_downlink_start_cleanup_done video_detach=%{public}d audio_detach=%{public}d video_unsubscribe=%{public}d audio_unsubscribe=%{public}d disconnect=%{public}d',
+        videoDetachCode, audioDetachCode, videoUnsubscribeCode, audioUnsubscribeCode, disconnectCode);
+      return;
+    }
+    hilog.error(LOG_DOMAIN, LOG_TAG,
+      'TIRTC_downlink_start_cleanup_failed video_detach=%{public}d audio_detach=%{public}d video_unsubscribe=%{public}d audio_unsubscribe=%{public}d disconnect=%{public}d local_audio=%{public}d video=%{public}d audio=%{public}d conn=%{public}d shutdown=%{public}d',
+      videoDetachCode, audioDetachCode, videoUnsubscribeCode, audioUnsubscribeCode, disconnectCode,
+      localAudioDisposeCode, videoDisposeCode, audioDisposeCode, connDisposeCode, shutdownCode);
   }
 
   private applyVideoRenderSize(width: number, height: number): void {

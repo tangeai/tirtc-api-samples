@@ -38,6 +38,7 @@ export enum ExampleView {
   configure,
   settings,
   qrScanner,
+  store,
   player,
 }
 

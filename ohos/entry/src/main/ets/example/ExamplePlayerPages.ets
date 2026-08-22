@@ -48,6 +48,8 @@ export struct DownlinkPlayerPage {
   videoOutput: TiRtcVideoOutput = new TiRtcVideoOutput();
   @Prop localAudioStarted: boolean = false;
   @Prop audioOutputMuted: boolean = false;
+  @Prop recording: boolean = false;
+  @Prop mediaAvailable: boolean = false;
   @Prop metricsLabel: string = '';
   @Prop commandStatus: string = '';
   @Prop streamMessageStatus: string = '';
@@ -56,6 +58,9 @@ export struct DownlinkPlayerPage {
   onToggle: () => void = () => {};
   onLocalAudioToggle: () => void = () => {};
   onAudioOutputVolumeToggle: () => void = () => {};
+  onRecordingToggle: () => void = () => {};
+  onSnapshot: () => void = () => {};
+  onSaveMedia: () => void = () => {};
   onSendCommand: (commandId: number, payload: Uint8Array) => number = () => 0;
   onUploadLogs: () => void = () => {};
   onStageAreaChanged: (width: number, height: number) => void = () => {};
@@ -138,6 +143,12 @@ export struct DownlinkPlayerPage {
           localAudioEnabled: this.playing && !this.connecting,
           audioOutputMuted: this.audioOutputMuted,
           audioOutputVolumeEnabled: this.playing && !this.connecting,
+          recording: this.recording,
+          mediaAvailable: this.mediaAvailable,
+          mediaEnabled: this.playing && !this.connecting,
+          onRecordingAction: this.onRecordingToggle,
+          onSnapshotAction: this.onSnapshot,
+          onSaveMediaAction: this.onSaveMedia,
           onAction: this.onToggle,
           onLocalAudioAction: this.onLocalAudioToggle,
           onAudioOutputVolumeAction: this.onAudioOutputVolumeToggle,

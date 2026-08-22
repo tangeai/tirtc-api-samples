@@ -180,12 +180,12 @@ export struct PlayerMetricsOverlay {
         this.metricLine('媒体参数', 'tirtc_example_downlink_metrics_media_params_text')
         this.metricLine('视频接收', 'tirtc_example_downlink_metrics_video_receive_text')
         this.metricLine('音频接收', 'tirtc_example_downlink_metrics_audio_receive_text')
-        this.metricLine('预计输出延迟', 'tirtc_example_downlink_metrics_latency_stats_text')
+        this.metricLine('估算延迟', 'tirtc_example_downlink_metrics_latency_stats_text')
         this.metricLine('启动耗时', 'tirtc_example_downlink_metrics_startup_text')
         this.metricLine('卡顿统计', 'tirtc_example_downlink_metrics_stutter_text')
         if (this.explanationVisible) {
           Blank().height(6)
-          Text('连接耗时、首帧等待、卡顿统计时机、卡顿定义、接收、音频卡顿和预计输出延迟均来自 SDK 最近采样窗口。')
+          Text('连接耗时、首帧等待、卡顿统计时机、卡顿定义、接收、音频卡顿和估算延迟均来自 SDK 最近采样窗口。')
             .fontSize(10)
             .fontColor('#848282')
             .lineHeight(15)
@@ -598,48 +598,48 @@ export struct PlayerBottomButton {
   @Prop localAudioEnabled: boolean = true;
   @Prop audioOutputMuted: boolean = false;
   @Prop audioOutputVolumeEnabled: boolean = true;
+  @Prop recording: boolean = false;
+  @Prop mediaEnabled: boolean = false;
+  @Prop mediaAvailable: boolean = false;
+  onRecordingAction: () => void = () => {};
+  onSnapshotAction: () => void = () => {};
+  onSaveMediaAction: () => void = () => {};
   onAction: () => void = () => {};
   onLocalAudioAction: () => void = () => {};
   onAudioOutputVolumeAction: () => void = () => {};
   onFocusedActionChanged: (action: string) => void = () => {};
 
   build() {
-    Row() {
+    Column({ space: 12 }) {
+      Row({ space: 12 }) {
+        Blank()
+        Button(this.recording ? '◉' : '●')
+          .id('tirtc_example_player_recording_button')
+          .width(48).height(48).fontSize(18).fontColor('#659287')
+          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaEnabled)
+          .onClick(this.onRecordingAction)
+        Button('▣')
+          .id('tirtc_example_player_snapshot_button')
+          .width(48).height(48).fontSize(18).fontColor('#659287')
+          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaEnabled)
+          .onClick(this.onSnapshotAction)
+        Button('▧')
+          .id('tirtc_example_player_gallery_button')
+          .accessibilityText('保存到系统相册')
+          .width(48).height(48).fontSize(18).fontColor('#659287')
+          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaAvailable)
+          .onClick(this.onSaveMediaAction)
+      }
+      .width('100%')
+      Row() {
       Blank()
-      Button(this.localAudioStarted ? '停止麦克风' : '启动麦克风')
-        .id('tirtc_example_player_local_audio_button')
-        .height(50)
-        .fontSize(13)
-        .fontWeight(FontWeight.Medium)
-        .fontColor('#FFFFFF')
-        .backgroundColor(this.localAudioStarted ? '#F87171' : '#659287')
-        .borderRadius(25)
-        .enabled(this.localAudioEnabled)
-        .onClick(() => {
-          this.onLocalAudioAction();
-        })
-        .onFocus(() => {
-          this.onFocusedActionChanged(PLAYER_ACTION_LOCAL_AUDIO);
-        })
-        .onBlur(() => {
-          this.onFocusedActionChanged(PLAYER_ACTION_NONE);
-        })
-        .onKeyEvent((event: KeyEvent): boolean => {
-          if (!this.localAudioEnabled) {
-            return false;
-          }
-          return runOnActivationKey(event, () => {
-            this.onLocalAudioAction();
-          });
-        })
-      Blank().width(10)
-      Button(this.audioOutputMuted ? '恢复声音' : '静音播放')
+      Button(this.audioOutputMuted ? '恢复声音' : '静音')
         .id('tirtc_example_player_audio_volume_button')
         .height(50)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
-        .fontColor('#FFFFFF')
-        .backgroundColor(this.audioOutputMuted ? '#F59E0B' : '#659287')
+        .fontColor(this.audioOutputMuted ? '#FFFFFF' : '#659287')
+        .backgroundColor(this.audioOutputMuted ? '#F59E0B' : '#FFFFFF')
         .borderRadius(25)
         .enabled(this.audioOutputVolumeEnabled)
         .onClick(() => {
@@ -657,6 +657,33 @@ export struct PlayerBottomButton {
           }
           return runOnActivationKey(event, () => {
             this.onAudioOutputVolumeAction();
+          });
+        })
+      Blank().width(10)
+      Button(this.localAudioStarted ? '停止麦克风' : '启动麦克风')
+        .id('tirtc_example_player_local_audio_button')
+        .height(50)
+        .fontSize(13)
+        .fontWeight(FontWeight.Medium)
+        .fontColor(this.localAudioStarted ? '#FFFFFF' : '#659287')
+        .backgroundColor(this.localAudioStarted ? '#F59E0B' : '#FFFFFF')
+        .borderRadius(25)
+        .enabled(this.localAudioEnabled)
+        .onClick(() => {
+          this.onLocalAudioAction();
+        })
+        .onFocus(() => {
+          this.onFocusedActionChanged(PLAYER_ACTION_LOCAL_AUDIO);
+        })
+        .onBlur(() => {
+          this.onFocusedActionChanged(PLAYER_ACTION_NONE);
+        })
+        .onKeyEvent((event: KeyEvent): boolean => {
+          if (!this.localAudioEnabled) {
+            return false;
+          }
+          return runOnActivationKey(event, () => {
+            this.onLocalAudioAction();
           });
         })
       Blank().width(10)
@@ -686,6 +713,8 @@ export struct PlayerBottomButton {
             this.onAction();
           });
         })
+      }
+      .width('100%')
     }
     .width('100%')
     .padding({ left: 20, right: 20, bottom: PLAYER_BOTTOM_PADDING })

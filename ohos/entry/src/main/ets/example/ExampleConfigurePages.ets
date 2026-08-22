@@ -14,34 +14,55 @@ export struct ClientConfigurePage {
   @Prop appId: string = '';
   @Prop remoteId: string = '';
   @Prop token: string = '';
+  @Prop storeAppId: string = '';
+  @Prop storeEndpoint: string = '';
+  @Prop storeToken: string = '';
+  @Prop storeAudioChannelId: string = '';
+  @Prop storeVideoChannelId: string = '';
   @Prop tokenIssuerBaseUrl: string = '';
   @Prop tokenSource: DemoTokenSource = DemoTokenSource.issuer;
   @Prop audioStreamId: string = '';
   @Prop videoStreamId: string = '';
   @Prop connecting: boolean = false;
   @Prop lastError: string = '';
+  @State private productIndex: number = 0;
   onOpenSettings: () => void = () => {};
   onEndpointChanged: (value: string) => void = () => {};
   onAppIdChanged: (value: string) => void = () => {};
   onRemoteIdChanged: (value: string) => void = () => {};
   onTokenChanged: (value: string) => void = () => {};
+  onStoreAppIdChanged: (value: string) => void = () => {};
+  onStoreEndpointChanged: (value: string) => void = () => {};
+  onStoreTokenChanged: (value: string) => void = () => {};
+  onStoreAudioChannelIdChanged: (value: string) => void = () => {};
+  onStoreVideoChannelIdChanged: (value: string) => void = () => {};
   onTokenIssuerBaseUrlChanged: (value: string) => void = () => {};
   onTokenSourceChanged: (value: DemoTokenSource) => void = () => {};
   onOpenQrScanner: () => void = () => {};
+  onOpenStoreQrScanner: () => void = () => {};
   onAudioStreamIdChanged: (value: string) => void = () => {};
   onVideoStreamIdChanged: (value: string) => void = () => {};
   onStartDownlink: () => void = () => {};
+  onOpenStore: () => void = () => {};
 
   build() {
     Scroll() {
       Column() {
         Row() {
-          Text('Ti RTC')
-            .fontSize(22)
-            .fontWeight(FontWeight.Bold)
-            .fontColor('#767676')
+          Column() {
+            Text('Ti RTC')
+              .fontSize(22)
+              .fontWeight(FontWeight.Bold)
+              .fontColor('#767676')
+            Text('Based on OpenHarmony')
+              .fontSize(12)
+              .fontColor('#B3B3B3')
+              .margin({ top: 2 })
+          }
+          .alignItems(HorizontalAlign.Start)
           Blank()
           Button('偏好设置')
+            .id('tirtc_example_settings_button')
             .type(ButtonType.Normal)
             .fontSize(13)
             .fontColor('#659287')
@@ -60,48 +81,13 @@ export struct ClientConfigurePage {
         .width('100%')
         .height(42)
         Blank().height(20)
-        Row() {
-          this.rowInputField('app_id', 'TiRTC 应用标识', this.appId, this.onAppIdChanged,
-            'tirtc_example_app_id_field')
-          Blank().width(16)
-          this.rowInputField('endpoint', '留空则使用默认环境', this.endpoint, this.onEndpointChanged,
-            'tirtc_example_endpoint_field')
-        }
-        .width('100%')
-        Blank().height(16)
-        this.inputField('remote_id', '待连接的远端目标 ID', this.remoteId, this.onRemoteIdChanged,
-          'tirtc_example_remote_id_field')
-        Blank().height(16)
-        Row() {
-          this.streamField('audio_stream_id', '默认 10', this.audioStreamId, this.onAudioStreamIdChanged,
-            'tirtc_example_audio_stream_id_field')
-          Blank().width(16)
-          this.streamField('video_stream_id', '默认 11', this.videoStreamId, this.onVideoStreamIdChanged,
-            'tirtc_example_video_stream_id_field')
-        }
-        .width('100%')
-        Blank().height(16)
-        this.tokenSection()
+        this.productTabs()
         Blank().height(20)
-        Button(this.connecting ? '初始化中' : '进入播放页面')
-          .id('tirtc_example_start_downlink_button')
-          .width('100%')
-          .height(56)
-          .fontSize(16)
-          .fontWeight(FontWeight.Medium)
-          .fontColor('#FFFFFF')
-          .backgroundColor('#659287')
-          .borderRadius(28)
-          .enabled(!this.connecting)
-          .onClick(() => {
-            hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_configure_open_player_button_clicked');
-            this.onStartDownlink();
-          })
-          .onKeyEvent((event: KeyEvent): boolean => {
-            return runOnActivationKey(event, () => {
-              this.onStartDownlink();
-            });
-          })
+        if (this.productIndex === 0) {
+          this.rtcConfiguration()
+        } else {
+          this.storeConfiguration()
+        }
         this.errorLabel()
       }
       .width('100%')
@@ -119,15 +105,135 @@ export struct ClientConfigurePage {
   }
 
   @Builder
+  private productTabs() {
+    Row() {
+      this.productTab('RTC', 0, 'tirtc_example_rtc_product_tab')
+      Blank().width(3)
+      this.productTab('云录像', 1, 'tirtc_example_store_product_tab')
+    }
+    .width('100%')
+    .height(44)
+    .padding(3)
+    .backgroundColor('#1A659287')
+    .borderRadius(22)
+  }
+
+  @Builder
+  private productTab(label: string, index: number, anchor: string) {
+    Button(label)
+      .id(anchor)
+      .layoutWeight(1)
+      .height(38)
+      .fontSize(14)
+      .fontWeight(FontWeight.Bold)
+      .fontColor(this.productIndex === index ? '#FFFFFF' : '#659287')
+      .backgroundColor(this.productIndex === index ? '#659287' : '#00FFFFFF')
+      .borderRadius(20)
+      .enabled(!this.connecting)
+      .onClick((): void => {
+        this.productIndex = index;
+      })
+  }
+
+  @Builder
+  private rtcConfiguration() {
+    this.inputField('endpoint', '留空则使用默认环境', this.endpoint, this.onEndpointChanged,
+      'tirtc_example_endpoint_field')
+    Blank().height(16)
+    this.inputField('app_id', 'TiRTC 应用标识', this.appId, this.onAppIdChanged,
+      'tirtc_example_app_id_field')
+    Blank().height(16)
+    this.inputField('remote_id', '待连接的远端目标 ID', this.remoteId, this.onRemoteIdChanged,
+      'tirtc_example_remote_id_field')
+    Blank().height(16)
+    Row() {
+      this.streamField('audio_stream_id', '默认 10', this.audioStreamId, this.onAudioStreamIdChanged,
+        'tirtc_example_audio_stream_id_field')
+      Blank().width(16)
+      this.streamField('video_stream_id', '默认 11', this.videoStreamId, this.onVideoStreamIdChanged,
+        'tirtc_example_video_stream_id_field')
+    }
+    .width('100%')
+    Blank().height(16)
+    this.tokenSection()
+    Blank().height(20)
+    Button(this.connecting ? '初始化中' : '开始连接、拉流播放')
+      .id('tirtc_example_start_downlink_button')
+      .width('100%')
+      .height(56)
+      .fontSize(16)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#FFFFFF')
+      .backgroundColor('#659287')
+      .borderRadius(28)
+      .enabled(!this.connecting)
+      .onClick((): void => {
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_configure_open_player_button_clicked');
+        this.onStartDownlink();
+      })
+  }
+
+  @Builder
+  private storeConfiguration() {
+    this.inputField('app_id', 'TiStore 应用标识', this.storeAppId, this.onStoreAppIdChanged,
+      'tirtc_example_store_app_id_field')
+    Blank().height(16)
+    this.inputField('endpoint', '留空则使用默认环境', this.storeEndpoint,
+      this.onStoreEndpointChanged, 'tirtc_example_store_endpoint_field')
+    Blank().height(16)
+    Row() {
+      Column() {
+        this.inputFieldContent('token', '粘贴 TiStore APP Token', this.storeToken,
+          this.onStoreTokenChanged, 'tirtc_example_store_token_field', true)
+      }
+      .layoutWeight(1)
+      .alignItems(HorizontalAlign.Start)
+      Blank().width(10)
+      Button('扫码')
+        .id('tirtc_example_store_token_scan_button')
+        .width(68)
+        .height(56)
+        .fontSize(13)
+        .fontColor('#659287')
+        .backgroundColor('#FFFFFF')
+        .border({ width: 1, color: '#659287', radius: 20 })
+        .onClick(this.onOpenStoreQrScanner)
+    }
+    .width('100%')
+    Blank().height(16)
+    Row() {
+      this.streamField('audio_channel_id', '默认 10', this.storeAudioChannelId,
+        this.onStoreAudioChannelIdChanged, 'tirtc_example_store_audio_channel_field')
+      Blank().width(16)
+      this.streamField('video_channel_id', '默认 11', this.storeVideoChannelId,
+        this.onStoreVideoChannelIdChanged, 'tirtc_example_store_video_channel_field')
+    }
+    .width('100%')
+    Blank().height(20)
+    Button('播放云录像')
+      .id('tirtc_example_open_store_button')
+      .width('100%')
+      .height(56)
+      .fontSize(16)
+      .fontWeight(FontWeight.Medium)
+      .fontColor('#FFFFFF')
+      .backgroundColor('#659287')
+      .borderRadius(28)
+      .enabled(!this.connecting)
+      .onClick(this.onOpenStore)
+  }
+
+  @Builder
   private inputField(
     label: string,
     hint: string,
     value: string,
     onChanged: (value: string) => void,
     anchor: string,
+    secure: boolean = false,
   ) {
     Column() {
-      this.inputFieldContent(label, hint, value, onChanged, anchor)
+      this.inputFieldContent(label, hint, value, onChanged, anchor, secure)
     }
     .width('100%')
     .alignItems(HorizontalAlign.Start)
@@ -140,6 +246,7 @@ export struct ClientConfigurePage {
     value: string,
     onChanged: (value: string) => void,
     anchor: string,
+    secure: boolean = false,
   ) {
     Column() {
       this.inputFieldContent(label, hint, value, onChanged, anchor)
@@ -155,11 +262,13 @@ export struct ClientConfigurePage {
     value: string,
     onChanged: (value: string) => void,
     anchor: string,
+    secure: boolean = false,
   ) {
     this.inputLabel(label)
     TextInput({ placeholder: hint, text: value })
       .id(anchor)
-      .height(58)
+      .type(secure ? InputType.Password : InputType.Normal)
+      .height(56)
       .fontSize(13)
       .fontColor('#666666')
       .placeholderColor('#848282')
@@ -181,7 +290,7 @@ export struct ClientConfigurePage {
       this.inputLabel(label)
       TextInput({ placeholder: hint, text: value })
         .id(anchor)
-        .height(58)
+        .height(56)
         .fontSize(13)
         .fontColor('#666666')
         .placeholderColor('#848282')
@@ -197,86 +306,36 @@ export struct ClientConfigurePage {
   @Builder
   private tokenSection() {
     Column() {
-      Text('连接 Token')
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#767676')
-        .width('100%')
-      Blank().height(14)
       Row() {
-        this.tokenSourceChip('Token 签发服务地址', DemoTokenSource.issuer,
-          'tirtc_example_token_source_issuer_button')
-        Blank().width(8)
-        this.tokenSourceChip('一次性连接 Token', DemoTokenSource.oneTime,
-          'tirtc_example_token_source_one_time_button')
+        Column() {
+          this.inputFieldContent('一次性连接 Token', '粘贴 v1.xxx 一次性 Token', this.token,
+            this.onTokenChanged, 'tirtc_example_token_field')
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+        Blank().width(10)
+        Button('扫码')
+          .id('tirtc_example_token_scan_button')
+          .width(68)
+          .height(56)
+          .fontSize(13)
+          .fontColor('#659287')
+          .backgroundColor('#FFFFFF')
+          .border({ width: 1, color: '#659287', radius: 20 })
+          .onClick(this.onOpenQrScanner)
       }
       .width('100%')
-      Blank().height(16)
-      if (this.tokenSource === DemoTokenSource.issuer) {
-        Column() {
-          this.inputLabel('Token 签发服务地址')
-          TextInput({
-            placeholder: '例如 http://127.0.0.1:8966 或 http://openapidemo.tange365.com/tirtc/token/Ue4rIG',
-            text: this.tokenIssuerBaseUrl,
-          })
-            .id('tirtc_example_token_issuer_base_url_field')
-            .height(58)
-            .fontSize(13)
-            .fontColor('#666666')
-            .placeholderColor('#848282')
-            .backgroundColor('#FFFFFF')
-            .border({ width: 0, radius: 20 })
-            .padding({ left: 20, right: 20 })
-            .onChange(this.onTokenIssuerBaseUrlChanged)
-        }
+      Text('或')
         .width('100%')
-        .alignItems(HorizontalAlign.Start)
-      } else {
-        Column() {
-          this.inputLabel('一次性连接 Token')
-          Row() {
-            TextInput({ placeholder: '粘贴 TiRTC DevTools CLI 生成的一次性 Token', text: this.token })
-              .id('tirtc_example_token_field')
-              .height(58)
-              .fontSize(13)
-              .fontColor('#666666')
-              .placeholderColor('#848282')
-              .backgroundColor('#FFFFFF')
-              .border({ width: 0, radius: 20 })
-              .padding({ left: 20, right: 12 })
-              .layoutWeight(1)
-              .onChange(this.onTokenChanged)
-              .onSubmit(() => {
-                this.onStartDownlink();
-              })
-            Blank().width(10)
-            Button('扫码')
-              .id('tirtc_example_token_scan_button')
-              .width(68)
-              .height(48)
-              .fontSize(13)
-              .fontColor('#659287')
-              .backgroundColor('#00FFFFFF')
-              .border({ width: 1, color: '#659287', radius: 24 })
-              .onClick(() => {
-                this.onOpenQrScanner();
-              })
-              .onKeyEvent((event: KeyEvent): boolean => {
-                return runOnActivationKey(event, () => {
-                  this.onOpenQrScanner();
-                });
-              })
-          }
-          .width('100%')
-        }
-        .width('100%')
-        .alignItems(HorizontalAlign.Start)
-      }
+        .fontSize(12)
+        .fontColor('#B3B3B3')
+        .textAlign(TextAlign.Center)
+        .margin({ top: 8, bottom: 8 })
+      this.inputFieldContent('TiRTC DevTools 服务地址', '例如 http://192.168.1.10:8966',
+        this.tokenIssuerBaseUrl, this.onTokenIssuerBaseUrlChanged,
+        'tirtc_example_token_issuer_base_url_field')
     }
     .width('100%')
-    .padding({ left: 18, right: 18, top: 18, bottom: 18 })
-    .backgroundColor('#FFFFFF')
-    .border({ width: 0, radius: 18 })
   }
 
   @Builder

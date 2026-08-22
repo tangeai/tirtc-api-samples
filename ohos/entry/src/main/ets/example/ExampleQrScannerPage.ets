@@ -2,6 +2,7 @@ import { runOnActivationKey } from './ExampleKeyboard';
 
 @Component
 export struct QrScannerPage {
+  @Prop storeMode: boolean = false;
   @Prop payloadText: string = '';
   @Prop errorText: string = '';
   onBack: () => void = () => {};
@@ -35,7 +36,9 @@ export struct QrScannerPage {
         .width('100%')
         .height(42)
         Blank().height(18)
-        Text('将 TiRTC DevTools CLI 生成的二维码完整放入方框内，系统会自动填充一次性连接 Token。')
+        Text(this.storeMode ?
+          '扫描云录像 Token，或包含 app_id、token 和可选 endpoint 的配置 JSON。' :
+          '将 TiRTC DevTools CLI 生成的二维码完整放入方框内，系统会自动填充一次性连接 Token。')
           .fontSize(14)
           .fontColor('#666666')
           .lineHeight(20)
@@ -45,7 +48,9 @@ export struct QrScannerPage {
         Blank().height(20)
         this.manualPayloadField()
         Blank().height(16)
-        this.guideCard()
+        if (!this.storeMode) {
+          this.guideCard()
+        }
         if (this.errorText.length > 0) {
           Blank().height(12)
           Text(this.errorText)
@@ -103,7 +108,7 @@ export struct QrScannerPage {
   private manualPayloadField() {
     Column() {
       TextArea({
-        placeholder: '粘贴二维码内容，可为 JSON payload 或纯 v1. Token',
+        placeholder: this.storeMode ? '粘贴云录像 Token 或配置 JSON' : '粘贴二维码内容，可为 JSON payload 或纯 v1. Token',
         text: this.payloadText,
       })
         .height(120)

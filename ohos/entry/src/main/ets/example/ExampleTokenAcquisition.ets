@@ -16,6 +16,12 @@ export interface DemoScanPayload {
   token: string;
 }
 
+export interface DemoStoreScanPayload {
+  appId?: string;
+  endpoint?: string;
+  token: string;
+}
+
 interface DemoTokenIssuerParts {
   scheme: string;
   authority: string;
@@ -166,6 +172,29 @@ export function tryParseDemoScanPayload(rawValue: string): DemoScanPayload | und
   };
 }
 
+export function tryParseDemoStoreScanPayload(rawValue: string): DemoStoreScanPayload | undefined {
+  const text = rawValue.trim();
+  if (text.length === 0) return undefined;
+  if (!text.startsWith('{')) {
+    return storeTokenLooksValid(text) ? { token: text } : undefined;
+  }
+  const decoded = parseJsonObject(normalizeScanJson(text));
+  if (decoded === undefined) return undefined;
+  const keys = Object.keys(decoded);
+  for (let index = 0; index < keys.length; index += 1) {
+    const key = keys[index];
+    if (key !== 'app_id' && key !== 'endpoint' && key !== 'token') return undefined;
+  }
+  const appId = stringValue(decoded['app_id']);
+  const token = stringValue(decoded['token']);
+  const endpointRaw = decoded['endpoint'];
+  if (appId.length === 0 || !storeTokenLooksValid(token)) return undefined;
+  if (keys.indexOf('endpoint') >= 0 && typeof endpointRaw !== 'string') return undefined;
+  const endpoint = typeof endpointRaw === 'string' ? endpointRaw.trim() : '';
+  if (endpoint.length > 0 && !validStoreEndpoint(endpoint)) return undefined;
+  return { appId, token, endpoint: endpoint.length > 0 ? endpoint : undefined };
+}
+
 function demoTokenIssuerRequest(rawValue: string, remoteId: string): DemoTokenHttpRequest {
   const parts = parseIssuerUrl(rawValue);
   if (isFixedPathIssuerAddress(parts)) {
@@ -219,6 +248,15 @@ function buildUrl(parts: DemoTokenIssuerParts): string {
 
 function validHttpEndpoint(text: string): boolean {
   return /^(https?):\/\/([^\/?#@]+)([^?#]*)(\?[^#]*)?$/i.test(text.trim());
+}
+
+function validStoreEndpoint(text: string): boolean {
+  return /^https:\/\/([^\/?#@]+)([^?#]*)(\?[^#]*)?$/i.test(text.trim());
+}
+
+function storeTokenLooksValid(text: string): boolean {
+  const token = text.trim();
+  return token.length > 0 && !/\s/.test(token);
 }
 
 function normalizeScanJson(rawValue: string): string {

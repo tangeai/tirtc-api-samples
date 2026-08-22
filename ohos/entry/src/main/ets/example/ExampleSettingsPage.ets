@@ -48,6 +48,7 @@ export struct SettingsPage {
       Column() {
         Row() {
           Button('<')
+            .id('tirtc_example_settings_back_button')
             .width(42)
             .height(36)
             .fontSize(18)
@@ -235,6 +236,7 @@ export struct SettingsPage {
       }
       .layoutWeight(1)
       Toggle({ type: ToggleType.Switch, isOn: this.consoleLogEnabled })
+        .id('tirtc_example_console_log_toggle')
         .selectedColor('#659287')
         .onChange((enabled: boolean) => {
           this.onConsoleLogEnabledChanged(enabled);
