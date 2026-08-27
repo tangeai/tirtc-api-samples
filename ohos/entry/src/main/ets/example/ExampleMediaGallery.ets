@@ -13,7 +13,7 @@ export async function saveMediaFileToGallery(
   const extension = mediaKind === 'snapshot' ? 'jpg' : 'mp4';
   const photoType = mediaKind === 'snapshot' ? photoAccessHelper.PhotoType.IMAGE : photoAccessHelper.PhotoType.VIDEO;
   const creationConfig: photoAccessHelper.PhotoCreationConfig = {
-    title: `TiStore-${Date.now()}`,
+    title: `TiCloudStorage-${Date.now()}`,
     fileNameExtension: extension,
     photoType,
     subtype: photoAccessHelper.PhotoSubtype.DEFAULT,

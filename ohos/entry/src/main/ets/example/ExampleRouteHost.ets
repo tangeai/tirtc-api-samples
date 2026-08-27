@@ -26,7 +26,7 @@ import { ClientConfigurePage } from './ExampleConfigurePages';
 import { QrScannerPage } from './ExampleQrScannerPage';
 import { SettingsPage } from './ExampleSettingsPage';
 import { DownlinkPlayerPage } from './ExamplePlayerPages';
-import { TiStoreExamplePage } from './TiStoreExamplePage';
+import { TiCloudStorageExamplePage } from './TiCloudStorageExamplePage';
 import { DemoTokenSource } from './ExampleTokenAcquisition';
 
 @Component
@@ -36,16 +36,16 @@ export struct ExampleRouteHost {
   @Prop appId: string = '';
   @Prop remoteId: string = '';
   @Prop token: string = '';
-  @Prop storeAppId: string = '';
-  @Prop storeEndpoint: string = '';
-  @Prop storeToken: string = '';
-  @Prop storeAudioChannelId: string = '';
-  @Prop storeVideoChannelId: string = '';
+  @Prop cloudStorageAppId: string = '';
+  @Prop cloudStorageEndpoint: string = '';
+  @Prop cloudStorageToken: string = '';
+  @Prop cloudStorageAudioChannelId: string = '';
+  @Prop cloudStorageVideoChannelId: string = '';
   @Prop tokenIssuerBaseUrl: string = '';
   @Prop tokenSource: DemoTokenSource = DemoTokenSource.issuer;
   @Prop qrPayloadText: string = '';
   @Prop qrErrorText: string = '';
-  @Prop qrForStore: boolean = false;
+  @Prop qrForCloudStorage: boolean = false;
   @Prop audioStreamId: string = '';
   @Prop videoStreamId: string = '';
   @Prop videoDecoderPreference: TiRtcVideoDecoderPreference = TiRtcVideoDecoderPreference.auto;
@@ -81,23 +81,23 @@ export struct ExampleRouteHost {
   onAppIdChanged: (value: string) => void = () => {};
   onRemoteIdChanged: (value: string) => void = () => {};
   onTokenChanged: (value: string) => void = () => {};
-  onStoreAppIdChanged: (value: string) => void = () => {};
-  onStoreEndpointChanged: (value: string) => void = () => {};
-  onStoreTokenChanged: (value: string) => void = () => {};
-  onStoreAudioChannelIdChanged: (value: string) => void = () => {};
-  onStoreVideoChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageAppIdChanged: (value: string) => void = () => {};
+  onCloudStorageEndpointChanged: (value: string) => void = () => {};
+  onCloudStorageTokenChanged: (value: string) => void = () => {};
+  onCloudStorageAudioChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageVideoChannelIdChanged: (value: string) => void = () => {};
   onTokenIssuerBaseUrlChanged: (value: string) => void = () => {};
   onTokenSourceChanged: (value: DemoTokenSource) => void = () => {};
   onOpenQrScanner: () => void = () => {};
-  onOpenStoreQrScanner: () => void = () => {};
+  onOpenCloudStorageQrScanner: () => void = () => {};
   onQrScannerBack: () => void = () => {};
   onQrPayloadChanged: (value: string) => void = () => {};
   onApplyQrPayload: () => void = () => {};
   onAudioStreamIdChanged: (value: string) => void = () => {};
   onVideoStreamIdChanged: (value: string) => void = () => {};
   onOpenPlayer: () => void = () => {};
-  onOpenStore: () => void = () => {};
-  onStoreBack: () => void = () => {};
+  onOpenCloudStorage: () => void = () => {};
+  onCloudStorageBack: () => void = () => {};
   onSettingsBack: () => void = () => {};
   onDecoderPreferenceChanged: (value: TiRtcVideoDecoderPreference) => void = () => {};
   onOutputBufferStrategyChanged: (value: TiRtcOutputBufferStrategy) => void = () => {};
@@ -127,8 +127,8 @@ export struct ExampleRouteHost {
         this.settingsPage()
       } else if (this.view === ExampleView.qrScanner) {
         this.qrScannerPage()
-      } else if (this.view === ExampleView.store) {
-        this.storePage()
+      } else if (this.view === ExampleView.cloudStorage) {
+        this.cloudStoragePage()
       } else {
         this.playerPage()
       }
@@ -146,11 +146,11 @@ export struct ExampleRouteHost {
       appId: this.appId,
       remoteId: this.remoteId,
       token: this.token,
-      storeAppId: this.storeAppId,
-      storeEndpoint: this.storeEndpoint,
-      storeToken: this.storeToken,
-      storeAudioChannelId: this.storeAudioChannelId,
-      storeVideoChannelId: this.storeVideoChannelId,
+      cloudStorageAppId: this.cloudStorageAppId,
+      cloudStorageEndpoint: this.cloudStorageEndpoint,
+      cloudStorageToken: this.cloudStorageToken,
+      cloudStorageAudioChannelId: this.cloudStorageAudioChannelId,
+      cloudStorageVideoChannelId: this.cloudStorageVideoChannelId,
       tokenIssuerBaseUrl: this.tokenIssuerBaseUrl,
       tokenSource: this.tokenSource,
       audioStreamId: this.audioStreamId,
@@ -162,32 +162,32 @@ export struct ExampleRouteHost {
       onAppIdChanged: this.onAppIdChanged,
       onRemoteIdChanged: this.onRemoteIdChanged,
       onTokenChanged: this.onTokenChanged,
-      onStoreAppIdChanged: this.onStoreAppIdChanged,
-      onStoreEndpointChanged: this.onStoreEndpointChanged,
-      onStoreTokenChanged: this.onStoreTokenChanged,
-      onStoreAudioChannelIdChanged: this.onStoreAudioChannelIdChanged,
-      onStoreVideoChannelIdChanged: this.onStoreVideoChannelIdChanged,
+      onCloudStorageAppIdChanged: this.onCloudStorageAppIdChanged,
+      onCloudStorageEndpointChanged: this.onCloudStorageEndpointChanged,
+      onCloudStorageTokenChanged: this.onCloudStorageTokenChanged,
+      onCloudStorageAudioChannelIdChanged: this.onCloudStorageAudioChannelIdChanged,
+      onCloudStorageVideoChannelIdChanged: this.onCloudStorageVideoChannelIdChanged,
       onTokenIssuerBaseUrlChanged: this.onTokenIssuerBaseUrlChanged,
       onTokenSourceChanged: this.onTokenSourceChanged,
       onOpenQrScanner: this.onOpenQrScanner,
-      onOpenStoreQrScanner: this.onOpenStoreQrScanner,
+      onOpenCloudStorageQrScanner: this.onOpenCloudStorageQrScanner,
       onAudioStreamIdChanged: this.onAudioStreamIdChanged,
       onVideoStreamIdChanged: this.onVideoStreamIdChanged,
       onStartDownlink: this.onOpenPlayer,
-      onOpenStore: this.onOpenStore,
+      onOpenCloudStorage: this.onOpenCloudStorage,
     })
   }
 
   @Builder
-  private storePage() {
-    TiStoreExamplePage({
-      appId: this.storeAppId,
-      endpoint: this.storeEndpoint,
-      token: this.storeToken,
-      audioChannelId: parseStreamId(this.storeAudioChannelId, 10),
-      videoChannelId: parseStreamId(this.storeVideoChannelId, 11),
+  private cloudStoragePage() {
+    TiCloudStorageExamplePage({
+      appId: this.cloudStorageAppId,
+      endpoint: this.cloudStorageEndpoint,
+      token: this.cloudStorageToken,
+      audioChannelId: parseStreamId(this.cloudStorageAudioChannelId, 10),
+      videoChannelId: parseStreamId(this.cloudStorageVideoChannelId, 11),
       consoleLogEnabled: this.consoleLogEnabled,
-      onBack: this.onStoreBack,
+      onBack: this.onCloudStorageBack,
     })
   }
 
@@ -220,7 +220,7 @@ export struct ExampleRouteHost {
   @Builder
   private qrScannerPage() {
     QrScannerPage({
-      storeMode: this.qrForStore,
+      cloudStorageMode: this.qrForCloudStorage,
       payloadText: this.qrPayloadText,
       errorText: this.qrErrorText,
       onBack: this.onQrScannerBack,

@@ -1,11 +1,11 @@
 import type { common } from '@kit.AbilityKit';
 import {
   TiRtcLogging,
-  TiStore,
-  TiStoreRecordingRange,
-  TiStoreReplaySpeed,
-  TiStoreVideoOutputView,
-  TISTORE_ERROR_OK,
+  TiCloudStorage,
+  TiCloudStorageRecordingRange,
+  TiCloudStorageReplaySpeed,
+  TiCloudStorageVideoOutputView,
+  TI_CLOUD_STORAGE_ERROR_OK,
 } from 'tirtc/Index';
 import {
   DEFAULT_AUDIO_STREAM_ID,
@@ -15,34 +15,34 @@ import {
 } from './ExampleConfig';
 import { PlayerStageOverlay } from './ExamplePlayerChrome';
 import { saveMediaFileToGallery } from './ExampleMediaGallery';
-import { TiStoreExampleFlow, TiStoreExampleFlowListener } from './TiStoreExampleFlow';
+import { TiCloudStorageExampleFlow, TiCloudStorageExampleFlowListener } from './TiCloudStorageExampleFlow';
 
 const NOTICE_AUTO_HIDE_MS: number = 3000;
 
-function padStoreClock(value: number): string {
+function padCloudStorageClock(value: number): string {
   return value < 10 ? `0${value}` : `${value}`;
 }
 
-function currentStoreDateText(): string {
+function currentCloudStorageDateText(): string {
   const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
-  return `${now.getUTCFullYear()}-${padStoreClock(now.getUTCMonth() + 1)}-${padStoreClock(now.getUTCDate())}`;
+  return `${now.getUTCFullYear()}-${padCloudStorageClock(now.getUTCMonth() + 1)}-${padCloudStorageClock(now.getUTCDate())}`;
 }
 
 function newestFirstRecordingRanges(
-  ranges: ReadonlyArray<TiStoreRecordingRange>,
-): Array<TiStoreRecordingRange> {
-  const sorted: Array<TiStoreRecordingRange> = [];
-  ranges.forEach((range: TiStoreRecordingRange): void => {
+  ranges: ReadonlyArray<TiCloudStorageRecordingRange>,
+): Array<TiCloudStorageRecordingRange> {
+  const sorted: Array<TiCloudStorageRecordingRange> = [];
+  ranges.forEach((range: TiCloudStorageRecordingRange): void => {
     sorted.push(range);
   });
-  sorted.sort((left: TiStoreRecordingRange, right: TiStoreRecordingRange): number => {
+  sorted.sort((left: TiCloudStorageRecordingRange, right: TiCloudStorageRecordingRange): number => {
     const startOrder = right.startTimeMs - left.startTimeMs;
     return startOrder !== 0 ? startOrder : right.endTimeMs - left.endTimeMs;
   });
   return sorted;
 }
 
-class StoreDayBounds {
+class CloudStorageDayBounds {
   readonly startTimeMs: number;
   readonly endTimeMs: number;
 
@@ -56,7 +56,7 @@ class StoreDayBounds {
 }
 
 @Component
-export struct TiStoreExamplePage {
+export struct TiCloudStorageExamplePage {
   @Prop appId: string = '';
   @Prop endpoint: string = '';
   @Prop token: string = '';
@@ -69,25 +69,25 @@ export struct TiStoreExamplePage {
   @State private querying: boolean = false;
   @State private sheetVisible: boolean = false;
   @State private calendarVisible: boolean = true;
-  @State private ranges: Array<TiStoreRecordingRange> = [];
+  @State private ranges: Array<TiCloudStorageRecordingRange> = [];
   @State private selectedIndex: number = -1;
   @State private currentTimeMs: number = 0;
   @State private replayState: string = 'idle';
   @State private paused: boolean = false;
   @State private muted: boolean = false;
-  @State private speedIndex: number = 0;
+  @State private speedIndex: number = 3;
   @State private recording: boolean = false;
   @State private mediaBusy: boolean = false;
   @State private latestMediaKind: string = '';
   @State private exportProgress: number = -1;
   @State private uploadingLogs: boolean = false;
-  @State private dateText: string = currentStoreDateText();
-  @State private visibleMonth: string = currentStoreDateText().slice(0, 7);
+  @State private dateText: string = currentCloudStorageDateText();
+  @State private visibleMonth: string = currentCloudStorageDateText().slice(0, 7);
   @State private recordingDays: Array<string> = [];
   @State private monthLoading: boolean = false;
   @State private monthFailed: boolean = false;
   @State private queryFailed: boolean = false;
-  private flow?: TiStoreExampleFlow;
+  private flow?: TiCloudStorageExampleFlow;
   private closing?: Promise<void>;
   private active: boolean = false;
   private generation: number = 0;
@@ -115,7 +115,7 @@ export struct TiStoreExamplePage {
         Stack() {
           Stack({ alignContent: Alignment.Center }) {
             if (this.flowReady && this.flow !== undefined) {
-              TiStoreVideoOutputView({
+              TiCloudStorageVideoOutputView({
                 output: this.flow!.videoOutput,
               })
             }
@@ -138,7 +138,7 @@ export struct TiStoreExamplePage {
               Row() {
                 Blank()
                 Text('播放中')
-                  .id('tirtc_example_store_rendering_state')
+                  .id('tirtc_example_ti_cloud_storage_rendering_state')
                   .fontSize(12)
                   .fontColor('#FFFFFF')
                   .padding({ left: 12, right: 12, top: 6, bottom: 6 })
@@ -152,7 +152,7 @@ export struct TiStoreExamplePage {
               Row() {
                 Blank()
                 Text(this.notice)
-                  .id('tirtc_example_store_status')
+                  .id('tirtc_example_ti_cloud_storage_status')
                   .fontSize(13)
                   .fontColor('#FFFFFF')
                   .padding({ left: 16, right: 16, top: 10, bottom: 10 })
@@ -181,7 +181,7 @@ export struct TiStoreExamplePage {
         .width('100%')
         .layoutWeight(1)
         .backgroundColor('#252525')
-        .id('tirtc_example_store_video_stage')
+        .id('tirtc_example_ti_cloud_storage_video_stage')
       }
       .width('100%')
       .height('100%')
@@ -190,7 +190,7 @@ export struct TiStoreExamplePage {
         this.recordingsSheet()
       }
     }
-    .id('tirtc_example_store_page')
+    .id('tirtc_example_ti_cloud_storage_page')
     .width('100%')
     .height('100%')
     .backgroundColor('#FFF8E8')
@@ -201,14 +201,14 @@ export struct TiStoreExamplePage {
   private topBar() {
     Row() {
       Button('<')
-        .id('tirtc_example_store_back_button')
+        .id('tirtc_example_ti_cloud_storage_back_button')
         .width(42)
         .height(36)
         .fontSize(18)
         .fontColor('#659287')
         .backgroundColor('#00FFFFFF')
         .onClick((): void => {
-          void this.backToStoreEntry();
+          void this.backToCloudStorageEntry();
         })
       Text('云录像')
         .fontSize(14)
@@ -218,7 +218,7 @@ export struct TiStoreExamplePage {
         .textOverflow({ overflow: TextOverflow.Ellipsis })
         .layoutWeight(1)
       Button('选择录像')
-        .id('tirtc_example_store_choose_button')
+        .id('tirtc_example_ti_cloud_storage_choose_button')
         .height(36)
         .fontSize(12)
         .fontColor(this.flowReady ? '#659287' : '#777777')
@@ -231,7 +231,7 @@ export struct TiStoreExamplePage {
         })
       Blank().width(8)
       Button(this.uploadingLogs ? '上传中' : '上传日志')
-        .id('tirtc_example_store_log_upload_button')
+        .id('tirtc_example_ti_cloud_storage_log_upload_button')
         .height(36)
         .fontSize(12)
         .fontColor(this.flowReady && !this.uploadingLogs ? '#659287' : '#777777')
@@ -263,7 +263,7 @@ export struct TiStoreExamplePage {
         max: 1000,
         step: 1,
       })
-        .id('tirtc_example_store_seek_slider')
+        .id('tirtc_example_ti_cloud_storage_seek_slider')
         .layoutWeight(1)
         .selectedColor('#659287')
         .trackColor('#4DFFFFFF')
@@ -288,7 +288,7 @@ export struct TiStoreExamplePage {
       Row({ space: 12 }) {
         Blank()
         Button(this.recording ? '◉' : '●')
-          .id('tirtc_example_store_recording_button')
+          .id('tirtc_example_ti_cloud_storage_recording_button')
           .accessibilityText(this.recording ? '停止本地保存' : '开始本地保存')
           .width(48)
           .height(48)
@@ -301,7 +301,7 @@ export struct TiStoreExamplePage {
             void this.toggleRecording();
           })
         Button('▣')
-          .id('tirtc_example_store_snapshot_button')
+          .id('tirtc_example_ti_cloud_storage_snapshot_button')
           .accessibilityText('截图')
           .width(48)
           .height(48)
@@ -314,7 +314,7 @@ export struct TiStoreExamplePage {
             void this.takeSnapshot();
           })
         Button('▤')
-          .id('tirtc_example_store_gallery_button')
+          .id('tirtc_example_ti_cloud_storage_gallery_button')
           .accessibilityText('保存到系统相册')
           .width(48)
           .height(48)
@@ -331,24 +331,27 @@ export struct TiStoreExamplePage {
       Row({ space: 10 }) {
         Blank()
         Button(this.muted ? '恢复声音' : '静音')
-          .id('tirtc_example_store_mute_button')
+          .id('tirtc_example_ti_cloud_storage_mute_button')
           .height(50)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.muted ? '#FFFFFF' : '#659287')
           .backgroundColor(this.muted ? '#F59E0B' : '#FFFFFF')
           .borderRadius(25)
-          .enabled(this.canControl() && this.speedIndex === 0)
+          .enabled(this.canControl() && this.speedIndex === 3)
           .onClick((): void => {
             this.toggleMuted();
           })
         Select([
-          { value: 'x1' },
-          { value: 'x2' },
-          { value: 'x4' },
-          { value: 'x8' },
+          { value: '1/8×' },
+          { value: '1/4×' },
+          { value: '1/2×' },
+          { value: '1×' },
+          { value: '2×' },
+          { value: '4×' },
+          { value: '8×' },
         ])
-          .id('tirtc_example_store_speed_selector')
+          .id('tirtc_example_ti_cloud_storage_speed_selector')
           .selected(this.speedIndex)
           .value(this.speedLabel())
           .height(50)
@@ -362,7 +365,7 @@ export struct TiStoreExamplePage {
             this.changeSpeed(index);
           })
         Button(this.paused ? '继续播放' : '暂停播放')
-          .id('tirtc_example_store_pause_button')
+          .id('tirtc_example_ti_cloud_storage_pause_button')
           .height(56)
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
@@ -384,7 +387,7 @@ export struct TiStoreExamplePage {
     Column() {
       Row() {
         Button('上个月')
-          .id('tirtc_example_store_previous_month_button')
+          .id('tirtc_example_ti_cloud_storage_previous_month_button')
           .height(36)
           .fontSize(12)
           .fontColor('#659287')
@@ -400,7 +403,7 @@ export struct TiStoreExamplePage {
           .fontColor('#666666')
           .textAlign(TextAlign.Center)
         Button('下个月')
-          .id('tirtc_example_store_next_month_button')
+          .id('tirtc_example_ti_cloud_storage_next_month_button')
           .height(36)
           .fontSize(12)
           .fontColor('#659287')
@@ -431,8 +434,8 @@ export struct TiStoreExamplePage {
         ForEach(this.monthCells(), (date: string, index: number) => {
           GridItem() {
             Button(this.calendarDayLabel(date))
-              .id(date.length === 0 ? `tirtc_example_store_calendar_blank_${index}` :
-                `tirtc_example_store_calendar_day_${date}`)
+              .id(date.length === 0 ? `tirtc_example_ti_cloud_storage_calendar_blank_${index}` :
+                `tirtc_example_ti_cloud_storage_calendar_day_${date}`)
               .height(46)
               .fontSize(10)
               .fontColor(this.dateText === date ? '#FFFFFF' : '#666666')
@@ -483,7 +486,7 @@ export struct TiStoreExamplePage {
       Column() {
         Row() {
           Text('')
-            .id('tirtc_example_store_sheet_handle')
+            .id('tirtc_example_ti_cloud_storage_sheet_handle')
             .width(40)
             .height(4)
             .borderRadius(2)
@@ -503,7 +506,7 @@ export struct TiStoreExamplePage {
                 .fontColor('#666666')
                 .layoutWeight(1)
               Button('重新选择日期')
-                .id('tirtc_example_store_reselect_date_button')
+                .id('tirtc_example_ti_cloud_storage_reselect_date_button')
                 .height(36)
                 .fontSize(12)
                 .fontColor('#659287')
@@ -537,7 +540,7 @@ export struct TiStoreExamplePage {
                       .fontSize(13)
                       .fontColor('#848282')
                     Button('重试')
-                      .id('tirtc_example_store_query_retry_button')
+                      .id('tirtc_example_ti_cloud_storage_query_retry_button')
                       .height(48)
                       .fontSize(14)
                       .fontWeight(FontWeight.Medium)
@@ -559,7 +562,7 @@ export struct TiStoreExamplePage {
                       .fontSize(13)
                       .fontColor('#848282')
                     Button('重新查询')
-                      .id('tirtc_example_store_query_empty_retry_button')
+                      .id('tirtc_example_ti_cloud_storage_query_empty_retry_button')
                       .height(40)
                       .fontSize(12)
                       .fontWeight(FontWeight.Medium)
@@ -576,12 +579,12 @@ export struct TiStoreExamplePage {
                   .width('100%')
                   .padding(24)
                 } else {
-                  ForEach(this.ranges, (range: TiStoreRecordingRange, index: number) => {
+                  ForEach(this.ranges, (range: TiCloudStorageRecordingRange, index: number) => {
                     Column() {
                       Row() {
                         Column() {
                           Text(`${this.formatClock(range.startTimeMs)} — ${this.formatClock(range.endTimeMs)}`)
-                            .id(`tirtc_example_store_recording_rank_${index}`)
+                            .id(`tirtc_example_ti_cloud_storage_recording_rank_${index}`)
                             .fontSize(14)
                             .fontColor('#666666')
                           Text(`时长 ${this.formatDuration(range.endTimeMs - range.startTimeMs)}`)
@@ -594,7 +597,7 @@ export struct TiStoreExamplePage {
                           this.playRange(index);
                         })
                         Button(this.exportProgress >= 0 ? `${Math.round(this.exportProgress * 100)}%` : '下载')
-                          .id(`tirtc_example_store_export_${range.startTimeMs}`)
+                          .id(`tirtc_example_ti_cloud_storage_export_${range.startTimeMs}`)
                           .height(40)
                           .fontSize(12)
                           .fontWeight(FontWeight.Medium)
@@ -614,9 +617,9 @@ export struct TiStoreExamplePage {
                       })
                     }
                     .width('100%')
-                    .id(`tirtc_example_store_recording_${range.startTimeMs}`)
+                    .id(`tirtc_example_ti_cloud_storage_recording_${range.startTimeMs}`)
                     Divider().color('#E1DBCF')
-                  }, (range: TiStoreRecordingRange): string => `${range.startTimeMs}-${range.endTimeMs}`)
+                  }, (range: TiCloudStorageRecordingRange): string => `${range.startTimeMs}-${range.endTimeMs}`)
                 }
               }
               .width('100%')
@@ -624,7 +627,7 @@ export struct TiStoreExamplePage {
             .width('100%')
             .layoutWeight(1)
           }
-          .id('tirtc_example_store_recording_list')
+          .id('tirtc_example_ti_cloud_storage_recording_list')
           .width('100%')
           .layoutWeight(1)
         }
@@ -634,7 +637,7 @@ export struct TiStoreExamplePage {
       .padding({ left: 0, right: 0, top: 6, bottom: 12 })
       .backgroundColor('#FFF8E8')
       .borderRadius({ topLeft: 24, topRight: 24 })
-      .id('tirtc_example_store_sheet')
+      .id('tirtc_example_ti_cloud_storage_sheet')
       .onClick((): void => {
       })
     }
@@ -652,21 +655,21 @@ export struct TiStoreExamplePage {
     }
     if (!this.isCurrent(generation)) return;
     const context = getContext(this) as common.UIAbilityContext;
-    const initCode = await TiStore.init({
+    const initCode = await TiCloudStorage.init({
       context,
       appId: this.appId.trim(),
       endpoint: this.endpoint.trim(),
       consoleLogEnabled: this.consoleLogEnabled,
     });
     if (!this.isCurrent(generation)) {
-      if (initCode === TISTORE_ERROR_OK) TiStore.shutdown();
+      if (initCode === TI_CLOUD_STORAGE_ERROR_OK) TiCloudStorage.shutdown();
       return;
     }
-    if (initCode !== TISTORE_ERROR_OK) {
-      this.setNotice(`初始化失败 · ${TiStore.errorToString(initCode)} (${initCode})`);
+    if (initCode !== TI_CLOUD_STORAGE_ERROR_OK) {
+      this.setNotice(`初始化失败 · ${TiCloudStorage.errorToString(initCode)} (${initCode})`);
       return;
     }
-    const listener: TiStoreExampleFlowListener = {
+    const listener: TiCloudStorageExampleFlowListener = {
       onReplayState: (state: string): void => {
         if (!this.isCurrent(generation)) return;
         this.replayState = state;
@@ -681,7 +684,7 @@ export struct TiStoreExamplePage {
       },
       onError: (code: number): void => {
         if (!this.isCurrent(generation)) return;
-        this.setNotice(`操作失败 · ${TiStore.errorToString(code)} (${code})`);
+        this.setNotice(`操作失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
       },
       onExportProgress: (progress: number): void => {
         if (!this.isCurrent(generation)) return;
@@ -692,7 +695,7 @@ export struct TiStoreExamplePage {
         this.latestMediaKind = kind;
       },
     };
-    this.flow = new TiStoreExampleFlow(this.token, listener);
+    this.flow = new TiCloudStorageExampleFlow(this.token, listener);
     if (!this.isCurrent(generation)) {
       await this.closeFlow();
       return;
@@ -718,7 +721,7 @@ export struct TiStoreExamplePage {
     if (this.flow !== flow || generation !== this.dayQueryGeneration) return;
     this.ranges = newestFirstRecordingRanges(result.recordings);
     this.querying = false;
-    this.queryFailed = result.code !== TISTORE_ERROR_OK;
+    this.queryFailed = result.code !== TI_CLOUD_STORAGE_ERROR_OK;
     if (this.queryFailed) {
       this.setNotice('查询失败');
     }
@@ -741,21 +744,21 @@ export struct TiStoreExamplePage {
     });
     this.recordingDays = days;
     this.monthLoading = false;
-    this.monthFailed = result.code !== TISTORE_ERROR_OK;
+    this.monthFailed = result.code !== TI_CLOUD_STORAGE_ERROR_OK;
   }
 
   private shiftMonth(delta: number): void {
     const parts = this.visibleMonth.split('-');
     const value = new Date(Date.UTC(Number(parts[0]), Number(parts[1]) - 1 + delta, 1));
     this.visibleMonth =
-      `${value.getUTCFullYear()}-${padStoreClock(value.getUTCMonth() + 1)}`;
+      `${value.getUTCFullYear()}-${padCloudStorageClock(value.getUTCMonth() + 1)}`;
     void this.queryMonth();
   }
 
   private monthDateBounds(month: string): Array<string> {
     const parts = month.split('-');
     const last = new Date(Date.UTC(Number(parts[0]), Number(parts[1]), 0)).getUTCDate();
-    return [`${month}-01`, `${month}-${padStoreClock(last)}`];
+    return [`${month}-01`, `${month}-${padCloudStorageClock(last)}`];
   }
 
   private monthCells(): Array<string> {
@@ -767,7 +770,7 @@ export struct TiStoreExamplePage {
     const cells: Array<string> = [];
     for (let index = 0; index < leading; index += 1) cells.push('');
     for (let day = 1; day <= last; day += 1) {
-      cells.push(`${this.visibleMonth}-${padStoreClock(day)}`);
+      cells.push(`${this.visibleMonth}-${padCloudStorageClock(day)}`);
     }
     return cells;
   }
@@ -783,17 +786,17 @@ export struct TiStoreExamplePage {
     const range = this.ranges[index];
     if (flow === undefined || range === undefined) return;
     const code = flow.play(range, this.videoChannelId, this.audioChannelId);
-    if (code === TISTORE_ERROR_OK) {
+    if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.selectedIndex = index;
       this.currentTimeMs = range.startTimeMs;
       this.replayState = 'buffering';
       this.paused = false;
       this.muted = false;
-      this.speedIndex = 0;
+      this.speedIndex = 3;
       this.sheetVisible = false;
       this.setNotice('正在播放');
     } else {
-      this.setNotice(`播放失败 · ${TiStore.errorToString(code)} (${code})`);
+      this.setNotice(`播放失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
     }
   }
 
@@ -802,12 +805,12 @@ export struct TiStoreExamplePage {
     if (flow === undefined) return;
     const nextPaused = !this.paused;
     const code = nextPaused ? flow.pause() : flow.resume();
-    if (code === TISTORE_ERROR_OK) {
+    if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.paused = nextPaused;
       this.replayState = nextPaused ? 'paused' : 'buffering';
       this.setNotice(nextPaused ? '已暂停' : '已恢复播放');
     } else {
-      this.setNotice(`暂停操作失败 · ${TiStore.errorToString(code)} (${code})`);
+      this.setNotice(`暂停操作失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
     }
   }
 
@@ -816,25 +819,26 @@ export struct TiStoreExamplePage {
     if (flow === undefined) return;
     const nextMuted = !this.muted;
     const code = flow.setMuted(nextMuted);
-    if (code === TISTORE_ERROR_OK) {
+    if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.muted = nextMuted;
       this.setNotice(nextMuted ? '已静音' : '已恢复声音');
     } else {
-      this.setNotice(`音量设置失败 · ${TiStore.errorToString(code)} (${code})`);
+      this.setNotice(`音量设置失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
     }
   }
 
   private changeSpeed(index: number): void {
     const flow = this.flow;
-    if (flow === undefined || index < 0 || index > 3) return;
-    const speeds = [TiStoreReplaySpeed.x1, TiStoreReplaySpeed.x2, TiStoreReplaySpeed.x4,
-      TiStoreReplaySpeed.x8];
+    if (flow === undefined || index < 0 || index > 6) return;
+    const speeds = [TiCloudStorageReplaySpeed.x0_125, TiCloudStorageReplaySpeed.x0_25,
+      TiCloudStorageReplaySpeed.x0_5, TiCloudStorageReplaySpeed.x1, TiCloudStorageReplaySpeed.x2,
+      TiCloudStorageReplaySpeed.x4, TiCloudStorageReplaySpeed.x8];
     const code = flow.setSpeed(speeds[index]);
-    if (code === TISTORE_ERROR_OK) {
+    if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.speedIndex = index;
       this.setNotice(`播放倍速已切换为 ${this.speedLabel()}`);
     } else {
-      this.setNotice(`倍速设置失败 · ${TiStore.errorToString(code)} (${code})`);
+      this.setNotice(`倍速设置失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
     }
   }
 
@@ -843,11 +847,11 @@ export struct TiStoreExamplePage {
     if (flow === undefined || this.mediaBusy) return;
     if (!this.recording) {
       const code = flow.startRecording(this.videoChannelId, this.audioChannelId);
-      if (code === TISTORE_ERROR_OK) {
+      if (code === TI_CLOUD_STORAGE_ERROR_OK) {
         this.recording = true;
         this.setNotice('已开始本地保存');
       } else {
-        this.setNotice(`开始保存失败 · ${TiStore.errorToString(code)} (${code})`);
+        this.setNotice(`开始保存失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
       }
       return;
     }
@@ -855,8 +859,8 @@ export struct TiStoreExamplePage {
     const code = await flow.stopRecording();
     this.mediaBusy = false;
     this.recording = false;
-    this.setNotice(code === TISTORE_ERROR_OK ? '本地保存已完成' :
-      `停止保存失败 · ${TiStore.errorToString(code)} (${code})`);
+    this.setNotice(code === TI_CLOUD_STORAGE_ERROR_OK ? '本地保存已完成' :
+      `停止保存失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
   }
 
   private async takeSnapshot(): Promise<void> {
@@ -865,8 +869,8 @@ export struct TiStoreExamplePage {
     this.mediaBusy = true;
     const code = await flow.takeSnapshot();
     this.mediaBusy = false;
-    this.setNotice(code === TISTORE_ERROR_OK ? '截图已完成' :
-      `截图失败 · ${TiStore.errorToString(code)} (${code})`);
+    this.setNotice(code === TI_CLOUD_STORAGE_ERROR_OK ? '截图已完成' :
+      `截图失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
   }
 
   private async exportRange(index: number): Promise<void> {
@@ -877,8 +881,8 @@ export struct TiStoreExamplePage {
     this.setNotice('正在下载录像…');
     const code = await flow.exportRecording(range, this.videoChannelId, this.audioChannelId);
     this.exportProgress = -1;
-    this.setNotice(code === TISTORE_ERROR_OK ? '范围录像已下载' :
-      `导出失败 · ${TiStore.errorToString(code)} (${code})`);
+    this.setNotice(code === TI_CLOUD_STORAGE_ERROR_OK ? '范围录像已下载' :
+      `导出失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
   }
 
   private async saveLatestToGallery(): Promise<void> {
@@ -894,8 +898,8 @@ export struct TiStoreExamplePage {
     }
     const deleted = await flow.deleteLatestMedia();
     this.mediaBusy = false;
-    this.setNotice(deleted === TISTORE_ERROR_OK ? '已保存到系统相册' :
-      `相册已保存，但源文件删除失败 · ${TiStore.errorToString(deleted)} (${deleted})`);
+    this.setNotice(deleted === TI_CLOUD_STORAGE_ERROR_OK ? '已保存到系统相册' :
+      `相册已保存，但源文件删除失败 · ${TiCloudStorage.errorToString(deleted)} (${deleted})`);
   }
 
   private async uploadLogs(): Promise<void> {
@@ -904,7 +908,7 @@ export struct TiStoreExamplePage {
     this.setNotice('日志上传中');
     const result = await TiRtcLogging.upload();
     this.uploadingLogs = false;
-    this.setNotice(result.code === TISTORE_ERROR_OK ? `日志上传成功 · ${result.logId ?? ''}` :
+    this.setNotice(result.code === TI_CLOUD_STORAGE_ERROR_OK ? `日志上传成功 · ${result.logId ?? ''}` :
       `日志上传失败 · ${result.code}`);
   }
 
@@ -914,8 +918,8 @@ export struct TiStoreExamplePage {
     if (flow === undefined || range === undefined) return;
     const timeMs = range.startTimeMs + Math.round((range.endTimeMs - range.startTimeMs) * value / 1000);
     const code = flow.seek(timeMs);
-    this.setNotice(code === TISTORE_ERROR_OK ? '已跳转到所选位置' :
-      `Seek 失败 · ${TiStore.errorToString(code)} (${code})`);
+    this.setNotice(code === TI_CLOUD_STORAGE_ERROR_OK ? '已跳转到所选位置' :
+      `Seek 失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
   }
 
   private setNotice(text: string): void {
@@ -938,7 +942,7 @@ export struct TiStoreExamplePage {
     this.noticeTimer = -1;
   }
 
-  private async backToStoreEntry(): Promise<void> {
+  private async backToCloudStorageEntry(): Promise<void> {
     this.active = false;
     this.generation += 1;
     await this.closeFlow();
@@ -958,7 +962,7 @@ export struct TiStoreExamplePage {
     const started = (async (): Promise<void> => {
       if (flow !== undefined) {
         await flow.dispose();
-        TiStore.shutdown();
+        TiCloudStorage.shutdown();
       }
       this.recording = false;
       this.mediaBusy = false;
@@ -976,7 +980,7 @@ export struct TiStoreExamplePage {
     return this.active && this.generation === generation;
   }
 
-  private selectedRange(): TiStoreRecordingRange | undefined {
+  private selectedRange(): TiCloudStorageRecordingRange | undefined {
     return this.selectedIndex < 0 ? undefined : this.ranges[this.selectedIndex];
   }
 
@@ -1006,26 +1010,26 @@ export struct TiStoreExamplePage {
     return this.stageStatusLabel().length > 0;
   }
 
-  private selectedDayBounds(): StoreDayBounds | undefined {
+  private selectedDayBounds(): CloudStorageDayBounds | undefined {
     const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(this.dateText.trim());
     if (match === null) return undefined;
     const startTimeMs = Date.parse(`${this.dateText}T00:00:00+08:00`);
     if (!Number.isFinite(startTimeMs)) return undefined;
-    return new StoreDayBounds(startTimeMs, startTimeMs + 24 * 60 * 60 * 1000);
+    return new CloudStorageDayBounds(startTimeMs, startTimeMs + 24 * 60 * 60 * 1000);
   }
 
   private speedLabel(): string {
-    return ['x1', 'x2', 'x4', 'x8'][this.speedIndex];
+    return ['1/8×', '1/4×', '1/2×', '1×', '2×', '4×', '8×'][this.speedIndex];
   }
 
   private formatClock(timeMs: number): string {
     if (timeMs <= 0) return '--:--:--';
     const date = new Date(timeMs + 8 * 60 * 60 * 1000);
-    return `${padStoreClock(date.getUTCHours())}:${padStoreClock(date.getUTCMinutes())}:${padStoreClock(date.getUTCSeconds())}`;
+    return `${padCloudStorageClock(date.getUTCHours())}:${padCloudStorageClock(date.getUTCMinutes())}:${padCloudStorageClock(date.getUTCSeconds())}`;
   }
 
   private formatDuration(durationMs: number): string {
     const seconds = Math.max(0, Math.round(durationMs / 1000));
-    return `${padStoreClock(Math.floor(seconds / 60))}:${padStoreClock(seconds % 60)}`;
+    return `${padCloudStorageClock(Math.floor(seconds / 60))}:${padCloudStorageClock(seconds % 60)}`;
   }
 }

@@ -14,11 +14,11 @@ export struct ClientConfigurePage {
   @Prop appId: string = '';
   @Prop remoteId: string = '';
   @Prop token: string = '';
-  @Prop storeAppId: string = '';
-  @Prop storeEndpoint: string = '';
-  @Prop storeToken: string = '';
-  @Prop storeAudioChannelId: string = '';
-  @Prop storeVideoChannelId: string = '';
+  @Prop cloudStorageAppId: string = '';
+  @Prop cloudStorageEndpoint: string = '';
+  @Prop cloudStorageToken: string = '';
+  @Prop cloudStorageAudioChannelId: string = '';
+  @Prop cloudStorageVideoChannelId: string = '';
   @Prop tokenIssuerBaseUrl: string = '';
   @Prop tokenSource: DemoTokenSource = DemoTokenSource.issuer;
   @Prop audioStreamId: string = '';
@@ -31,19 +31,19 @@ export struct ClientConfigurePage {
   onAppIdChanged: (value: string) => void = () => {};
   onRemoteIdChanged: (value: string) => void = () => {};
   onTokenChanged: (value: string) => void = () => {};
-  onStoreAppIdChanged: (value: string) => void = () => {};
-  onStoreEndpointChanged: (value: string) => void = () => {};
-  onStoreTokenChanged: (value: string) => void = () => {};
-  onStoreAudioChannelIdChanged: (value: string) => void = () => {};
-  onStoreVideoChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageAppIdChanged: (value: string) => void = () => {};
+  onCloudStorageEndpointChanged: (value: string) => void = () => {};
+  onCloudStorageTokenChanged: (value: string) => void = () => {};
+  onCloudStorageAudioChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageVideoChannelIdChanged: (value: string) => void = () => {};
   onTokenIssuerBaseUrlChanged: (value: string) => void = () => {};
   onTokenSourceChanged: (value: DemoTokenSource) => void = () => {};
   onOpenQrScanner: () => void = () => {};
-  onOpenStoreQrScanner: () => void = () => {};
+  onOpenCloudStorageQrScanner: () => void = () => {};
   onAudioStreamIdChanged: (value: string) => void = () => {};
   onVideoStreamIdChanged: (value: string) => void = () => {};
   onStartDownlink: () => void = () => {};
-  onOpenStore: () => void = () => {};
+  onOpenCloudStorage: () => void = () => {};
 
   build() {
     Scroll() {
@@ -86,7 +86,7 @@ export struct ClientConfigurePage {
         if (this.productIndex === 0) {
           this.rtcConfiguration()
         } else {
-          this.storeConfiguration()
+          this.cloudStorageConfiguration()
         }
         this.errorLabel()
       }
@@ -109,7 +109,7 @@ export struct ClientConfigurePage {
     Row() {
       this.productTab('RTC', 0, 'tirtc_example_rtc_product_tab')
       Blank().width(3)
-      this.productTab('云录像', 1, 'tirtc_example_store_product_tab')
+      this.productTab('云录像', 1, 'tirtc_example_ti_cloud_storage_product_tab')
     }
     .width('100%')
     .height(44)
@@ -174,44 +174,44 @@ export struct ClientConfigurePage {
   }
 
   @Builder
-  private storeConfiguration() {
-    this.inputField('app_id', 'TiStore 应用标识', this.storeAppId, this.onStoreAppIdChanged,
-      'tirtc_example_store_app_id_field')
+  private cloudStorageConfiguration() {
+    this.inputField('app_id', 'Ti Cloud Storage 应用标识', this.cloudStorageAppId, this.onCloudStorageAppIdChanged,
+      'tirtc_example_ti_cloud_storage_app_id_field')
     Blank().height(16)
-    this.inputField('endpoint', '留空则使用默认环境', this.storeEndpoint,
-      this.onStoreEndpointChanged, 'tirtc_example_store_endpoint_field')
+    this.inputField('endpoint', '留空则使用默认环境', this.cloudStorageEndpoint,
+      this.onCloudStorageEndpointChanged, 'tirtc_example_ti_cloud_storage_endpoint_field')
     Blank().height(16)
     Row() {
       Column() {
-        this.inputFieldContent('token', '粘贴 TiStore APP Token', this.storeToken,
-          this.onStoreTokenChanged, 'tirtc_example_store_token_field', true)
+        this.inputFieldContent('token', '粘贴 Ti Cloud Storage APP Token', this.cloudStorageToken,
+          this.onCloudStorageTokenChanged, 'tirtc_example_ti_cloud_storage_token_field', true)
       }
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       Blank().width(10)
       Button('扫码')
-        .id('tirtc_example_store_token_scan_button')
+        .id('tirtc_example_ti_cloud_storage_token_scan_button')
         .width(68)
         .height(56)
         .fontSize(13)
         .fontColor('#659287')
         .backgroundColor('#FFFFFF')
         .border({ width: 1, color: '#659287', radius: 20 })
-        .onClick(this.onOpenStoreQrScanner)
+        .onClick(this.onOpenCloudStorageQrScanner)
     }
     .width('100%')
     Blank().height(16)
     Row() {
-      this.streamField('audio_channel_id', '默认 10', this.storeAudioChannelId,
-        this.onStoreAudioChannelIdChanged, 'tirtc_example_store_audio_channel_field')
+      this.streamField('audio_channel_id', '默认 10', this.cloudStorageAudioChannelId,
+        this.onCloudStorageAudioChannelIdChanged, 'tirtc_example_ti_cloud_storage_audio_channel_field')
       Blank().width(16)
-      this.streamField('video_channel_id', '默认 11', this.storeVideoChannelId,
-        this.onStoreVideoChannelIdChanged, 'tirtc_example_store_video_channel_field')
+      this.streamField('video_channel_id', '默认 11', this.cloudStorageVideoChannelId,
+        this.onCloudStorageVideoChannelIdChanged, 'tirtc_example_ti_cloud_storage_video_channel_field')
     }
     .width('100%')
     Blank().height(20)
     Button('播放云录像')
-      .id('tirtc_example_open_store_button')
+      .id('tirtc_example_open_ti_cloud_storage_button')
       .width('100%')
       .height(56)
       .fontSize(16)
@@ -220,7 +220,7 @@ export struct ClientConfigurePage {
       .backgroundColor('#659287')
       .borderRadius(28)
       .enabled(!this.connecting)
-      .onClick(this.onOpenStore)
+      .onClick(this.onOpenCloudStorage)
   }
 
   @Builder

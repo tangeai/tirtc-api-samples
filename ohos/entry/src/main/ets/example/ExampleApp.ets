@@ -44,7 +44,7 @@ import {
   parseDemoTokenSource,
   resolveDemoConnectionToken,
   tryParseDemoScanPayload,
-  tryParseDemoStoreScanPayload,
+  tryParseDemoCloudStorageScanPayload,
 } from './ExampleTokenAcquisition';
 
 @Component
@@ -56,16 +56,16 @@ export struct ExampleApp {
   @State private endpoint: string = appStorageString('tirtc.endpoint');
   @State private remoteId: string = appStorageString('tirtc.remote_id');
   @State private token: string = appStorageString('tirtc.token');
-  @State private storeAppId: string = appStorageString('tistore.app_id');
-  @State private storeEndpoint: string = appStorageString('tistore.endpoint');
-  @State private storeToken: string = appStorageString('tistore.app_token');
-  @State private storeAudioChannelId: string = appStorageString('tistore.audio_channel_id') || '10';
-  @State private storeVideoChannelId: string = appStorageString('tistore.video_channel_id') || '11';
+  @State private cloudStorageAppId: string = appStorageString('ti_cloud_storage.app_id');
+  @State private cloudStorageEndpoint: string = appStorageString('ti_cloud_storage.endpoint');
+  @State private cloudStorageToken: string = appStorageString('ti_cloud_storage.app_token');
+  @State private cloudStorageAudioChannelId: string = appStorageString('ti_cloud_storage.audio_channel_id') || '10';
+  @State private cloudStorageVideoChannelId: string = appStorageString('ti_cloud_storage.video_channel_id') || '11';
   @State private tokenIssuerBaseUrl: string = appStorageString('tirtc.token_issuer_base_url');
   @State private tokenSource: DemoTokenSource = parseDemoTokenSource(appStorageString('tirtc.token_source'));
   @State private qrPayloadText: string = '';
   @State private qrErrorText: string = '';
-  @State private qrForStore: boolean = false;
+  @State private qrForCloudStorage: boolean = false;
   @State private audioStreamId: string = appStorageString('tirtc.audio_stream_id');
   @State private videoStreamId: string = appStorageString('tirtc.video_stream_id');
   @State private videoDecoderPreference: TiRtcVideoDecoderPreference =
@@ -112,16 +112,16 @@ export struct ExampleApp {
         appId: this.appId,
         remoteId: this.remoteId,
         token: this.token,
-        storeAppId: this.storeAppId,
-        storeEndpoint: this.storeEndpoint,
-        storeToken: this.storeToken,
-        storeAudioChannelId: this.storeAudioChannelId,
-        storeVideoChannelId: this.storeVideoChannelId,
+        cloudStorageAppId: this.cloudStorageAppId,
+        cloudStorageEndpoint: this.cloudStorageEndpoint,
+        cloudStorageToken: this.cloudStorageToken,
+        cloudStorageAudioChannelId: this.cloudStorageAudioChannelId,
+        cloudStorageVideoChannelId: this.cloudStorageVideoChannelId,
         tokenIssuerBaseUrl: this.tokenIssuerBaseUrl,
         tokenSource: this.tokenSource,
         qrPayloadText: this.qrPayloadText,
         qrErrorText: this.qrErrorText,
-        qrForStore: this.qrForStore,
+        qrForCloudStorage: this.qrForCloudStorage,
         audioStreamId: this.audioStreamId,
         videoStreamId: this.videoStreamId,
         videoDecoderPreference: this.videoDecoderPreference,
@@ -174,25 +174,25 @@ export struct ExampleApp {
           if (value.trim().length > 0) this.tokenSource = DemoTokenSource.oneTime;
           writeAppStorageString('tirtc.token', value);
         },
-        onStoreAppIdChanged: (value: string): void => {
-          this.storeAppId = value;
-          writeAppStorageString('tistore.app_id', value);
+        onCloudStorageAppIdChanged: (value: string): void => {
+          this.cloudStorageAppId = value;
+          writeAppStorageString('ti_cloud_storage.app_id', value);
         },
-        onStoreEndpointChanged: (value: string): void => {
-          this.storeEndpoint = value;
-          writeAppStorageString('tistore.endpoint', value);
+        onCloudStorageEndpointChanged: (value: string): void => {
+          this.cloudStorageEndpoint = value;
+          writeAppStorageString('ti_cloud_storage.endpoint', value);
         },
-        onStoreTokenChanged: (value: string): void => {
-          this.storeToken = value;
-          writeAppStorageString('tistore.app_token', value);
+        onCloudStorageTokenChanged: (value: string): void => {
+          this.cloudStorageToken = value;
+          writeAppStorageString('ti_cloud_storage.app_token', value);
         },
-        onStoreAudioChannelIdChanged: (value: string): void => {
-          this.storeAudioChannelId = value;
-          writeAppStorageString('tistore.audio_channel_id', value);
+        onCloudStorageAudioChannelIdChanged: (value: string): void => {
+          this.cloudStorageAudioChannelId = value;
+          writeAppStorageString('ti_cloud_storage.audio_channel_id', value);
         },
-        onStoreVideoChannelIdChanged: (value: string): void => {
-          this.storeVideoChannelId = value;
-          writeAppStorageString('tistore.video_channel_id', value);
+        onCloudStorageVideoChannelIdChanged: (value: string): void => {
+          this.cloudStorageVideoChannelId = value;
+          writeAppStorageString('ti_cloud_storage.video_channel_id', value);
         },
         onTokenIssuerBaseUrlChanged: (value: string): void => {
           this.tokenIssuerBaseUrl = value;
@@ -204,13 +204,13 @@ export struct ExampleApp {
           writeAppStorageString('tirtc.token_source', demoTokenSourceStorageValue(value));
         },
         onOpenQrScanner: (): void => {
-          this.qrForStore = false;
+          this.qrForCloudStorage = false;
           this.qrPayloadText = '';
           this.qrErrorText = '';
           this.view = ExampleView.qrScanner;
         },
-        onOpenStoreQrScanner: (): void => {
-          this.qrForStore = true;
+        onOpenCloudStorageQrScanner: (): void => {
+          this.qrForCloudStorage = true;
           this.qrPayloadText = '';
           this.qrErrorText = '';
           this.view = ExampleView.qrScanner;
@@ -237,19 +237,19 @@ export struct ExampleApp {
         onOpenPlayer: (): void => {
           void this.openPlayer();
         },
-        onOpenStore: (): void => {
-          const audioChannelId = parseStreamId(this.storeAudioChannelId, -1);
-          const videoChannelId = parseStreamId(this.storeVideoChannelId, -1);
-          if (this.storeAppId.trim().length === 0 || this.storeToken.length === 0 ||
-            this.storeToken !== this.storeToken.trim() || audioChannelId < 0 || audioChannelId > 255 ||
+        onOpenCloudStorage: (): void => {
+          const audioChannelId = parseStreamId(this.cloudStorageAudioChannelId, -1);
+          const videoChannelId = parseStreamId(this.cloudStorageVideoChannelId, -1);
+          if (this.cloudStorageAppId.trim().length === 0 || this.cloudStorageToken.length === 0 ||
+            this.cloudStorageToken !== this.cloudStorageToken.trim() || audioChannelId < 0 || audioChannelId > 255 ||
             videoChannelId < 0 || videoChannelId > 255) {
             this.lastError = '请补全云录像参数；Token 首尾不能有空白，Channel ID 必须为 0..255。';
             return;
           }
           this.lastError = '';
-          this.view = ExampleView.store;
+          this.view = ExampleView.cloudStorage;
         },
-        onStoreBack: (): void => {
+        onCloudStorageBack: (): void => {
           this.view = ExampleView.configure;
         },
         onSettingsBack: (): void => {
@@ -399,21 +399,21 @@ export struct ExampleApp {
   }
 
   private applyQrPayload(): void {
-    if (this.qrForStore) {
-      const payload = tryParseDemoStoreScanPayload(this.qrPayloadText);
+    if (this.qrForCloudStorage) {
+      const payload = tryParseDemoCloudStorageScanPayload(this.qrPayloadText);
       if (payload === undefined) {
         this.qrErrorText = '二维码内容不是有效的云录像 Token。';
         return;
       }
-      this.storeToken = payload.token;
-      writeAppStorageString('tistore.app_token', payload.token);
+      this.cloudStorageToken = payload.token;
+      writeAppStorageString('ti_cloud_storage.app_token', payload.token);
       if (payload.appId !== undefined) {
-        this.storeAppId = payload.appId;
-        writeAppStorageString('tistore.app_id', payload.appId);
+        this.cloudStorageAppId = payload.appId;
+        writeAppStorageString('ti_cloud_storage.app_id', payload.appId);
       }
       if (payload.endpoint !== undefined) {
-        this.storeEndpoint = payload.endpoint;
-        writeAppStorageString('tistore.endpoint', payload.endpoint);
+        this.cloudStorageEndpoint = payload.endpoint;
+        writeAppStorageString('ti_cloud_storage.endpoint', payload.endpoint);
       }
       this.qrPayloadText = '';
       this.qrErrorText = '';
