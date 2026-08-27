@@ -1,4 +1,4 @@
-export type Page = 'configure' | 'player' | 'store' | 'settings' | 'qrScanner';
+export type Page = 'configure' | 'player' | 'tiCloudStorage' | 'settings' | 'qrScanner';
 export type VideoDecoderPreference = 'auto' | 'hardware' | 'software';
 export type OutputBufferPolicy = 'automatic' | 'no_buffer';
 export type LocalAudioCodec = 'g711a' | 'aac' | 'pcm' | 'opus' | 'amr';
@@ -11,7 +11,7 @@ export type ExampleConfig = {
   remoteId: string;
   token: string;
   tokenServerAddress: string;
-  storeToken: string;
+  tiCloudStorageToken: string;
   audioStreamId: string;
   videoStreamId: string;
   videoDecoderPreference: VideoDecoderPreference;
@@ -35,7 +35,7 @@ export const initialConfig: ExampleConfig = {
   remoteId: '',
   token: '',
   tokenServerAddress: '',
-  storeToken: '',
+  tiCloudStorageToken: '',
   audioStreamId: String(DEFAULT_DOWNLINK_AUDIO_STREAM_ID),
   videoStreamId: String(DEFAULT_DOWNLINK_VIDEO_STREAM_ID),
   videoDecoderPreference: 'auto',
@@ -98,13 +98,13 @@ export function parseScanPayload(rawValue: string): ExampleScanPayload | null {
   };
 }
 
-export function parseStoreScanPayload(rawValue: string): ExampleScanPayload | null {
+export function tiCloudStorageParseScanPayload(rawValue: string): ExampleScanPayload | null {
   const text = rawValue.trim();
   if (text.length === 0) {
     return null;
   }
   if (!text.startsWith('{')) {
-    return looksLikeStoreToken(text) ? {token: text} : null;
+    return tiCloudStorageLooksLikeToken(text) ? {token: text} : null;
   }
   const decoded = decodeScanJson(text);
   if (decoded === null || Object.keys(decoded).some((key) => !['app_id', 'endpoint', 'token'].includes(key))) {
@@ -112,14 +112,14 @@ export function parseStoreScanPayload(rawValue: string): ExampleScanPayload | nu
   }
   const token = stringValue(decoded.token);
   const appId = stringValue(decoded.app_id);
-  if (!looksLikeStoreToken(token) || appId.length === 0) {
+  if (!tiCloudStorageLooksLikeToken(token) || appId.length === 0) {
     return null;
   }
   if ('endpoint' in decoded && decoded.endpoint !== null && typeof decoded.endpoint !== 'string') {
     return null;
   }
   const endpoint = stringValue(decoded.endpoint);
-  if (endpoint.length > 0 && !validStoreEndpoint(endpoint)) {
+  if (endpoint.length > 0 && !tiCloudStorageEndpointIsValid(endpoint)) {
     return null;
   }
   return {token, appId, endpoint: endpoint || undefined};
@@ -141,12 +141,12 @@ function looksLikeToken(value: string): boolean {
   return value.trim().startsWith('v1.');
 }
 
-function looksLikeStoreToken(value: string): boolean {
+function tiCloudStorageLooksLikeToken(value: string): boolean {
   const token = value.trim();
   return token.length > 0 && token.length <= 64 * 1024 && !/\s/.test(token);
 }
 
-function validStoreEndpoint(value: string): boolean {
+function tiCloudStorageEndpointIsValid(value: string): boolean {
   try {
     const endpoint = new URL(value);
     return endpoint.protocol === 'https:' && endpoint.hostname.length > 0 &&

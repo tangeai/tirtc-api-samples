@@ -22,18 +22,18 @@ export function ConfigureScreen({
   onChange,
   onSelectProduct,
   onStart,
-  onOpenStore,
+  tiCloudStorageOnOpen,
   onOpenSettings,
   onScanToken,
 }: {
   config: ExampleConfig;
-  product: 'rtc' | 'store';
+  product: 'rtc' | 'tiCloudStorage';
   busy: boolean;
   status: string;
   onChange: ExampleConfigChange;
-  onSelectProduct: (product: 'rtc' | 'store') => void;
+  onSelectProduct: (product: 'rtc' | 'tiCloudStorage') => void;
   onStart: () => void;
-  onOpenStore: () => void;
+  tiCloudStorageOnOpen: () => void;
   onOpenSettings: () => void;
   onScanToken: () => void;
 }) {
@@ -45,7 +45,7 @@ export function ConfigureScreen({
           <ConfigureHeader actionLabel="偏好设置" onAction={onOpenSettings} />
           <View style={styles.productTabs} accessibilityRole="tablist">
             <ProductTab label="RTC" selected={product === 'rtc'} onPress={() => onSelectProduct('rtc')} />
-            <ProductTab label="云录像" selected={product === 'store'} onPress={() => onSelectProduct('store')} />
+            <ProductTab label="云录像" selected={product === 'tiCloudStorage'} onPress={() => onSelectProduct('tiCloudStorage')} />
           </View>
           {product === 'rtc' ? (
             <>
@@ -133,9 +133,9 @@ export function ConfigureScreen({
             <>
               <InputField
                 label="app_id"
-                hint="TiStore 应用标识"
+                hint="Ti Cloud Storage 应用标识"
                 value={config.appId}
-                accessibilityLabel="TiStore Config appId"
+                accessibilityLabel="Ti Cloud Storage Config appId"
                 onChangeText={(value) => onChange('appId', value)}
               />
               <InputField
@@ -143,25 +143,25 @@ export function ConfigureScreen({
                 hint="留空则使用默认环境"
                 value={config.endpoint}
                 keyboardType="url"
-                accessibilityLabel="TiStore Config endpoint"
+                accessibilityLabel="Ti Cloud Storage Config endpoint"
                 onChangeText={(value) => onChange('endpoint', value)}
               />
               <View style={styles.tokenRow}>
                 <InputField
                   label="token"
                   hint="粘贴用于云录像查询的 APP Token"
-                  value={config.storeToken}
-                  accessibilityLabel="TiStore Config token"
+                  value={config.tiCloudStorageToken}
+                  accessibilityLabel="Ti Cloud Storage Config token"
                   autoCapitalize="none"
                   autoCorrect={false}
                   secureTextEntry
-                  onChangeText={(value) => onChange('storeToken', value)}
+                  onChangeText={(value) => onChange('tiCloudStorageToken', value)}
                   style={styles.tokenField}
                 />
                 <Pressable
                   accessible
                   accessibilityRole="button"
-                  accessibilityLabel="TiStore Scan Token QR"
+                  accessibilityLabel="Ti Cloud Storage Scan Token QR"
                   onPress={onScanToken}
                   style={styles.scanTokenButton}
                 >
@@ -174,7 +174,7 @@ export function ConfigureScreen({
                   hint="默认 10"
                   value={config.audioStreamId}
                   keyboardType="number-pad"
-                  accessibilityLabel="TiStore Config audioChannelId"
+                  accessibilityLabel="Ti Cloud Storage Config audioChannelId"
                   onChangeText={(value) => onChange('audioStreamId', value)}
                 />
                 <InputField
@@ -182,15 +182,15 @@ export function ConfigureScreen({
                   hint="默认 11"
                   value={config.videoStreamId}
                   keyboardType="number-pad"
-                  accessibilityLabel="TiStore Config videoChannelId"
+                  accessibilityLabel="Ti Cloud Storage Config videoChannelId"
                   onChangeText={(value) => onChange('videoStreamId', value)}
                 />
               </FieldRow>
               <PrimaryButton
                 label={busy ? '初始化中' : '播放云录像'}
-                accessibilityLabel="TiStore Open"
+                accessibilityLabel="Ti Cloud Storage Open"
                 busy={busy}
-                onPress={onOpenStore}
+                onPress={tiCloudStorageOnOpen}
               />
             </>
           )}

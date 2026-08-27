@@ -33,14 +33,14 @@ class ExamplePublicUiSmokeTest {
 
   @Test
   fun runPublicUiFlow() {
-    if (arg("flow", "downlink") == "store-sdk") {
+    if (arg("flow", "downlink") == "ti-cloud-storage-sdk") {
       launchSdkCase()
-      runStoreSdkCase()
+      runCloudStorageSdkCase()
       return
     }
     launchExample()
     when (arg("flow", "downlink")) {
-      "store" -> runStoreFlow()
+      "ti-cloud-storage" -> runCloudStorageFlow()
       "stress" -> {
         fillCommonConfig()
         runStressFlow()
@@ -61,146 +61,147 @@ class ExamplePublicUiSmokeTest {
     intent!!.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TASK or Intent.FLAG_ACTIVITY_NEW_TASK)
     context.startActivity(intent)
     assertTrue(
-      "Store SDK Case app package did not launch",
+      "Ti Cloud Storage SDK Case app package did not launch",
       device.wait(Until.hasObject(By.pkg(PACKAGE_NAME).depth(0)), LAUNCH_TIMEOUT_MS),
     )
   }
 
-  private fun runStoreSdkCase() {
+  private fun runCloudStorageSdkCase() {
     val deadline = System.currentTimeMillis() + STORE_SDK_CASE_TIMEOUT_MS
     while (System.currentTimeMillis() < deadline) {
       if (device.currentPackageName != PACKAGE_NAME) {
-        dumpFailureArtifacts("store_sdk_case_app_exited")
-        throw AssertionError("Store SDK Case app exited before a terminal result")
+        dumpFailureArtifacts("ti-cloud-storage-sdk-case-app-exited")
+        throw AssertionError("Ti Cloud Storage SDK Case app exited before a terminal result")
       }
-      if (hasAnyText(listOf("TiStore SDK Case Failed"))) {
-        dumpFailureArtifacts("store_sdk_case_failed")
-        throw AssertionError("Store public SDK Case reported failure")
+      if (hasAnyText(listOf("Ti Cloud Storage SDK Case Failed"))) {
+        dumpFailureArtifacts("ti-cloud-storage-sdk-case-failed")
+        throw AssertionError("Ti Cloud Storage public SDK Case reported failure")
       }
-      if (hasAnyText(listOf("TiStore SDK Case Passed"))) {
-        marker("store_sdk_case_completed")
+      if (hasAnyText(listOf("Ti Cloud Storage SDK Case Passed"))) {
+        marker("ti-cloud-storage-sdk-case-completed")
         return
       }
       Thread.sleep(500)
     }
-    dumpFailureArtifacts("store_sdk_case_timeout")
-    throw AssertionError("timed out waiting for Store public SDK Case")
+    dumpFailureArtifacts("ti-cloud-storage-sdk-case-timeout")
+    throw AssertionError("timed out waiting for Ti Cloud Storage public SDK Case")
   }
 
-  private fun runStoreFlow() {
-    val token = fetchOneUseToken(arg("storeTokenUrl"))
-    val startTimeMs = arg("storeStartTimeMs").toLongOrNull() ?: error("missing Store start time")
+  private fun runCloudStorageFlow() {
+    val token = fetchOneUseToken(arg("ti-cloud-storage-token-url"))
+    val startTimeMs = arg("ti-cloud-storage-start-time-ms").toLongOrNull()
+      ?: error("missing Ti Cloud Storage start time")
     try {
       clickText("云录像")
-      setConfigField("TiStore Config appId", arg("storeAppId"))
-      setConfigField("TiStore Config endpoint", arg("storeEndpoint"))
-      setConfigField("TiStore Config token", token.concatToString())
-      setConfigField("TiStore Config audioChannelId", arg("storeAudioChannelId", "10"))
-      setConfigField("TiStore Config videoChannelId", arg("storeVideoChannelId", "11"))
-      marker("store_config_filled")
-      storeUiGateCheckpoint("configure")
-      clickDesc("TiStore Open")
-      waitForDesc("TiStore Recordings Sheet", CONNECT_TIMEOUT_MS)
-      waitForDesc("TiStore Play $startTimeMs", CONNECT_TIMEOUT_MS)
-      storeUiGateCheckpoint("sheet", startTimeMs)
-      clickDesc("TiStore Play $startTimeMs")
-      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "store_rendering")
+      setConfigField("Ti Cloud Storage Config appId", arg("ti-cloud-storage-app-id"))
+      setConfigField("Ti Cloud Storage Config endpoint", arg("ti-cloud-storage-endpoint"))
+      setConfigField("Ti Cloud Storage Config token", token.concatToString())
+      setConfigField("Ti Cloud Storage Config audioChannelId", arg("ti-cloud-storage-audio-channel-id", "10"))
+      setConfigField("Ti Cloud Storage Config videoChannelId", arg("ti-cloud-storage-video-channel-id", "11"))
+      marker("ti-cloud-storage-config-filled")
+      tiCloudStorageUiGateCheckpoint("configure")
+      clickDesc("Ti Cloud Storage Open")
+      waitForDesc("Ti Cloud Storage Recordings Sheet", CONNECT_TIMEOUT_MS)
+      waitForDesc("Ti Cloud Storage Play $startTimeMs", CONNECT_TIMEOUT_MS)
+      tiCloudStorageUiGateCheckpoint("sheet", startTimeMs)
+      clickDesc("Ti Cloud Storage Play $startTimeMs")
+      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "ti-cloud-storage-rendering")
       val videoDeadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
       while (System.currentTimeMillis() < videoDeadline && !hasVisibleVideoFrame()) Thread.sleep(750)
-      assertTrue("Store video frame was not visible", hasVisibleVideoFrame())
-      marker("store_visible_video_ok")
-      storeUiGateCheckpoint("playback")
+      assertTrue("Ti Cloud Storage video frame was not visible", hasVisibleVideoFrame())
+      marker("ti-cloud-storage-visible-video-ok")
+      tiCloudStorageUiGateCheckpoint("playback")
 
       Thread.sleep(5_000L)
       val speedControl =
-        device.findObject(By.desc("TiStore Speed"))
-          ?: device.findObject(By.res(PACKAGE_NAME, automationId("TiStore Speed")))
-          ?: device.findObject(By.textContains("x1"))
-      assertNotNull("Store speed control is missing", speedControl)
+        device.findObject(By.desc("Ti Cloud Storage Speed"))
+          ?: device.findObject(By.res(PACKAGE_NAME, automationId("Ti Cloud Storage Speed")))
+          ?: device.findObject(By.textContains("1×"))
+      assertNotNull("Ti Cloud Storage speed control is missing", speedControl)
       val speedBounds = Rect(speedControl.visibleBounds)
-      device.click(speedBounds.centerX(), speedBounds.centerY())
-      waitAnyText(listOf("播放倍速：x2"), SHORT_TIMEOUT_MS, "store_speed_x2")
-      Thread.sleep(2_000L)
-      repeat(3) {
+      repeat(6) {
         device.click(speedBounds.centerX(), speedBounds.centerY())
         Thread.sleep(1_500L)
       }
-      waitForStoreSpeedX1()
-
-      clickDesc("TiStore Pause Resume")
-      waitAnyText(listOf("已暂停"), SHORT_TIMEOUT_MS, "store_pause")
-      Thread.sleep(3_000L)
-      clickDesc("TiStore Pause Resume")
-      waitAnyText(listOf("继续播放", "正在播放"), SHORT_TIMEOUT_MS, "store_resume")
-
-      clickDesc("TiStore Mute")
-      waitAnyText(listOf("已静音"), SHORT_TIMEOUT_MS, "store_mute")
+      waitAnyText(listOf("播放倍速：1/2×"), SHORT_TIMEOUT_MS, "ti-cloud-storage-speed-x0_5")
       Thread.sleep(2_000L)
-      clickDesc("TiStore Mute")
-      waitAnyText(listOf("已恢复声音"), SHORT_TIMEOUT_MS, "store_unmute")
+      device.click(speedBounds.centerX(), speedBounds.centerY())
+      waitForCloudStorageSpeedX1()
 
-      val seek = requireNotNull(findControl("TiStore Seek", "")) { "Store seek control missing" }
+      clickDesc("Ti Cloud Storage Pause Resume")
+      waitAnyText(listOf("已暂停"), SHORT_TIMEOUT_MS, "ti-cloud-storage-pause")
+      Thread.sleep(3_000L)
+      clickDesc("Ti Cloud Storage Pause Resume")
+      waitAnyText(listOf("继续播放", "正在播放"), SHORT_TIMEOUT_MS, "ti-cloud-storage-resume")
+
+      clickDesc("Ti Cloud Storage Mute")
+      waitAnyText(listOf("已静音"), SHORT_TIMEOUT_MS, "ti-cloud-storage-mute")
+      Thread.sleep(2_000L)
+      clickDesc("Ti Cloud Storage Mute")
+      waitAnyText(listOf("已恢复声音"), SHORT_TIMEOUT_MS, "ti-cloud-storage-unmute")
+
+      val seek = requireNotNull(findControl("Ti Cloud Storage Seek", "")) { "Ti Cloud Storage seek control missing" }
       val seekBounds = seek.visibleBounds
       device.click(seekBounds.left + seekBounds.width() * 45 / 100, seekBounds.centerY())
-      waitAnyText(listOf("已跳转"), SHORT_TIMEOUT_MS, "store_seek")
+      waitAnyText(listOf("已跳转"), SHORT_TIMEOUT_MS, "ti-cloud-storage-seek")
       Thread.sleep(3_000L)
 
-      clickDesc("TiStore Snapshot")
-      waitAnyText(listOf("截图完成"), SHORT_TIMEOUT_MS, "store_snapshot")
-      clickDesc("TiStore Save Gallery")
-      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_snapshot_gallery")
+      clickDesc("Ti Cloud Storage Snapshot")
+      waitAnyText(listOf("截图完成"), SHORT_TIMEOUT_MS, "ti-cloud-storage-snapshot")
+      clickDesc("Ti Cloud Storage Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-snapshot-gallery")
 
-      clickDesc("TiStore Recording")
-      waitAnyText(listOf("边播边录已开始"), SHORT_TIMEOUT_MS, "store_recording_started")
+      clickDesc("Ti Cloud Storage Recording")
+      waitAnyText(listOf("边播边录已开始"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-started")
       Thread.sleep(7_000L)
-      clickDesc("TiStore Recording")
-      waitAnyText(listOf("边播边录完成"), SHORT_TIMEOUT_MS, "store_recording_completed")
-      clickDesc("TiStore Save Gallery")
-      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_recording_gallery")
+      clickDesc("Ti Cloud Storage Recording")
+      waitAnyText(listOf("边播边录完成"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-completed")
+      clickDesc("Ti Cloud Storage Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-gallery")
 
-      clickDesc("TiStore Recordings")
-      clickDesc("TiStore Export $startTimeMs")
-      clickDesc("TiStore Close Recordings")
-      waitAnyText(listOf("范围下载完成"), STORE_EXPORT_TIMEOUT_MS, "store_export_completed")
-      clickDesc("TiStore Save Gallery")
-      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "store_export_gallery")
+      clickDesc("Ti Cloud Storage Recordings")
+      clickDesc("Ti Cloud Storage Export $startTimeMs")
+      clickDesc("Ti Cloud Storage Close Recordings")
+      waitAnyText(listOf("范围下载完成"), STORE_EXPORT_TIMEOUT_MS, "ti-cloud-storage-export-completed")
+      clickDesc("Ti Cloud Storage Save Gallery")
+      waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-export-gallery")
 
-      clickDesc("TiStore Recordings")
-      clickDesc("TiStore Play $startTimeMs")
-      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "store_replay_restarted")
-      waitForStoreReplayRendering()
+      clickDesc("Ti Cloud Storage Recordings")
+      clickDesc("Ti Cloud Storage Play $startTimeMs")
+      waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "ti-cloud-storage-replay-restarted")
+      waitForCloudStorageReplayRendering()
       val replayDeadline = System.currentTimeMillis() + STORE_CONTINUOUS_PLAYBACK_MS
       while (System.currentTimeMillis() < replayDeadline) {
-        assertTrue("Store replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
-        assertTrue("Store replay buffered after rendering", !hasAnyText(listOf("缓冲中")))
+        assertTrue("Ti Cloud Storage replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
+        assertTrue("Ti Cloud Storage replay buffered after rendering", !hasAnyText(listOf("缓冲中")))
         Thread.sleep(1_000L)
       }
-      marker("store_continuous_playback_ok duration_ms=$STORE_CONTINUOUS_PLAYBACK_MS")
+      marker("ti-cloud-storage-continuous-playback-ok duration_ms=$STORE_CONTINUOUS_PLAYBACK_MS")
 
-      clickDesc("TiStore Upload Logs")
-      waitForLogUpload("store")
-      clickDesc("TiStore Back")
-      waitForControlVisible("TiStore Open", SHORT_TIMEOUT_MS)
-      marker("store_returned_to_configure")
-      storeUiGateCheckpoint("entry")
-      marker("store_public_ui_done")
+      clickDesc("Ti Cloud Storage Upload Logs")
+      waitForLogUpload("ti-cloud-storage", "-")
+      clickDesc("Ti Cloud Storage Back")
+      waitForControlVisible("Ti Cloud Storage Open", SHORT_TIMEOUT_MS)
+      marker("ti-cloud-storage-returned-to-configure")
+      tiCloudStorageUiGateCheckpoint("entry")
+      marker("ti-cloud-storage-public-ui-done")
     } finally {
       token.fill('\u0000')
     }
   }
 
-  private fun waitForStoreReplayRendering() {
+  private fun waitForCloudStorageReplayRendering() {
     val deadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
     while (System.currentTimeMillis() < deadline) {
-      assertTrue("Store replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
+      assertTrue("Ti Cloud Storage replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
       if (!hasAnyText(listOf("缓冲中")) && hasVisibleVideoFrame()) {
-        marker("store_replay_rendering_ok")
+        marker("ti-cloud-storage-replay-rendering-ok")
         return
       }
       Thread.sleep(500L)
     }
-    dumpFailureArtifacts("store_replay_rendering")
-    throw AssertionError("Store replay did not leave its initial buffering state")
+    dumpFailureArtifacts("ti-cloud-storage-replay-rendering")
+    throw AssertionError("Ti Cloud Storage replay did not leave its initial buffering state")
   }
 
   private fun waitForDesc(desc: String, timeoutMs: Long): UiObject2 {
@@ -213,64 +214,64 @@ class ExamplePublicUiSmokeTest {
     throw AssertionError("timed out waiting for accessibility label: $desc")
   }
 
-  private fun storeUiGateCheckpoint(name: String, expectedStartMs: Long? = null) {
-    val fileName = "store-ui-$name.png"
+  private fun tiCloudStorageUiGateCheckpoint(name: String, expectedStartMs: Long? = null) {
+    val fileName = "ti-cloud-storage-ui-$name.png"
     val checkpointDir = instrumentation.targetContext.getExternalFilesDir(null)
       ?: instrumentation.targetContext.cacheDir
     val file = File(checkpointDir, fileName)
-    assertTrue("Store checkpoint screenshot failed: $name", device.takeScreenshot(file))
+    assertTrue("Ti Cloud Storage checkpoint screenshot failed: $name", device.takeScreenshot(file))
     when (name) {
       "configure" -> {
-        val entry = device.findObject(By.desc("TiStore Open"))
-        assertNotNull("Store configure entry is not visible", entry)
-        assertTrue("Store configure entry is not visible", entry.visibleBounds.height() > 0)
-        val audio = device.findObject(By.desc("TiStore Config audioChannelId"))
-        val video = device.findObject(By.desc("TiStore Config videoChannelId"))
-        assertNotNull("Store audio channel field is missing", audio)
-        assertNotNull("Store video channel field is missing", video)
-        assertTrue("Store channel fields are not on the same row", audio.visibleBounds.top == video.visibleBounds.top)
+        val entry = device.findObject(By.desc("Ti Cloud Storage Open"))
+        assertNotNull("Ti Cloud Storage configure entry is not visible", entry)
+        assertTrue("Ti Cloud Storage configure entry is not visible", entry.visibleBounds.height() > 0)
+        val audio = device.findObject(By.desc("Ti Cloud Storage Config audioChannelId"))
+        val video = device.findObject(By.desc("Ti Cloud Storage Config videoChannelId"))
+        assertNotNull("Ti Cloud Storage audio channel field is missing", audio)
+        assertNotNull("Ti Cloud Storage video channel field is missing", video)
+        assertTrue("Ti Cloud Storage channel fields are not on the same row", audio.visibleBounds.top == video.visibleBounds.top)
       }
       "sheet" -> {
-        val sheet = device.findObject(By.desc("TiStore Recordings Sheet"))
-          ?: device.findObject(By.res(PACKAGE_NAME, "store-recordings-sheet"))
-        assertNotNull("Store recordings sheet is missing", sheet)
+        val sheet = device.findObject(By.desc("Ti Cloud Storage Recordings Sheet"))
+          ?: device.findObject(By.res(PACKAGE_NAME, "ti-cloud-storage-recordings-sheet"))
+        assertNotNull("Ti Cloud Storage recordings sheet is missing", sheet)
         val bounds = sheet.visibleBounds
         val heightRatio = bounds.height().toDouble() / device.displayHeight
         val bottomRatio = bounds.bottom.toDouble() / device.displayHeight
         val topRatio = bounds.top.toDouble() / device.displayHeight
-        assertTrue("Store sheet height out of contract: $heightRatio", heightRatio in 0.84..0.92)
-        assertTrue("Store sheet is not bottom anchored", bottomRatio >= 0.97 && topRatio <= 0.35)
-        val handle = device.findObject(By.desc("TiStore Sheet Handle"))
-          ?: device.findObject(By.res(PACKAGE_NAME, "store-sheet-handle"))
-        assertNotNull("Store sheet drag handle is missing", handle)
-        assertTrue("Store sheet drag handle is not visible", handle.visibleBounds.height() > 0)
-        val rows = device.findObjects(By.descContains("TiStore Play "))
-        assertTrue("Store recording rows are missing", rows.isNotEmpty())
+        assertTrue("Ti Cloud Storage sheet height out of contract: $heightRatio", heightRatio in 0.84..0.92)
+        assertTrue("Ti Cloud Storage sheet is not bottom anchored", bottomRatio >= 0.97 && topRatio <= 0.35)
+        val handle = device.findObject(By.desc("Ti Cloud Storage Sheet Handle"))
+          ?: device.findObject(By.res(PACKAGE_NAME, "ti-cloud-storage-sheet-handle"))
+        assertNotNull("Ti Cloud Storage sheet drag handle is missing", handle)
+        assertTrue("Ti Cloud Storage sheet drag handle is not visible", handle.visibleBounds.height() > 0)
+        val rows = device.findObjects(By.descContains("Ti Cloud Storage Play "))
+        assertTrue("Ti Cloud Storage recording rows are missing", rows.isNotEmpty())
         val topmost = rows.minByOrNull { it.visibleBounds.top }
-        assertNotNull("Store recording row bounds are missing", topmost)
+        assertNotNull("Ti Cloud Storage recording row bounds are missing", topmost)
         assertTrue(
-          "Store newest recording is not the first visible row",
-          topmost!!.contentDescription?.contains("TiStore Play ${expectedStartMs ?: 0}") == true,
+          "Ti Cloud Storage newest recording is not the first visible row",
+          topmost!!.contentDescription?.contains("Ti Cloud Storage Play ${expectedStartMs ?: 0}") == true,
         )
       }
       "playback" -> {
         val stage = device.findObject(By.descContains("录像播放中"))
-        assertNotNull("Store playback stage is missing", stage)
+        assertNotNull("Ti Cloud Storage playback stage is missing", stage)
         val bounds = stage.visibleBounds
         val widthRatio = bounds.width().toDouble() / device.displayWidth
         val heightRatio = bounds.height().toDouble() / device.displayHeight
-        assertTrue("Store video stage is squeezed horizontally: $widthRatio", widthRatio >= 0.6)
-        assertTrue("Store video stage is squeezed vertically: $heightRatio", heightRatio >= 0.35)
-        assertTrue("Store playback controls are not visible", hasControl("TiStore Pause Resume"))
+        assertTrue("Ti Cloud Storage video stage is squeezed horizontally: $widthRatio", widthRatio >= 0.6)
+        assertTrue("Ti Cloud Storage video stage is squeezed vertically: $heightRatio", heightRatio >= 0.35)
+        assertTrue("Ti Cloud Storage playback controls are not visible", hasControl("Ti Cloud Storage Pause Resume"))
       }
       "entry" -> {
-        val entry = device.findObject(By.desc("TiStore Open"))
-        assertNotNull("Store entry page did not render after back navigation", entry)
-        assertTrue("Store entry page is not visible", entry.visibleBounds.height() > 0)
+        val entry = device.findObject(By.desc("Ti Cloud Storage Open"))
+        assertNotNull("Ti Cloud Storage entry page did not render after back navigation", entry)
+        assertTrue("Ti Cloud Storage entry page is not visible", entry.visibleBounds.height() > 0)
       }
     }
-    marker("store_ui_gate_$name")
-    marker("store_ui_checkpoint_$name path=$fileName")
+    marker("ti-cloud-storage-ui-gate-$name")
+    marker("ti-cloud-storage-ui-checkpoint_$name path=$fileName")
   }
 
   private fun runDownlinkFlow() {
@@ -375,7 +376,7 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun setConfigField(key: String, value: String) {
-    val desc = if (key.startsWith("TiStore ")) key else "TiRTC Config $key"
+    val desc = if (key.startsWith("Ti Cloud Storage ")) key else "TiRTC Config $key"
     assertTrue("missing test value for $desc", value.isNotEmpty())
     val field = findControl(desc, key)
     if (field == null) {
@@ -385,7 +386,7 @@ class ExamplePublicUiSmokeTest {
     field!!.click()
     field.text = value
     dismissSoftKeyboardIfShown()
-    if (desc != "TiStore Config token") {
+    if (desc != "Ti Cloud Storage Config token") {
       waitForFieldValue(desc, value)
     }
   }
@@ -398,20 +399,20 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun fetchOneUseToken(url: String): CharArray {
-    require(url.isNotEmpty()) { "missing Store token URL" }
+    require(url.isNotEmpty()) { "missing Ti Cloud Storage token URL" }
     val connection = URL(url).openConnection() as HttpURLConnection
     connection.connectTimeout = SHORT_TIMEOUT_MS.toInt()
     connection.readTimeout = SHORT_TIMEOUT_MS.toInt()
     connection.useCaches = false
     return try {
-      check(connection.responseCode == HttpURLConnection.HTTP_OK) { "Store token handoff failed" }
+      check(connection.responseCode == HttpURLConnection.HTTP_OK) { "Ti Cloud Storage token handoff failed" }
       val output = ByteArrayOutputStream()
       connection.inputStream.use { input ->
         val buffer = ByteArray(4096)
         while (true) {
           val count = input.read(buffer)
           if (count < 0) break
-          check(output.size() + count <= 64 * 1024) { "Store token handoff is too large" }
+          check(output.size() + count <= 64 * 1024) { "Ti Cloud Storage token handoff is too large" }
           output.write(buffer, 0, count)
         }
         buffer.fill(0)
@@ -488,7 +489,7 @@ class ExamplePublicUiSmokeTest {
     val deadline = System.currentTimeMillis() + timeoutMs
     while (System.currentTimeMillis() < deadline) {
       if (hasAnyText(values)) {
-        marker("${stage}_ok")
+        marker("$stage-ok")
         return
       }
       Thread.sleep(250)
@@ -498,23 +499,23 @@ class ExamplePublicUiSmokeTest {
     throw AssertionError("timed out waiting for $stage: ${values.joinToString()}")
   }
 
-  private fun waitForStoreSpeedX1() {
+  private fun waitForCloudStorageSpeedX1() {
     val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
     while (System.currentTimeMillis() < deadline) {
-      if (hasAnyText(listOf("播放倍速：x1"))) {
-        marker("store_speed_x1_ok")
+      if (hasAnyText(listOf("播放倍速：1×"))) {
+        marker("ti-cloud-storage-speed-x1-ok")
         return
       }
       if (hasAnyText(listOf("倍速设置失败"))) {
-        marker("store_speed_x1_rejected")
-        dumpFailureArtifacts("store_speed_x1_rejected")
-        throw AssertionError("Store replay rejected the x1 speed change")
+        marker("ti-cloud-storage-speed-x1-rejected")
+        dumpFailureArtifacts("ti-cloud-storage-speed-x1-rejected")
+        throw AssertionError("Ti Cloud Storage replay rejected the x1 speed change")
       }
       Thread.sleep(250)
     }
-    marker("store_speed_x1_timeout")
-    dumpFailureArtifacts("store_speed_x1_timeout")
-    throw AssertionError("timed out waiting for store_speed_x1")
+    marker("ti-cloud-storage-speed-x1-timeout")
+    dumpFailureArtifacts("ti-cloud-storage-speed-x1-timeout")
+    throw AssertionError("timed out waiting for ti_cloud_storage_speed_x1")
   }
 
   private fun waitPlayerOpened() {
@@ -662,24 +663,24 @@ class ExamplePublicUiSmokeTest {
     )
   }
 
-  private fun waitForLogUpload(role: String) {
+  private fun waitForLogUpload(role: String, separator: String = "_") {
     val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
     while (System.currentTimeMillis() < deadline) {
       if (hasAnyText(listOf("日志上传失败"))) {
-        marker("${role}_log_upload_failed")
+        marker("$role${separator}log${separator}upload${separator}failed")
         dismissLogUploadDialogIfPresent()
         throw AssertionError("log upload failed for $role")
       }
       val logId = visibleLogUploadId()
       if (hasAnyText(listOf("日志上传成功")) && !logId.isNullOrBlank()) {
-        marker("${role}_log_upload_id logId=$logId")
-        marker("${role}_log_upload_ok")
+        marker("$role${separator}log${separator}upload${separator}id logId=$logId")
+        marker("$role${separator}log${separator}upload${separator}ok")
         dismissLogUploadDialogIfPresent()
         return
       }
       Thread.sleep(500)
     }
-    marker("${role}_log_upload_timeout")
+    marker("$role${separator}log${separator}upload${separator}timeout")
     dumpFailureArtifacts("${role}_log_upload")
     throw AssertionError("timed out waiting for log upload result for $role")
   }

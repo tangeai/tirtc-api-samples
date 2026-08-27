@@ -6,17 +6,17 @@ import {PlayerScreen} from './ExampleStagePages';
 import {
   QrScannerScreen,
   applyScanPayloadToConfig,
-  applyScanPayloadToStoreConfig,
+  tiCloudStorageApplyScanPayloadToConfig,
 } from './ExampleQrScanner';
 import {SettingsScreen} from './ExampleSettings';
-import {StoreScreen} from './ExampleStorePage';
+import {TiCloudStorageScreen} from './ExampleCloudStoragePage';
 import {loadStoredConfig, saveStoredConfig} from './ExampleStorage';
-import {resolveStoreToken, resolveToken} from './ExampleToken';
+import {tiCloudStorageResolveToken, resolveToken} from './ExampleToken';
 import {ExampleConfig, Page, initialConfig, parseStreamIds} from './ExampleTypes';
 
 export default function App(): React.ReactElement {
   const [page, setPage] = useState<Page>('configure');
-  const [configureProduct, setConfigureProduct] = useState<'rtc' | 'store'>('rtc');
+  const [configureProduct, setConfigureProduct] = useState<'rtc' | 'tiCloudStorage'>('rtc');
   const [config, setConfig] = useState<ExampleConfig>(initialConfig);
   const [status, setStatus] = useState('');
   const [busy, setBusy] = useState(false);
@@ -72,17 +72,17 @@ export default function App(): React.ReactElement {
     }
   };
 
-  const openStore = async () => {
+  const tiCloudStorageOpen = async () => {
     if (busy) return;
     setBusy(true);
-    setStatus('Store Token 校验中');
+    setStatus('Ti Cloud Storage Token 校验中');
     try {
-      const token = await resolveStoreToken(config.storeToken);
-      setConfig((current) => ({...current, storeToken: token}));
-      setPage('store');
+      const token = await tiCloudStorageResolveToken(config.tiCloudStorageToken);
+      setConfig((current) => ({...current, tiCloudStorageToken: token}));
+      setPage('tiCloudStorage');
       setStatus('');
     } catch (error) {
-      setStatus(`Store Token 校验失败 ${String(error)}`);
+      setStatus(`Ti Cloud Storage Token 校验失败 ${String(error)}`);
     } finally {
       setBusy(false);
     }
@@ -121,12 +121,12 @@ export default function App(): React.ReactElement {
     return <SettingsScreen config={config} onChange={updateConfig} onBack={() => setPage('configure')} />;
   }
 
-  if (page === 'store') {
+  if (page === 'tiCloudStorage') {
     return (
-      <StoreScreen
+      <TiCloudStorageScreen
         config={config}
         onBack={() => {
-          setConfigureProduct('store');
+          setConfigureProduct('tiCloudStorage');
           setPage('configure');
         }}
       />
@@ -140,8 +140,8 @@ export default function App(): React.ReactElement {
         product={scanProduct}
         onBack={() => setPage('configure')}
         onScan={(payload) => {
-          setConfig((current) => scanProduct === 'store'
-            ? applyScanPayloadToStoreConfig(current, payload)
+          setConfig((current) => scanProduct === 'tiCloudStorage'
+            ? tiCloudStorageApplyScanPayloadToConfig(current, payload)
             : applyScanPayloadToConfig(current, payload));
           setStatus('二维码已填充');
           setPage('configure');
@@ -159,7 +159,7 @@ export default function App(): React.ReactElement {
       onChange={updateConfig}
       onSelectProduct={setConfigureProduct}
       onStart={openPlayer}
-      onOpenStore={openStore}
+      tiCloudStorageOnOpen={tiCloudStorageOpen}
       onOpenSettings={() => setPage('settings')}
       onScanToken={() => setPage('qrScanner')}
     />

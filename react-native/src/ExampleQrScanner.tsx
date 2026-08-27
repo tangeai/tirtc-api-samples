@@ -3,14 +3,14 @@ import {Text, View} from 'react-native';
 import {Camera, useCameraDevice, useCodeScanner} from 'react-native-vision-camera';
 import {BackHeader, ConfigureShell, ExampleScreenRoot, InputField, PrimaryButton, StatusText, uiStyles} from './ExampleUi';
 import type {ExampleConfig, ExampleScanPayload} from './ExampleTypes';
-import {parseScanPayload, parseStoreScanPayload} from './ExampleTypes';
+import {parseScanPayload, tiCloudStorageParseScanPayload} from './ExampleTypes';
 
 export function QrScannerScreen({
   product,
   onBack,
   onScan,
 }: {
-  product: 'rtc' | 'store';
+  product: 'rtc' | 'tiCloudStorage';
   onBack: () => void;
   onScan: (payload: ExampleScanPayload) => void;
 }) {
@@ -18,13 +18,13 @@ export function QrScannerScreen({
   const processing = useRef(false);
   const [permission, setPermission] = useState(Camera.getCameraPermissionStatus());
   const [status, setStatus] = useState(
-    product === 'store' ? '对准 APP Access Token 二维码' : '对准 JSON 二维码，或 v1.xxx 纯 Token 二维码',
+    product === 'tiCloudStorage' ? '对准 APP Access Token 二维码' : '对准 JSON 二维码，或 v1.xxx 纯 Token 二维码',
   );
   const [manualValue, setManualValue] = useState('');
-  const invalidPayloadText = product === 'store'
+  const invalidPayloadText = product === 'tiCloudStorage'
     ? '二维码内容无效，请使用云录像 APP Token 或包含 app_id、token 和可选 endpoint 的 JSON'
     : '二维码内容无效，请使用包含 app_id、remote_id、token 的 JSON，或 v1.xxx 纯 Token';
-  const parsePayload = product === 'store' ? parseStoreScanPayload : parseScanPayload;
+  const parsePayload = product === 'tiCloudStorage' ? tiCloudStorageParseScanPayload : parseScanPayload;
 
   useEffect(() => {
     if (permission === 'granted') {
@@ -75,19 +75,19 @@ export function QrScannerScreen({
       <ConfigureShell>
         <BackHeader
           title="扫描二维码"
-          accessibilityLabel={`${product === 'store' ? 'TiStore' : 'TiRTC'} QR Scanner Back`}
+          accessibilityLabel={`${product === 'tiCloudStorage' ? 'Ti Cloud Storage' : 'TiRTC'} QR Scanner Back`}
           onBack={onBack}
         />
         <Text style={uiStyles.scannerLead}>
-          {product === 'store'
+          {product === 'tiCloudStorage'
             ? '扫描或粘贴 APP Access Token。扫码只更新云录像 Token，其他配置保持不变。'
             : '支持包含 app_id、remote_id、token 和可选 endpoint 的 JSON，或 v1.xxx 开头的纯 Token。纯 Token 只会填充 Token。'}
         </Text>
         <InputField
           label="二维码内容"
-          hint={product === 'store' ? '粘贴 APP Token 或配置 JSON' : '粘贴 JSON 或 v1.xxx Token'}
+          hint={product === 'tiCloudStorage' ? '粘贴 APP Token 或配置 JSON' : '粘贴 JSON 或 v1.xxx Token'}
           value={manualValue}
-          accessibilityLabel={`${product === 'store' ? 'TiStore' : 'TiRTC'} QR Manual Content`}
+          accessibilityLabel={`${product === 'tiCloudStorage' ? 'Ti Cloud Storage' : 'TiRTC'} QR Manual Content`}
           autoCapitalize="none"
           autoCorrect={false}
           multiline
@@ -95,7 +95,7 @@ export function QrScannerScreen({
         />
         <PrimaryButton
           label="应用二维码内容"
-          accessibilityLabel={`${product === 'store' ? 'TiStore' : 'TiRTC'} QR Apply Content`}
+          accessibilityLabel={`${product === 'tiCloudStorage' ? 'Ti Cloud Storage' : 'TiRTC'} QR Apply Content`}
           onPress={applyManualValue}
         />
         <View style={uiStyles.scannerFrame}>
@@ -129,7 +129,7 @@ export function QrScannerScreen({
   );
 }
 
-export function applyScanPayloadToStoreConfig(
+export function tiCloudStorageApplyScanPayloadToConfig(
   current: ExampleConfig,
   payload: ExampleScanPayload,
 ): ExampleConfig {
@@ -137,7 +137,7 @@ export function applyScanPayloadToStoreConfig(
     ...current,
     appId: payload.appId ?? current.appId,
     endpoint: payload.endpoint ?? current.endpoint,
-    storeToken: payload.token,
+    tiCloudStorageToken: payload.token,
   };
 }
 

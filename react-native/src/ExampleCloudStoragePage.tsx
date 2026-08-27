@@ -11,20 +11,20 @@ import Slider from '@react-native-community/slider';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {
   TiRtcLogging,
-  TiStore,
-  TiStoreAudioOutput,
-  TiStoreReplay,
-  TiStoreReplaySpeed,
-  TiStoreVideoOutput,
-  TiStoreVideoOutputState,
-  TiStoreVideoOutputView,
-  type TiStoreExportTask,
-  type TiStoreRecordingFile,
-  type TiStoreRecordingDay,
-  type TiStoreRecordingRange,
-  type TiStoreRecordingRangesResult,
-  type TiStoreRecordingTask,
-  type TiStoreSnapshotFile,
+  TiCloudStorage,
+  TiCloudStorageAudioOutput,
+  TiCloudStorageReplay,
+  TiCloudStorageReplaySpeed,
+  TiCloudStorageVideoOutput,
+  TiCloudStorageVideoOutputState,
+  TiCloudStorageVideoOutputView,
+  type TiCloudStorageExportTask,
+  type TiCloudStorageRecordingFile,
+  type TiCloudStorageRecordingDay,
+  type TiCloudStorageRecordingRange,
+  type TiCloudStorageRecordingRangesResult,
+  type TiCloudStorageRecordingTask,
+  type TiCloudStorageSnapshotFile,
 } from 'tirtc-react-native';
 import {useExampleLogUpload} from './ExampleLogUpload';
 import {
@@ -38,35 +38,40 @@ import {
 import type {ExampleConfig} from './ExampleTypes';
 import {galleryFileName, prepareGalleryWritePermission} from './ExampleSessionShared';
 
-const speeds = [TiStoreReplaySpeed.x1, TiStoreReplaySpeed.x2, TiStoreReplaySpeed.x4, TiStoreReplaySpeed.x8] as const;
-type StoreMediaFile = TiStoreRecordingFile | TiStoreSnapshotFile;
+const speeds = [TiCloudStorageReplaySpeed.x0_125, TiCloudStorageReplaySpeed.x0_25,
+  TiCloudStorageReplaySpeed.x0_5, TiCloudStorageReplaySpeed.x1, TiCloudStorageReplaySpeed.x2,
+  TiCloudStorageReplaySpeed.x4, TiCloudStorageReplaySpeed.x8] as const;
+const speedLabels: Record<TiCloudStorageReplaySpeed, string> = {
+  x0_125: '1/8×', x0_25: '1/4×', x0_5: '1/2×', x1: '1×', x2: '2×', x4: '4×', x8: '8×',
+};
+type TiCloudStorageMediaFile = TiCloudStorageRecordingFile | TiCloudStorageSnapshotFile;
 
 function newestFirstRecordingRanges(
-  ranges: readonly TiStoreRecordingRange[],
-): TiStoreRecordingRange[] {
+  ranges: readonly TiCloudStorageRecordingRange[],
+): TiCloudStorageRecordingRange[] {
   return [...ranges].sort(
     (left, right) => right.startTimeMs - left.startTimeMs || right.endTimeMs - left.endTimeMs,
   );
 }
 
-export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: () => void}) {
+export function TiCloudStorageScreen({config, onBack}: {config: ExampleConfig; onBack: () => void}) {
   const insets = useSafeAreaInsets();
-  const session = useMemo(() => new StoreExampleSession(config), [config]);
-  const [status, setStatus] = useState('正在初始化 TiStore');
-  const [ranges, setRanges] = useState<readonly TiStoreRecordingRange[]>([]);
+  const session = useMemo(() => new TiCloudStorageExampleSession(config), [config]);
+  const [status, setStatus] = useState('正在初始化 Ti Cloud Storage');
+  const [ranges, setRanges] = useState<readonly TiCloudStorageRecordingRange[]>([]);
   const [selectedDay, setSelectedDay] = useState(() => shanghaiDate(Date.now()));
   const [visibleMonth, setVisibleMonth] = useState(() => shanghaiDate(Date.now()).slice(0, 7));
   const [recordingDays, setRecordingDays] = useState<ReadonlySet<string>>(() => new Set());
   const [monthLoading, setMonthLoading] = useState(false);
   const [monthError, setMonthError] = useState('');
-  const [selected, setSelected] = useState<TiStoreRecordingRange | null>(null);
+  const [selected, setSelected] = useState<TiCloudStorageRecordingRange | null>(null);
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
-  const [videoState, setVideoState] = useState<TiStoreVideoOutputState>(TiStoreVideoOutputState.idle);
+  const [videoState, setVideoState] = useState<TiCloudStorageVideoOutputState>(TiCloudStorageVideoOutputState.idle);
   const [ready, setReady] = useState(false);
   const [paused, setPaused] = useState(false);
   const [muted, setMuted] = useState(false);
   const [recording, setRecording] = useState(false);
-  const [speed, setSpeed] = useState<TiStoreReplaySpeed>(TiStoreReplaySpeed.x1);
+  const [speed, setSpeed] = useState<TiCloudStorageReplaySpeed>(TiCloudStorageReplaySpeed.x1);
   const [busy, setBusy] = useState(false);
   const [showRanges, setShowRanges] = useState(true);
   const [latestMedia, setLatestMedia] = useState(false);
@@ -99,7 +104,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
     setMonthLoading(true);
     setMonthError('');
     setRecordingDays(new Set());
-    const result = await session.queryDays(...monthBounds(month), STORE_TIME_ZONE);
+    const result = await session.queryDays(...monthBounds(month), TI_CLOUD_STORAGE_TIME_ZONE);
     if (!mountedRef.current || generation !== monthQueryGenerationRef.current) return;
     setMonthLoading(false);
     if (result.code !== 0) {
@@ -132,7 +137,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
         void queryMonth(today.slice(0, 7));
         void query(today);
       } else {
-        setStatus(`TiStore 初始化失败 ${code}`);
+        setStatus(`Ti Cloud Storage 初始化失败 ${code}`);
       }
     });
     return () => {
@@ -144,17 +149,15 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
     };
   }, [query, queryMonth, session]);
 
-  const leave = async () => {
+  const leave = () => {
     if (busy) return;
     setBusy(true);
     setReady(false);
     mountedRef.current = false;
-    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-    await session.close();
     onBack();
   };
 
-  const play = (range: TiStoreRecordingRange) => {
+  const play = (range: TiCloudStorageRecordingRange) => {
     const code = session.play(range);
     if (code === 0) {
       setSelected(range);
@@ -185,12 +188,12 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
   };
 
   const cycleSpeed = () => {
-    const next = speeds[(speeds.indexOf(speed) + 1) % speeds.length] ?? TiStoreReplaySpeed.x1;
+    const next = speeds[(speeds.indexOf(speed) + 1) % speeds.length] ?? TiCloudStorageReplaySpeed.x1;
     const code = session.replay.setSpeed(next);
     if (code === 0) {
       setSpeed(next);
     }
-    setStatus(code === 0 ? `播放倍速：${next}` : `倍速设置失败 ${code}`);
+    setStatus(code === 0 ? `播放倍速：${speedLabels[next]}` : `倍速设置失败 ${code}`);
   };
 
   const toggleMuted = () => {
@@ -216,7 +219,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
     setStatus(result.message);
   };
 
-  const exportRange = async (range: TiStoreRecordingRange) => {
+  const exportRange = async (range: TiCloudStorageRecordingRange) => {
     setBusy(true);
     setStatus('下载 0%');
     const result = await session.exportRange(range, (value) => {
@@ -255,28 +258,28 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
     selected === null
       ? 0
       : Math.round(selected.startTimeMs + (selected.endTimeMs - selected.startTimeMs) * seekProgress);
-  const showOverlay = selected === null || videoState !== TiStoreVideoOutputState.rendering;
+  const showOverlay = selected === null || videoState !== TiCloudStorageVideoOutputState.rendering;
 
   return (
     <View style={styles.root}>
       <VideoStage label={stageLabel(selected, videoState, paused)} showOverlay={showOverlay}>
-        {ready ? <TiStoreVideoOutputView output={session.video} resizeMode="contain" style={styles.video} /> : null}
+        {ready ? <TiCloudStorageVideoOutputView output={session.video} resizeMode="contain" style={styles.video} /> : null}
       </VideoStage>
       <View pointerEvents="none" style={styles.bottomScrimSoft} />
       <View pointerEvents="none" style={styles.bottomScrimStrong} />
-      <TopBar title="云录像" onBack={() => void leave()} backAccessibilityLabel="TiStore Back">
+      <TopBar title="云录像" onBack={leave} backAccessibilityLabel="Ti Cloud Storage Back">
         <View style={styles.barActions}>
           <OutlineButton
             label="选择录像"
             onPress={() => setShowRanges(true)}
-            accessibilityLabel="TiStore Recordings"
+            accessibilityLabel="Ti Cloud Storage Recordings"
             compact
             disabled={!ready}
           />
           <OutlineButton
             label={uploadingLogs ? '上传中…' : '上传日志'}
             onPress={uploadLogs}
-            accessibilityLabel="TiStore Upload Logs"
+            accessibilityLabel="Ti Cloud Storage Upload Logs"
             compact
             busy={uploadingLogs}
           />
@@ -290,7 +293,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
           <View style={styles.seekPanel}>
             <Text style={styles.seekTime}>{formatClock(seekTimeMs)}</Text>
             <Slider
-              accessibilityLabel="TiStore Seek"
+              accessibilityLabel="Ti Cloud Storage Seek"
               minimumValue={0}
               maximumValue={1}
               value={seekProgress}
@@ -306,45 +309,45 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
           </View>
         ) : null}
         <View style={styles.controls}>
-          <StoreRoundButton
+          <TiCloudStorageRoundButton
             symbol={recording ? '■' : '●'}
             label={recording ? '停止本地保存' : '开始本地保存'}
             onPress={() => void toggleRecording()}
-            accessibilityLabel="TiStore Recording"
+            accessibilityLabel="Ti Cloud Storage Recording"
             disabled={selected === null || busy}
             active={recording}
           />
-          <StoreRoundButton
+          <TiCloudStorageRoundButton
             symbol="▣"
             label="截图"
             onPress={() => void snapshot()}
-            accessibilityLabel="TiStore Snapshot"
+            accessibilityLabel="Ti Cloud Storage Snapshot"
             disabled={selected === null || busy}
           />
-          <StoreRoundButton
+          <TiCloudStorageRoundButton
             symbol="▧"
             label="保存到系统相册"
             onPress={() => void saveLatest()}
-            accessibilityLabel="TiStore Save Gallery"
+            accessibilityLabel="Ti Cloud Storage Save Gallery"
             disabled={!latestMedia || busy}
           />
           <StageControlButton
-            label={muted || speed !== TiStoreReplaySpeed.x1 ? '恢复声音' : '静音'}
+            label={muted || speed !== TiCloudStorageReplaySpeed.x1 ? '恢复声音' : '静音'}
             onPress={toggleMuted}
-            accessibilityLabel="TiStore Mute"
+            accessibilityLabel="Ti Cloud Storage Mute"
             tone="surface"
-            disabled={selected === null || speed !== TiStoreReplaySpeed.x1}
+            disabled={selected === null || speed !== TiCloudStorageReplaySpeed.x1}
           />
-          <StoreSpeedButton
-            label={speed}
+          <TiCloudStorageSpeedButton
+            label={speedLabels[speed]}
             onPress={cycleSpeed}
-            accessibilityLabel="TiStore Speed"
+            accessibilityLabel="Ti Cloud Storage Speed"
             disabled={selected === null}
           />
           <StageControlButton
             label={paused ? '继续播放' : '暂停播放'}
             onPress={togglePause}
-            accessibilityLabel="TiStore Pause Resume"
+            accessibilityLabel="Ti Cloud Storage Pause Resume"
             disabled={selected === null}
           />
         </View>
@@ -353,19 +356,19 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
         <View style={styles.modalBackdrop}>
           <View
             style={styles.sheet}
-            testID="store-recordings-sheet"
-            accessibilityLabel="TiStore Recordings Sheet"
+            testID="ti-cloud-storage-recordings-sheet"
+            accessibilityLabel="Ti Cloud Storage Recordings Sheet"
             accessible>
             <View
               style={styles.sheetHandle}
-              testID="store-sheet-handle"
-              accessibilityLabel="TiStore Sheet Handle"
+              testID="ti-cloud-storage-sheet-handle"
+              accessibilityLabel="Ti Cloud Storage Sheet Handle"
               accessible
             />
             <View style={styles.sheetHeader}>
               <View>
                 <Text style={styles.sheetTitle}>{selectedDay}</Text>
-                <Text style={styles.sheetSubtitle}>自然日按 {STORE_TIME_ZONE} 查询</Text>
+                <Text style={styles.sheetSubtitle}>自然日按 {TI_CLOUD_STORAGE_TIME_ZONE} 查询</Text>
               </View>
               <OutlineButton
                 label="刷新"
@@ -373,14 +376,14 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                   void queryMonth(visibleMonth);
                   void query(selectedDay);
                 }}
-                accessibilityLabel="TiStore Query"
+                accessibilityLabel="Ti Cloud Storage Query"
                 compact
                 busy={busy}
               />
               <OutlineButton
                 label="关闭"
                 onPress={() => setShowRanges(false)}
-                accessibilityLabel="TiStore Close Recordings"
+                accessibilityLabel="Ti Cloud Storage Close Recordings"
                 compact
               />
             </View>
@@ -393,7 +396,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                     setVisibleMonth(month);
                     void queryMonth(month);
                   }}
-                  accessibilityLabel="TiStore Previous Month"
+                  accessibilityLabel="Ti Cloud Storage Previous Month"
                   compact
                 />
                 <Text style={styles.monthTitle}>{visibleMonth}</Text>
@@ -404,7 +407,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                     setVisibleMonth(month);
                     void queryMonth(month);
                   }}
-                  accessibilityLabel="TiStore Next Month"
+                  accessibilityLabel="Ti Cloud Storage Next Month"
                   compact
                 />
               </View>
@@ -420,7 +423,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                   <Pressable
                     key={date}
                     accessibilityRole="button"
-                    accessibilityLabel={`TiStore Day ${date}`}
+                    accessibilityLabel={`Ti Cloud Storage Day ${date}`}
                     accessibilityState={{selected: selectedDay === date, disabled: !recordingDays.has(date)}}
                     disabled={!recordingDays.has(date)}
                     onPress={() => {
@@ -456,7 +459,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                   <View key={`${range.startTimeMs}-${range.endTimeMs}`} style={styles.range}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel={`TiStore Play ${range.startTimeMs}`}
+                      accessibilityLabel={`Ti Cloud Storage Play ${range.startTimeMs}`}
                       onPress={() => play(range)}
                       style={styles.rangeText}
                     >
@@ -468,7 +471,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
                     <OutlineButton
                       label="下载"
                       onPress={() => void exportRange(range)}
-                      accessibilityLabel={`TiStore Export ${range.startTimeMs}`}
+                      accessibilityLabel={`Ti Cloud Storage Export ${range.startTimeMs}`}
                       compact
                       disabled={busy}
                     />
@@ -483,7 +486,7 @@ export function StoreScreen({config, onBack}: {config: ExampleConfig; onBack: ()
   );
 }
 
-function StoreRoundButton({
+function TiCloudStorageRoundButton({
   symbol,
   label,
   accessibilityLabel,
@@ -519,7 +522,7 @@ function StoreRoundButton({
   );
 }
 
-function StoreSpeedButton({
+function TiCloudStorageSpeedButton({
   label,
   accessibilityLabel,
   onPress,
@@ -546,41 +549,41 @@ function StoreSpeedButton({
   );
 }
 
-type StoreCallbacks = {
+type TiCloudStorageCallbacks = {
   onStatus: (message: string) => void;
   onTime: (value: number) => void;
-  onVideoState: (value: TiStoreVideoOutputState) => void;
+  onVideoState: (value: TiCloudStorageVideoOutputState) => void;
 };
 
-class StoreExampleSession {
-  readonly store: TiStore;
-  readonly replay: TiStoreReplay;
-  readonly audio = new TiStoreAudioOutput();
-  readonly video = new TiStoreVideoOutput();
-  private callbacks: StoreCallbacks = {
+class TiCloudStorageExampleSession {
+  readonly tiCloudStorage: TiCloudStorage;
+  readonly replay: TiCloudStorageReplay;
+  readonly audio = new TiCloudStorageAudioOutput();
+  readonly video = new TiCloudStorageVideoOutput();
+  private callbacks: TiCloudStorageCallbacks = {
     onStatus: () => {},
     onTime: () => {},
     onVideoState: () => {},
   };
-  private task: TiStoreRecordingTask | null = null;
-  private exportTask: TiStoreExportTask | null = null;
-  private latestMedia: StoreMediaFile | null = null;
-  private snapshotPromise: Promise<StoreFileResult> | null = null;
+  private task: TiCloudStorageRecordingTask | null = null;
+  private exportTask: TiCloudStorageExportTask | null = null;
+  private latestMedia: TiCloudStorageMediaFile | null = null;
+  private snapshotPromise: Promise<TiCloudStorageFileResult> | null = null;
   private readonly pendingQueries = new Set<Promise<unknown>>();
   private closed = false;
   private startPromise: Promise<number> | null = null;
   private closePromise: Promise<void> | null = null;
 
   constructor(private readonly config: ExampleConfig) {
-    this.store = new TiStore(config.storeToken);
-    this.replay = this.store.createReplay();
+    this.tiCloudStorage = new TiCloudStorage(config.tiCloudStorageToken);
+    this.replay = this.tiCloudStorage.createReplay();
   }
 
   get hasLatestMedia(): boolean {
     return this.latestMedia !== null;
   }
 
-  setCallbacks(callbacks: StoreCallbacks): void {
+  setCallbacks(callbacks: TiCloudStorageCallbacks): void {
     this.callbacks = callbacks;
   }
 
@@ -589,17 +592,16 @@ class StoreExampleSession {
   }
 
   private async startOnce(): Promise<number> {
-    const code = await TiStore.init({
+    const code = await TiCloudStorage.init({
       appId: this.config.appId,
       endpoint: this.config.endpoint,
       consoleLogEnabled: this.config.consoleLogEnabled,
     });
     if (code !== 0) return code;
     if (this.closed) return 6001;
-    this.store.onTokenExpired = () => this.callbacks.onStatus('Token 已过期');
     this.replay.onTimeChanged = (value) => this.callbacks.onTime(value);
     this.replay.onError = (value) => this.callbacks.onStatus(`回放失败 ${value}`);
-    this.replay.onCompleted = () => this.callbacks.onVideoState(TiStoreVideoOutputState.completed);
+    this.replay.onCompleted = () => this.callbacks.onVideoState(TiCloudStorageVideoOutputState.completed);
     this.video.onStateChanged = (value) => this.callbacks.onVideoState(value);
     this.video.onError = (value) => this.callbacks.onStatus(`视频输出失败 ${value}`);
     this.audio.onError = (value) => this.callbacks.onStatus(`音频输出失败 ${value}`);
@@ -608,23 +610,23 @@ class StoreExampleSession {
     return this.video.attach(this.replay, Number.parseInt(this.config.videoStreamId, 10) || 11);
   }
 
-  query(startTimeMs: number, endTimeMs: number): Promise<TiStoreRecordingRangesResult> {
+  query(startTimeMs: number, endTimeMs: number): Promise<TiCloudStorageRecordingRangesResult> {
     if (this.closed) return Promise.resolve({code: 6001, recordings: []});
-    const operation = this.store.listRecordings(startTimeMs, endTimeMs);
+    const operation = this.tiCloudStorage.listRecordings(startTimeMs, endTimeMs);
     this.pendingQueries.add(operation);
     void operation.finally(() => this.pendingQueries.delete(operation));
     return operation;
   }
 
-  queryDays(startDate: string, endDate: string, timeZoneId: string): Promise<{code: number; days: readonly TiStoreRecordingDay[]}> {
+  queryDays(startDate: string, endDate: string, timeZoneId: string): Promise<{code: number; days: readonly TiCloudStorageRecordingDay[]}> {
     if (this.closed) return Promise.resolve({code: 6001, days: []});
-    const operation = this.store.listRecordingDays(startDate, endDate, timeZoneId);
+    const operation = this.tiCloudStorage.listRecordingDays(startDate, endDate, timeZoneId);
     this.pendingQueries.add(operation);
     void operation.finally(() => this.pendingQueries.delete(operation));
     return operation;
   }
 
-  play(range: TiStoreRecordingRange): number {
+  play(range: TiCloudStorageRecordingRange): number {
     return this.replay.play(range.startTimeMs, range.endTimeMs);
   }
   setMuted(value: boolean): number {
@@ -640,7 +642,7 @@ class StoreExampleSession {
     return result.success ? 0 : (result.code ?? 6123);
   }
 
-  async finishRecording(): Promise<StoreFileResult> {
+  async finishRecording(): Promise<TiCloudStorageFileResult> {
     const task = this.task;
     this.task = null;
     if (task === null) return {message: '没有活动保存任务', file: null};
@@ -650,8 +652,8 @@ class StoreExampleSession {
     return {message: '边播边录完成', file: result.data};
   }
 
-  async exportRange(range: TiStoreRecordingRange, onProgress: (value: number) => void): Promise<StoreFileResult> {
-    const started = this.store.exportRecording(
+  async exportRange(range: TiCloudStorageRecordingRange, onProgress: (value: number) => void): Promise<TiCloudStorageFileResult> {
+    const started = this.tiCloudStorage.exportRecording(
       {
         startTimeMs: range.startTimeMs,
         endTimeMs: range.endTimeMs,
@@ -672,8 +674,8 @@ class StoreExampleSession {
     }
   }
 
-  async snapshot(): Promise<StoreFileResult> {
-    const operation = (async (): Promise<StoreFileResult> => {
+  async snapshot(): Promise<TiCloudStorageFileResult> {
+    const operation = (async (): Promise<TiCloudStorageFileResult> => {
       const result = await this.video.takeSnapshot();
       if (!result.success || result.data === null) return {message: `截图失败 ${result.code}`, file: null};
       await this.replaceLatest(result.data);
@@ -703,7 +705,7 @@ class StoreExampleSession {
     return (this.closePromise ??= this.closeOnce());
   }
 
-  private async replaceLatest(file: StoreMediaFile): Promise<void> {
+  private async replaceLatest(file: TiCloudStorageMediaFile): Promise<void> {
     const previous = this.latestMedia;
     this.latestMedia = file;
     if (previous !== null && previous !== file) await previous.delete();
@@ -732,18 +734,18 @@ class StoreExampleSession {
     this.audio.dispose();
     this.video.dispose();
     this.replay.dispose();
-    this.store.dispose();
-    TiStore.shutdown();
+    this.tiCloudStorage.dispose();
+    TiCloudStorage.shutdown();
   }
 }
 
-type StoreFileResult = {message: string; file: StoreMediaFile | null};
+type TiCloudStorageFileResult = {message: string; file: TiCloudStorageMediaFile | null};
 
-const STORE_TIME_ZONE = 'Asia/Shanghai';
+const TI_CLOUD_STORAGE_TIME_ZONE = 'Asia/Shanghai';
 
 function shanghaiDate(value: number): string {
   return new Intl.DateTimeFormat('en-CA', {
-    timeZone: STORE_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
+    timeZone: TI_CLOUD_STORAGE_TIME_ZONE, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(value);
 }
 
@@ -774,18 +776,18 @@ function monthCells(month: string): readonly (string | null)[] {
   ];
 }
 
-function stageLabel(range: TiStoreRecordingRange | null, state: TiStoreVideoOutputState, paused: boolean): string {
+function stageLabel(range: TiCloudStorageRecordingRange | null, state: TiCloudStorageVideoOutputState, paused: boolean): string {
   if (range === null) return '请选择录像';
-  if (paused || state === TiStoreVideoOutputState.paused) return '已暂停';
-  if (state === TiStoreVideoOutputState.buffering) return '缓冲中';
-  if (state === TiStoreVideoOutputState.completed) return '播放完成';
-  if (state === TiStoreVideoOutputState.failed) return '播放失败';
+  if (paused || state === TiCloudStorageVideoOutputState.paused) return '已暂停';
+  if (state === TiCloudStorageVideoOutputState.buffering) return '缓冲中';
+  if (state === TiCloudStorageVideoOutputState.completed) return '播放完成';
+  if (state === TiCloudStorageVideoOutputState.failed) return '播放失败';
   return '录像播放中';
 }
 
 function formatClock(value: number): string {
   return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: STORE_TIME_ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
+    timeZone: TI_CLOUD_STORAGE_TIME_ZONE, hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false,
   }).format(value);
 }
 

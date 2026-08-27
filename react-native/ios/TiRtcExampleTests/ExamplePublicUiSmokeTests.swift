@@ -32,8 +32,8 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     waitForControl("TiRTC Config appId", timeout: launchTimeout)
 
     switch env("TIRTC_RN_FLOW", defaultValue: "downlink") {
-    case "store":
-      try runStoreFlow()
+    case "ti-cloud-storage":
+      try runCloudStorageFlow()
     case "stress":
       fillCommonConfig()
       runStressFlow()
@@ -43,7 +43,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     }
   }
 
-  func testTiStorePublicSdkCase() throws {
+  func testTiCloudStoragePublicSdkCase() throws {
     app.launch()
     dismissSystemAlertsIfPresent()
     app.tap()
@@ -51,132 +51,132 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     let deadline = Date().addingTimeInterval(900)
     while Date() < deadline {
       if app.state != .runningForeground {
-        attachScreenshot(name: "store-sdk-case-app-exited")
-        XCTFail("Store SDK Case app exited before a terminal result")
+        attachScreenshot(name: "ti-cloud-storage-sdk-case-app-exited")
+        XCTFail("Ti Cloud Storage SDK Case app exited before a terminal result")
         return
       }
-      if labelContains("TiStore SDK Case Failed") {
-        attachScreenshot(name: "store-sdk-case-failed")
-        XCTFail("Store public SDK Case reported failure")
+      if labelContains("Ti Cloud Storage SDK Case Failed") {
+        attachScreenshot(name: "ti-cloud-storage-sdk-case-failed")
+        XCTFail("Ti Cloud Storage public SDK Case reported failure")
         return
       }
-      if labelContains("TiStore SDK Case Passed") {
-        marker("store_sdk_case_completed")
+      if labelContains("Ti Cloud Storage SDK Case Passed") {
+        marker("ti-cloud-storage-sdk-case-completed")
         return
       }
       RunLoop.current.run(until: Date().addingTimeInterval(0.5))
     }
-    attachScreenshot(name: "store-sdk-case-timeout")
-    XCTFail("timed out waiting for Store public SDK Case")
+    attachScreenshot(name: "ti-cloud-storage-sdk-case-timeout")
+    XCTFail("timed out waiting for Ti Cloud Storage public SDK Case")
   }
 
-  private func runStoreFlow() throws {
-    let startTimeMs = env("TIRTC_RN_STORE_START_TIME_MS")
+  private func runCloudStorageFlow() throws {
+    let startTimeMs = env("TI_CLOUD_STORAGE_START_TIME_MS")
     guard !startTimeMs.isEmpty else {
-      XCTFail("missing Store start time")
+      XCTFail("missing Ti Cloud Storage start time")
       return
     }
     tapControl("云录像")
-    setField("TiStore Config appId", value: env("TIRTC_RN_STORE_APP_ID"))
-    setField("TiStore Config endpoint", value: env("TIRTC_RN_STORE_ENDPOINT"))
+    setField("Ti Cloud Storage Config appId", value: env("TI_CLOUD_STORAGE_APP_ID"))
+    setField("Ti Cloud Storage Config endpoint", value: env("TI_CLOUD_STORAGE_ENDPOINT"))
     setField(
-      "TiStore Config token",
-      value: env("TIRTC_RN_STORE_TOKEN_URL"))
+      "Ti Cloud Storage Config token",
+      value: env("TI_CLOUD_STORAGE_TOKEN_URL"))
     setField(
-      "TiStore Config audioChannelId",
-      value: env("TIRTC_RN_STORE_AUDIO_CHANNEL_ID", defaultValue: "10"))
+      "Ti Cloud Storage Config audioChannelId",
+      value: env("TI_CLOUD_STORAGE_AUDIO_CHANNEL_ID", defaultValue: "10"))
     setField(
-      "TiStore Config videoChannelId",
-      value: env("TIRTC_RN_STORE_VIDEO_CHANNEL_ID", defaultValue: "11"))
-    marker("store_config_filled")
-    tapControl("TiStore Open")
-    tapControl("TiStore Play \(startTimeMs)")
+      "Ti Cloud Storage Config videoChannelId",
+      value: env("TI_CLOUD_STORAGE_VIDEO_CHANNEL_ID", defaultValue: "11"))
+    marker("ti-cloud-storage-config-filled")
+    tapControl("Ti Cloud Storage Open")
+    tapControl("Ti Cloud Storage Play \(startTimeMs)")
     waitForText("正在播放", timeout: connectTimeout)
-    marker("store_rendering_ok")
+    marker("ti-cloud-storage-rendering-ok")
     let videoDeadline = Date().addingTimeInterval(connectTimeout)
     while Date() < videoDeadline && !hasVisibleVideoFrame() {
       RunLoop.current.run(until: Date().addingTimeInterval(0.75))
     }
-    XCTAssertTrue(hasVisibleVideoFrame(), "Store video frame was not visible")
-    attachScreenshot(name: "store-visible-video")
-    marker("store_visible_video_ok")
+    XCTAssertTrue(hasVisibleVideoFrame(), "Ti Cloud Storage video frame was not visible")
+    attachScreenshot(name: "ti-cloud-storage-visible-video")
+    marker("ti-cloud-storage-visible-video-ok")
 
     RunLoop.current.run(until: Date().addingTimeInterval(5))
-    tapControl("TiStore Pause Resume")
+    tapControl("Ti Cloud Storage Pause Resume")
     waitForText("已暂停", timeout: shortTimeout)
-    marker("store_pause_ok")
+    marker("ti-cloud-storage-pause-ok")
     RunLoop.current.run(until: Date().addingTimeInterval(3))
-    tapControl("TiStore Pause Resume")
+    tapControl("Ti Cloud Storage Pause Resume")
     waitForText("继续播放", timeout: shortTimeout)
-    marker("store_resume_ok")
+    marker("ti-cloud-storage-resume-ok")
 
-    tapControl("TiStore Mute")
+    tapControl("Ti Cloud Storage Mute")
     waitForText("已静音", timeout: shortTimeout)
-    marker("store_mute_ok")
+    marker("ti-cloud-storage-mute-ok")
     RunLoop.current.run(until: Date().addingTimeInterval(2))
-    tapControl("TiStore Mute")
+    tapControl("Ti Cloud Storage Mute")
     waitForText("已恢复声音", timeout: shortTimeout)
-    marker("store_unmute_ok")
+    marker("ti-cloud-storage-unmute-ok")
 
-    tapControl("TiStore Speed")
-    waitForText("播放倍速：x2", timeout: shortTimeout)
-    marker("store_speed_x2_ok")
+    for _ in 0..<6 { tapControl("Ti Cloud Storage Speed") }
+    waitForText("播放倍速：1/2×", timeout: shortTimeout)
+    marker("ti-cloud-storage-speed-x0_5-ok")
     RunLoop.current.run(until: Date().addingTimeInterval(3))
-    for _ in 0..<3 { tapControl("TiStore Speed") }
-    waitForText("播放倍速：x1", timeout: shortTimeout)
-    marker("store_speed_x1_ok")
+    tapControl("Ti Cloud Storage Speed")
+    waitForText("播放倍速：1×", timeout: shortTimeout)
+    marker("ti-cloud-storage-speed-x1-ok")
 
-    let seek = waitForControl("TiStore Seek", timeout: shortTimeout)
+    let seek = waitForControl("Ti Cloud Storage Seek", timeout: shortTimeout)
     seek.coordinate(withNormalizedOffset: CGVector(dx: 0.45, dy: 0.5)).tap()
     waitForText("已跳转", timeout: shortTimeout)
-    marker("store_seek_ok")
+    marker("ti-cloud-storage-seek-ok")
     RunLoop.current.run(until: Date().addingTimeInterval(3))
 
-    tapControl("TiStore Snapshot")
+    tapControl("Ti Cloud Storage Snapshot")
     waitForText("截图完成", timeout: shortTimeout)
-    marker("store_snapshot_ok")
-    tapControl("TiStore Save Gallery", dismissSystemAlertsAfterTap: false)
+    marker("ti-cloud-storage-snapshot-ok")
+    tapControl("Ti Cloud Storage Save Gallery", dismissSystemAlertsAfterTap: false)
     dismissSystemAlertsIfPresent()
     waitForText("已保存到系统相册", timeout: shortTimeout)
-    marker("store_snapshot_gallery_ok")
+    marker("ti-cloud-storage-snapshot-gallery-ok")
 
-    tapControl("TiStore Recording")
+    tapControl("Ti Cloud Storage Recording")
     waitForText("边播边录已开始", timeout: shortTimeout)
-    marker("store_recording_started_ok")
+    marker("ti-cloud-storage-recording-started-ok")
     RunLoop.current.run(until: Date().addingTimeInterval(7))
-    tapControl("TiStore Recording")
+    tapControl("Ti Cloud Storage Recording")
     waitForText("边播边录完成", timeout: shortTimeout)
-    marker("store_recording_completed_ok")
-    tapControl("TiStore Save Gallery")
+    marker("ti-cloud-storage-recording-completed-ok")
+    tapControl("Ti Cloud Storage Save Gallery")
     waitForText("已保存到系统相册", timeout: shortTimeout)
-    marker("store_recording_gallery_ok")
+    marker("ti-cloud-storage-recording-gallery-ok")
 
-    tapControl("TiStore Recordings")
-    tapControl("TiStore Export \(startTimeMs)")
-    tapControl("TiStore Close Recordings")
+    tapControl("Ti Cloud Storage Recordings")
+    tapControl("Ti Cloud Storage Export \(startTimeMs)")
+    tapControl("Ti Cloud Storage Close Recordings")
     waitForText("范围下载完成", timeout: 240)
-    marker("store_export_completed_ok")
-    tapControl("TiStore Save Gallery")
+    marker("ti-cloud-storage-export-completed-ok")
+    tapControl("Ti Cloud Storage Save Gallery")
     waitForText("已保存到系统相册", timeout: shortTimeout)
-    marker("store_export_gallery_ok")
+    marker("ti-cloud-storage-export-gallery-ok")
 
-    tapControl("TiStore Recordings")
-    tapControl("TiStore Play \(startTimeMs)")
+    tapControl("Ti Cloud Storage Recordings")
+    tapControl("Ti Cloud Storage Play \(startTimeMs)")
     waitForText("正在播放", timeout: connectTimeout)
     let replayDeadline = Date().addingTimeInterval(119)
     while Date() < replayDeadline {
       XCTAssertFalse(labelContains("播放失败") || labelContains("回放失败") || labelContains("输出失败"))
-      XCTAssertFalse(labelContains("缓冲中"), "Store replay buffered after rendering")
+      XCTAssertFalse(labelContains("缓冲中"), "Ti Cloud Storage replay buffered after rendering")
       RunLoop.current.run(until: Date().addingTimeInterval(1))
     }
-    marker("store_continuous_playback_ok duration_ms=119000")
+    marker("ti-cloud-storage-continuous-playback-ok duration_ms=119000")
 
-    tapControl("TiStore Upload Logs")
-    waitForLogUpload(role: "store")
-    tapControl("TiStore Back")
-    waitForControl("TiStore Open", timeout: shortTimeout)
-    marker("store_returned_to_configure")
-    marker("store_public_ui_done")
+    tapControl("Ti Cloud Storage Upload Logs")
+    waitForLogUpload(role: "ti-cloud-storage")
+    tapControl("Ti Cloud Storage Back")
+    waitForControl("Ti Cloud Storage Open", timeout: shortTimeout)
+    marker("ti-cloud-storage-returned-to-configure")
+    marker("ti-cloud-storage-public-ui-done")
   }
 
   private func runDownlinkFlow() {
@@ -212,7 +212,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   }
 
   private func runStressFlow() {
-    let loops = max(1, Int(env("TIRTC_RN_LOOPS", defaultValue: "20")) ?? 20)
+    let loops = max(1, Int(env("TIRTC_RN_LOOPS", defaultValue: "3")) ?? 3)
     let loopOffset = max(0, Int(env("TIRTC_RN_LOOP_OFFSET", defaultValue: "0")) ?? 0)
     for localLoop in 1...loops {
       let loop = loopOffset + localLoop

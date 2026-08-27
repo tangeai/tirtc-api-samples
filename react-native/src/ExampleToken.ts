@@ -41,13 +41,13 @@ export async function resolveToken(config: ExampleConfig): Promise<string> {
   return normalizeToken((decoded as {token: string}).token);
 }
 
-export async function resolveStoreToken(value: string): Promise<string> {
+export async function tiCloudStorageResolveToken(value: string): Promise<string> {
   const candidate = value.trim();
   if (!candidate) {
     throw new Error('token is required.');
   }
   if (!/^https?:\/\//i.test(candidate)) {
-    return normalizeStoreToken(candidate);
+    return tiCloudStorageNormalizeToken(candidate);
   }
 
   const response = await fetch(candidate);
@@ -58,7 +58,7 @@ export async function resolveStoreToken(value: string): Promise<string> {
   if (Number.isFinite(contentLength) && contentLength > STORE_TOKEN_LIMIT) {
     throw new Error('token handoff is too large.');
   }
-  return normalizeStoreToken(await response.text());
+  return tiCloudStorageNormalizeToken(await response.text());
 }
 
 const STORE_TOKEN_LIMIT = 64 * 1024;
@@ -80,7 +80,7 @@ function normalizeTokenServerOrigin(value: string): string {
   return url.origin;
 }
 
-function normalizeStoreToken(value: string): string {
+function tiCloudStorageNormalizeToken(value: string): string {
   if (
     !value ||
     value.length > STORE_TOKEN_LIMIT ||
