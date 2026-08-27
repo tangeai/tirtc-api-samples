@@ -9,6 +9,7 @@
 | [`flutter/`](flutter/) | Flutter | 包含各端原生宿主的 Flutter 应用 |
 | [`react-native/`](react-native/) | React Native | 包含 Android、iOS 宿主的 React Native 应用 |
 | [`ohos/`](ohos/) | OpenHarmony / HarmonyOS NEXT | DevEco Studio 应用 |
+| [`go/`](go/) | Go | RTC 与云存储命令行客户端 |
 | [`device/`](device/) | Nano C SDK | macOS ARM64、Linux x86_64 设备端示例 |
 
 应用端示例固定引用已经在公开 package registry 发布的精确 SDK 版本。设备端示例由开发者下载对应平台最新的 Nano `standard` 包。进入对应目录后，先阅读其中的 README，再按说明安装依赖并运行工程。
