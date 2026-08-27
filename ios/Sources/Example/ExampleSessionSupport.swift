@@ -9,9 +9,9 @@ import TiRTC
     import AppKit
 #endif
 
-private enum TiStoreExampleMedia {
-    case recording(TiStoreRecordingFile)
-    case snapshot(TiStoreSnapshotFile)
+private enum TiCloudStorageExampleMedia {
+    case recording(TiCloudStorageRecordingFile)
+    case snapshot(TiCloudStorageSnapshotFile)
 
     var path: String {
         switch self {
@@ -34,21 +34,21 @@ private enum TiStoreExampleMedia {
 }
 
 @MainActor
-final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDelegate,
-    TiStoreVideoOutputDelegate
+final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorageAudioOutputDelegate,
+    TiCloudStorageVideoOutputDelegate
 {
-    private let store: TiStore
-    let replay: TiStoreReplay
-    let audioOutput = TiStoreAudioOutput()
-    let videoOutput = TiStoreVideoOutput()
+    private let cloudStorage: TiCloudStorage
+    let replay: TiCloudStorageReplay
+    let audioOutput = TiCloudStorageAudioOutput()
+    let videoOutput = TiCloudStorageVideoOutput()
     let audioChannelId: UInt8
     let videoChannelId: UInt8
 
-    @Published private(set) var recordings: [TiStoreRecordingRange] = []
-    @Published private(set) var recordingDays: [TiStoreRecordingDay] = []
-    @Published private(set) var selected: TiStoreRecordingRange?
+    @Published private(set) var recordings: [TiCloudStorageRecordingRange] = []
+    @Published private(set) var recordingDays: [TiCloudStorageRecordingDay] = []
+    @Published private(set) var selected: TiCloudStorageRecordingRange?
     @Published private(set) var currentTimeMs: Int64?
-    @Published private(set) var videoState: TiStoreVideoOutputState = .idle
+    @Published private(set) var videoState: TiCloudStorageVideoOutputState = .idle
     @Published private(set) var status = "请选择录像"
     @Published private(set) var querying = false
     @Published private(set) var daysQuerying = false
@@ -58,7 +58,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
     @Published private(set) var exporting = false
     @Published private(set) var paused = false
     @Published private(set) var muted = false
-    @Published private(set) var speed: TiStoreReplaySpeed = .x1
+    @Published private(set) var speed: TiCloudStorageReplaySpeed = .x1
     @Published private(set) var hasLatestMedia = false
     @Published private(set) var uploadingLogs = false
 
@@ -83,10 +83,10 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
     }
 
     private var outputsAttached = false
-    private var recordingTask: TiStoreRecordingTask?
-    private var exportTask: TiStoreExportTask?
+    private var recordingTask: TiCloudStorageRecordingTask?
+    private var exportTask: TiCloudStorageExportTask?
     private var exportWaiters: [CheckedContinuation<Void, Never>] = []
-    private var latestMedia: TiStoreExampleMedia?
+    private var latestMedia: TiCloudStorageExampleMedia?
     private var queryTask: Task<Void, Never>?
     private var queuedQuery: (startTimeMs: Int64, endTimeMs: Int64)?
     private var queryGeneration = 0
@@ -98,8 +98,8 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
     private var closing = false
 
     init(token: String, audioChannelId: UInt8, videoChannelId: UInt8) {
-        store = TiStore(token: token)
-        replay = store.createReplay()
+        cloudStorage = TiCloudStorage(token: token)
+        replay = cloudStorage.createReplay()
         self.audioChannelId = audioChannelId
         self.videoChannelId = videoChannelId
         super.init()
@@ -130,7 +130,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             while !Task.isCancelled, let request = queuedQuery {
                 queuedQuery = nil
                 let generation = queryGeneration
-                let result = await store.listRecordings(
+                let result = await cloudStorage.listRecordings(
                     startTimeMs: request.startTimeMs,
                     endTimeMs: request.endTimeMs
                 )
@@ -143,7 +143,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
                     return left.endTimeMs > right.endTimeMs
                 }
                 status =
-                    result.code == TiStoreErrorCode.ok
+                    result.code == TiCloudStorageErrorCode.ok
                     ? "查询完成：\(result.recordings.count) 段录像" : "查询失败：\(result.code)"
             }
             querying = false
@@ -165,7 +165,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             while !Task.isCancelled, let request = queuedDaysQuery {
                 queuedDaysQuery = nil
                 let generation = daysQueryGeneration
-                let result = await store.listRecordingDays(
+                let result = await cloudStorage.listRecordingDays(
                     startDate: request.startDate,
                     endDate: request.endDate,
                     timeZoneId: "Asia/Shanghai"
@@ -181,21 +181,21 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
         daysQueryTask = task
     }
 
-    func play(_ range: TiStoreRecordingRange) {
+    func play(_ range: TiCloudStorageRecordingRange) {
         guard !closing else { return }
         if !outputsAttached {
             var code = videoOutput.attach(replay: replay, channelId: videoChannelId)
-            if code == TiStoreErrorCode.ok {
+            if code == TiCloudStorageErrorCode.ok {
                 code = audioOutput.attach(replay: replay, channelId: audioChannelId)
             }
-            guard code == TiStoreErrorCode.ok else {
+            guard code == TiCloudStorageErrorCode.ok else {
                 status = "输出绑定失败：\(code)"
                 return
             }
             outputsAttached = true
         }
         let code = replay.play(startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs)
-        if code == TiStoreErrorCode.ok {
+        if code == TiCloudStorageErrorCode.ok {
             selected = range
             currentTimeMs = range.startTimeMs
             paused = false
@@ -210,7 +210,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
         performReplayControl(
             operation: { replay.seek(toTimeMs: timeMs) },
             completion: { [weak self] code in
-                self?.status = code == TiStoreErrorCode.ok ? "已跳转" : "跳转失败：\(code)"
+                self?.status = code == TiCloudStorageErrorCode.ok ? "已跳转" : "跳转失败：\(code)"
             }
         )
     }
@@ -222,23 +222,23 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             operation: { shouldResume ? replay.resume() : replay.pause() },
             completion: { [weak self] code in
                 guard let self else { return }
-                if code == TiStoreErrorCode.ok { paused.toggle() }
-                status = code == TiStoreErrorCode.ok ? (paused ? "已暂停" : "继续播放") : "暂停操作失败：\(code)"
+                if code == TiCloudStorageErrorCode.ok { paused.toggle() }
+                status = code == TiCloudStorageErrorCode.ok ? (paused ? "已暂停" : "继续播放") : "暂停操作失败：\(code)"
             }
         )
     }
 
-    func setSpeed(_ next: TiStoreReplaySpeed) {
+    func setSpeed(_ next: TiCloudStorageReplaySpeed) {
         let replay = replay
         let rawValue = next.rawValue
         performReplayControl(
             operation: {
-                replay.setSpeed(TiStoreReplaySpeed(rawValue: rawValue) ?? .x1)
+                replay.setSpeed(TiCloudStorageReplaySpeed(rawValue: rawValue) ?? .x1)
             },
             completion: { [weak self] code in
                 guard let self else { return }
-                if code == TiStoreErrorCode.ok { speed = next }
-                status = code == TiStoreErrorCode.ok ? "播放倍速：\(next.label)" : "倍速设置失败：\(code)"
+                if code == TiCloudStorageErrorCode.ok { speed = next }
+                status = code == TiCloudStorageErrorCode.ok ? "播放倍速：\(next.label)" : "倍速设置失败：\(code)"
             }
         )
     }
@@ -246,8 +246,8 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
     func toggleMute() {
         let next = !muted
         let code = audioOutput.setVolume(next ? 0 : 100)
-        if code == TiStoreErrorCode.ok { muted = next }
-        status = code == TiStoreErrorCode.ok ? (muted ? "已静音" : "已恢复声音") : "音量设置失败：\(code)"
+        if code == TiCloudStorageErrorCode.ok { muted = next }
+        status = code == TiCloudStorageErrorCode.ok ? (muted ? "已静音" : "已恢复声音") : "音量设置失败：\(code)"
     }
 
     func takeSnapshot() {
@@ -256,12 +256,12 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
         mediaTask = Task { @MainActor [weak self] in
             guard let self else { return }
             let result = await videoOutput.takeSnapshot()
-            if let file = result.file, result.code == TiStoreErrorCode.ok {
+            if let file = result.file, result.code == TiCloudStorageErrorCode.ok {
                 await replaceLatest(.snapshot(file))
             }
             mediaBusy = false
             mediaTask = nil
-            status = result.code == TiStoreErrorCode.ok ? "截图完成" : "截图失败：\(result.code)"
+            status = result.code == TiCloudStorageErrorCode.ok ? "截图完成" : "截图失败：\(result.code)"
         }
     }
 
@@ -274,12 +274,12 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             mediaTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 let result = await task.stop()
-                if let file = result.file, result.code == TiStoreErrorCode.ok {
+                if let file = result.file, result.code == TiCloudStorageErrorCode.ok {
                     await replaceLatest(.recording(file))
                 }
                 mediaBusy = false
                 mediaTask = nil
-                status = result.code == TiStoreErrorCode.ok ? "边播边录完成" : "边播边录失败：\(result.code)"
+                status = result.code == TiCloudStorageErrorCode.ok ? "边播边录完成" : "边播边录失败：\(result.code)"
             }
             return
         }
@@ -288,19 +288,19 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             audioChannelId: NSNumber(value: audioChannelId)
         )
         recordingTask = result.task
-        recording = result.code == TiStoreErrorCode.ok && result.task != nil
+        recording = result.code == TiCloudStorageErrorCode.ok && result.task != nil
         status = recording ? "边播边录已开始" : "边播边录启动失败：\(result.code)"
     }
 
-    func export(_ range: TiStoreRecordingRange) {
+    func export(_ range: TiCloudStorageRecordingRange) {
         guard exportTask == nil, !closing else { return }
-        let request = TiStoreExportRequest(
+        let request = TiCloudStorageExportRequest(
             startTimeMs: range.startTimeMs,
             endTimeMs: range.endTimeMs,
             videoChannelId: Int(videoChannelId),
             audioChannelId: NSNumber(value: audioChannelId)
         )
-        let started = store.exportRecording(
+        let started = cloudStorage.exportRecording(
             request,
             progress: { [weak self] progress in
                 Task { @MainActor in self?.status = "范围下载 \(Int(progress * 100))%" }
@@ -310,7 +310,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             }
         )
         exportTask = started.task
-        exporting = started.code == TiStoreErrorCode.ok && started.task != nil
+        exporting = started.code == TiCloudStorageErrorCode.ok && started.task != nil
         status = exporting ? "范围下载已开始" : "范围下载启动失败：\(started.code)"
     }
 
@@ -321,9 +321,9 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             guard let self else { return }
             let copyCode = await publishToPhotos(media)
             let code: Int32
-            if copyCode == TiStoreErrorCode.ok {
+            if copyCode == TiCloudStorageErrorCode.ok {
                 code = await media.delete()
-                if code == TiStoreErrorCode.ok, latestMedia?.path == media.path {
+                if code == TiCloudStorageErrorCode.ok, latestMedia?.path == media.path {
                     latestMedia = nil
                     hasLatestMedia = false
                 }
@@ -332,7 +332,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             }
             mediaBusy = false
             mediaTask = nil
-            status = code == TiStoreErrorCode.ok ? "已保存到系统相册" : "保存到相册失败：\(code)"
+            status = code == TiCloudStorageErrorCode.ok ? "已保存到系统相册" : "保存到相册失败：\(code)"
         }
     }
 
@@ -345,20 +345,20 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
                 self?.status = result.succeeded ? "日志上传完成：\(result.logId ?? "")" : "日志上传失败：\(result.code)"
             }
         }
-        if code != TiStoreErrorCode.ok {
+        if code != TiCloudStorageErrorCode.ok {
             uploadingLogs = false
             status = "日志上传启动失败：\(code)"
         }
     }
 
     func close() async -> Int32 {
-        guard !closing else { return TiStoreErrorCode.ok }
+        guard !closing else { return TiCloudStorageErrorCode.ok }
         closing = true
         queryGeneration += 1
         daysQueryGeneration += 1
         queuedQuery = nil
         queuedDaysQuery = nil
-        var code = TiStoreErrorCode.ok
+        var code = TiCloudStorageErrorCode.ok
         await controlTask?.value
         controlTask = nil
         await mediaTask?.value
@@ -388,47 +388,53 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
         code = firstError(code, audioOutput.dispose())
         code = firstError(code, videoOutput.dispose())
         code = firstError(code, replay.dispose())
-        code = firstError(code, store.dispose())
+        code = firstError(code, cloudStorage.dispose())
         return code
     }
 
-    nonisolated func audioOutput(_ output: TiStoreAudioOutput, didChangeState state: TiStoreAudioOutputState) {}
+    nonisolated func audioOutput(
+        _ output: TiCloudStorageAudioOutput,
+        didChangeState state: TiCloudStorageAudioOutputState
+    ) {}
 
-    nonisolated func audioOutput(_ output: TiStoreAudioOutput, didFailWithCode code: Int32) {
+    nonisolated func audioOutput(_ output: TiCloudStorageAudioOutput, didFailWithCode code: Int32) {
         Task { @MainActor [weak self] in self?.status = "音频输出失败：\(code)" }
     }
 
-    nonisolated func videoOutput(_ output: TiStoreVideoOutput, didChangeState state: TiStoreVideoOutputState) {
+    nonisolated func videoOutput(
+        _ output: TiCloudStorageVideoOutput,
+        didChangeState state: TiCloudStorageVideoOutputState
+    ) {
         let rawValue = state.rawValue
         Task { @MainActor [weak self] in
-            let next = TiStoreVideoOutputState(rawValue: rawValue) ?? .failed
+            let next = TiCloudStorageVideoOutputState(rawValue: rawValue) ?? .failed
             self?.videoState = next
             if next == .failed { self?.status = "视频输出失败" }
         }
     }
 
-    nonisolated func videoOutput(_ output: TiStoreVideoOutput, didFailWithCode code: Int32) {
+    nonisolated func videoOutput(_ output: TiCloudStorageVideoOutput, didFailWithCode code: Int32) {
         Task { @MainActor [weak self] in self?.status = "视频输出失败：\(code)" }
     }
 
-    private func replaceLatest(_ next: TiStoreExampleMedia) async {
+    private func replaceLatest(_ next: TiCloudStorageExampleMedia) async {
         let previous = latestMedia
         latestMedia = next
         hasLatestMedia = true
         if let previous, previous.path != next.path { _ = await previous.delete() }
     }
 
-    private func finishExport(_ result: TiStoreRecordingResult) async {
+    private func finishExport(_ result: TiCloudStorageRecordingResult) async {
         exportTask = nil
         exporting = false
-        if let file = result.file, result.code == TiStoreErrorCode.ok {
+        if let file = result.file, result.code == TiCloudStorageErrorCode.ok {
             if closing {
                 _ = await file.delete()
             } else {
                 await replaceLatest(.recording(file))
             }
         }
-        status = result.code == TiStoreErrorCode.ok ? "范围下载完成" : "范围下载失败：\(result.code)"
+        status = result.code == TiCloudStorageErrorCode.ok ? "范围下载完成" : "范围下载失败：\(result.code)"
         let waiters = exportWaiters
         exportWaiters.removeAll()
         for waiter in waiters { waiter.resume() }
@@ -452,7 +458,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
         }
     }
 
-    private func publishToPhotos(_ media: TiStoreExampleMedia) async -> Int32 {
+    private func publishToPhotos(_ media: TiCloudStorageExampleMedia) async -> Int32 {
         await Self.publishToPhotos(path: media.path, isVideo: media.isVideo)
     }
 
@@ -464,7 +470,7 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
             }
         }
         guard authorization == .authorized || authorization == .limited else {
-            return TiStoreErrorCode.permissionDenied
+            return TiCloudStorageErrorCode.permissionDenied
         }
         return await withCheckedContinuation { continuation in
             PHPhotoLibrary.shared().performChanges {
@@ -475,32 +481,44 @@ final class TiStoreExampleFlow: NSObject, ObservableObject, TiStoreAudioOutputDe
                     _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
                 }
             } completionHandler: { success, _ in
-                continuation.resume(returning: success ? TiStoreErrorCode.ok : TiStoreErrorCode.fileWriteFailed)
+                let result: Int32
+                if success {
+                    result = TiCloudStorageErrorCode.ok
+                } else {
+                    result = TiCloudStorageErrorCode.fileWriteFailed
+                }
+                continuation.resume(returning: result)
             }
         }
     }
 
     private func firstError(_ current: Int32, _ next: Int32) -> Int32 {
-        if next == TiStoreErrorCode.ok || next == TiStoreErrorCode.notStarted || next == TiStoreErrorCode.notBound {
+        if next == TiCloudStorageErrorCode.ok
+            || next == TiCloudStorageErrorCode.notStarted
+            || next == TiCloudStorageErrorCode.notBound
+        {
             return current
         }
-        return current == TiStoreErrorCode.ok ? next : current
+        return current == TiCloudStorageErrorCode.ok ? next : current
     }
 }
 
-extension TiStoreReplaySpeed {
+extension TiCloudStorageReplaySpeed {
     fileprivate var label: String {
         switch self {
-        case .x1: "x1"
-        case .x2: "x2"
-        case .x4: "x4"
-        case .x8: "x8"
-        @unknown default: "x1"
+        case .x0_125: "1/8×"
+        case .x0_25: "1/4×"
+        case .x0_5: "1/2×"
+        case .x1: "1×"
+        case .x2: "2×"
+        case .x4: "4×"
+        case .x8: "8×"
+        @unknown default: "1×"
         }
     }
 }
 
-extension TiStoreVideoOutputState {
+extension TiCloudStorageVideoOutputState {
     fileprivate var accessibilityLabel: String {
         switch self {
         case .idle: "idle"
@@ -514,9 +532,9 @@ extension TiStoreVideoOutputState {
     }
 }
 
-struct TiStoreExampleView: View {
+struct TiCloudStorageExampleView: View {
     @Environment(\.presentationMode) private var presentationMode
-    @StateObject private var flow: TiStoreExampleFlow
+    @StateObject private var flow: TiCloudStorageExampleFlow
     @State private var initCode: Int32
     @State private var selectedDate = Date()
     @State private var visibleMonth = Date()
@@ -525,14 +543,14 @@ struct TiStoreExampleView: View {
     @State private var cleaning = false
 
     init(appId: String, endpoint: String, token: String, audioChannelId: UInt8, videoChannelId: UInt8) {
-        let code = TiStore.initialize(
+        let code = TiCloudStorage.initialize(
             appId: appId.trimmingCharacters(in: .whitespacesAndNewlines),
             endpoint: endpoint.trimmingCharacters(in: .whitespacesAndNewlines),
             consoleLogEnabled: false
         )
         _initCode = State(initialValue: code)
         _flow = StateObject(
-            wrappedValue: TiStoreExampleFlow(
+            wrappedValue: TiCloudStorageExampleFlow(
                 token: token.trimmingCharacters(in: .whitespacesAndNewlines),
                 audioChannelId: audioChannelId,
                 videoChannelId: videoChannelId
@@ -548,11 +566,11 @@ struct TiStoreExampleView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("store.close")
+                .accessibilityIdentifier("cloudStorage.close")
                 Text("云录像")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(ExampleColors.primary)
-                    .accessibilityIdentifier("store.player.page")
+                    .accessibilityIdentifier("cloudStorage.player.page")
                 Spacer()
                 Button(action: { recordingsPresented = true }) {
                     Text("选择录像")
@@ -560,8 +578,8 @@ struct TiStoreExampleView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .disabled(initCode != TiStoreErrorCode.ok)
-                .accessibilityIdentifier("store.recordings")
+                .disabled(initCode != TiCloudStorageErrorCode.ok)
+                .accessibilityIdentifier("cloudStorage.recordings")
                 Button(action: { flow.uploadLogs() }) {
                     Text(flow.uploadingLogs ? "上传中…" : "上传日志")
                         .frame(minHeight: 44)
@@ -569,14 +587,14 @@ struct TiStoreExampleView: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(flow.uploadingLogs)
-                .accessibilityIdentifier("store.upload_logs")
+                .accessibilityIdentifier("cloudStorage.upload_logs")
             }
             .padding(.horizontal, 16)
             .frame(height: 56)
             .background(ExampleColors.background)
 
             ZStack {
-                TiStoreExampleVideoSurface(output: flow.videoOutput)
+                TiCloudStorageExampleVideoSurface(output: flow.videoOutput)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .background(Color.black)
                 LinearGradient(
@@ -585,7 +603,7 @@ struct TiStoreExampleView: View {
                     endPoint: .bottom
                 )
                 if flow.selected == nil || flow.videoState != .rendering {
-                    Text(initCode == TiStoreErrorCode.ok ? flow.stageStatus : "初始化失败：\(initCode)")
+                    Text(initCode == TiCloudStorageErrorCode.ok ? flow.stageStatus : "初始化失败：\(initCode)")
                         .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(.white)
                         .padding(18)
@@ -594,12 +612,12 @@ struct TiStoreExampleView: View {
                 }
                 VStack {
                     Spacer()
-                    storeControls
+                    cloudStorageControls
                 }
                 .padding(20)
             }
             .accessibilityElement(children: .contain)
-            .accessibilityIdentifier("store.video_stage")
+            .accessibilityIdentifier("cloudStorage.video_stage")
             .accessibilityLabel(flow.videoState.accessibilityLabel)
             .accessibilityValue(flow.videoState.accessibilityLabel)
         }
@@ -607,7 +625,7 @@ struct TiStoreExampleView: View {
         .background(ExampleColors.background)
         .sheet(isPresented: $recordingsPresented) { recordingsSheetContainer }
         .onAppear {
-            guard initCode == TiStoreErrorCode.ok else { return }
+            guard initCode == TiCloudStorageErrorCode.ok else { return }
             recordingsPresented = true
             queryVisibleMonth()
             querySelectedWindow()
@@ -615,7 +633,7 @@ struct TiStoreExampleView: View {
         .onDisappear { closeWithoutDismiss() }
     }
 
-    private var storeControls: some View {
+    private var cloudStorageControls: some View {
         VStack(alignment: .trailing, spacing: 12) {
             if let range = flow.selected {
                 HStack {
@@ -632,7 +650,7 @@ struct TiStoreExampleView: View {
                             self.seekPreview = nil
                         }
                     )
-                    .accessibilityIdentifier("store.seek")
+                    .accessibilityIdentifier("cloudStorage.seek")
                     Text(formatTime(range.endTimeMs))
                 }
                 .font(.system(size: 12))
@@ -642,33 +660,36 @@ struct TiStoreExampleView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 16))
             }
             HStack(spacing: 10) {
-                storeAction(flow.recording ? "停止本地保存" : "开始本地保存", "store.recording") {
+                cloudStorageAction(flow.recording ? "停止本地保存" : "开始本地保存", "cloudStorage.recording") {
                     flow.toggleRecording()
                 }
-                storeAction("截图", "store.snapshot") { flow.takeSnapshot() }
-                storeAction("保存到系统相册", "store.gallery", enabled: flow.hasLatestMedia) {
+                cloudStorageAction("截图", "cloudStorage.snapshot") { flow.takeSnapshot() }
+                cloudStorageAction("保存到系统相册", "cloudStorage.gallery", enabled: flow.hasLatestMedia) {
                     flow.saveLatestToGallery()
                 }
             }
             HStack(spacing: 10) {
-                storeAction(flow.muted ? "恢复声音" : "静音", "store.mute", enabled: flow.speed == .x1) {
+                cloudStorageAction(flow.muted ? "恢复声音" : "静音", "cloudStorage.mute", enabled: flow.speed == .x1) {
                     flow.toggleMute()
                 }
                 Picker("倍速", selection: Binding(get: { flow.speed }, set: { flow.setSpeed($0) })) {
-                    Text("x1").tag(TiStoreReplaySpeed.x1)
-                    Text("x2").tag(TiStoreReplaySpeed.x2)
-                    Text("x4").tag(TiStoreReplaySpeed.x4)
-                    Text("x8").tag(TiStoreReplaySpeed.x8)
+                    Text("1/8×").tag(TiCloudStorageReplaySpeed.x0_125)
+                    Text("1/4×").tag(TiCloudStorageReplaySpeed.x0_25)
+                    Text("1/2×").tag(TiCloudStorageReplaySpeed.x0_5)
+                    Text("1×").tag(TiCloudStorageReplaySpeed.x1)
+                    Text("2×").tag(TiCloudStorageReplaySpeed.x2)
+                    Text("4×").tag(TiCloudStorageReplaySpeed.x4)
+                    Text("8×").tag(TiCloudStorageReplaySpeed.x8)
                 }
                 .pickerStyle(.menu)
                 .disabled(flow.selected == nil)
-                .accessibilityIdentifier("store.speed")
-                storeAction(flow.paused ? "继续播放" : "暂停播放", "store.pause") { flow.togglePause() }
+                .accessibilityIdentifier("cloudStorage.speed")
+                cloudStorageAction(flow.paused ? "继续播放" : "暂停播放", "cloudStorage.pause") { flow.togglePause() }
             }
             Text(flow.status)
                 .font(.system(size: 12))
                 .foregroundColor(.white.opacity(0.82))
-                .accessibilityIdentifier("store.status")
+                .accessibilityIdentifier("cloudStorage.status")
         }
     }
 
@@ -683,7 +704,7 @@ struct TiStoreExampleView: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityIdentifier("store.recordings.close")
+                .accessibilityIdentifier("cloudStorage.recordings.close")
             }
             recordingCalendar
             Divider()
@@ -700,11 +721,11 @@ struct TiStoreExampleView: View {
                                     flow.play(range)
                                 }
                                 .buttonStyle(.plain)
-                                .accessibilityIdentifier("store.play.\(range.startTimeMs)")
+                                .accessibilityIdentifier("cloudStorage.play.\(range.startTimeMs)")
                                 Spacer()
                                 Button(flow.exporting ? "下载中…" : "下载") { flow.export(range) }
                                     .disabled(flow.exporting)
-                                    .accessibilityIdentifier("store.export.\(range.startTimeMs)")
+                                    .accessibilityIdentifier("cloudStorage.export.\(range.startTimeMs)")
                             }
                             .padding(10)
                         }
@@ -733,14 +754,14 @@ struct TiStoreExampleView: View {
             HStack {
                 Button("‹") { changeVisibleMonth(by: -1) }
                     .disabled(flow.daysQuerying)
-                    .accessibilityIdentifier("store.calendar.previous")
+                    .accessibilityIdentifier("cloudStorage.calendar.previous")
                 Spacer()
                 Text(monthTitle)
                     .font(.system(size: 16, weight: .semibold))
                 Spacer()
                 Button("›") { changeVisibleMonth(by: 1) }
                     .disabled(flow.daysQuerying)
-                    .accessibilityIdentifier("store.calendar.next")
+                    .accessibilityIdentifier("cloudStorage.calendar.next")
             }
             HStack(spacing: 4) {
                 ForEach(["日", "一", "二", "三", "四", "五", "六"], id: \.self) { value in
@@ -766,7 +787,7 @@ struct TiStoreExampleView: View {
                         }
                         .buttonStyle(.plain)
                         .disabled(flow.daysQuerying || !available)
-                        .accessibilityIdentifier("store.calendar.day.\(dateText(day: day))")
+                        .accessibilityIdentifier("cloudStorage.calendar.day.\(dateText(day: day))")
                     } else {
                         Color.clear.frame(minHeight: 42)
                     }
@@ -774,12 +795,12 @@ struct TiStoreExampleView: View {
             }
             if flow.daysQuerying {
                 ProgressView("月份正在加载")
-                    .accessibilityIdentifier("store.calendar.loading")
-            } else if let code = flow.daysQueryCode, code != TiStoreErrorCode.ok {
+                    .accessibilityIdentifier("cloudStorage.calendar.loading")
+            } else if let code = flow.daysQueryCode, code != TiCloudStorageErrorCode.ok {
                 VStack(spacing: 8) {
                     Text("月份查询失败：\(code)")
                     Button("重试月份") { queryVisibleMonth() }
-                        .accessibilityIdentifier("store.calendar.retry")
+                        .accessibilityIdentifier("cloudStorage.calendar.retry")
                 }
             } else {
                 Text("\(flow.recordingDays.filter(\.hasRecording).count) 天有录像，灰色日期不可选择")
@@ -787,10 +808,10 @@ struct TiStoreExampleView: View {
                     .foregroundColor(ExampleColors.textSecondary)
             }
         }
-        .accessibilityIdentifier("store.calendar")
+        .accessibilityIdentifier("cloudStorage.calendar")
     }
 
-    private func storeAction(
+    private func cloudStorageAction(
         _ title: String,
         _ identifier: String,
         enabled: Bool = true,
@@ -817,8 +838,8 @@ struct TiStoreExampleView: View {
             flow.query(startTimeMs: start, endTimeMs: end)
             return
         }
-        let start = storeCalendar.startOfDay(for: selectedDate)
-        let end = storeCalendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
+        let start = cloudStorageCalendar.startOfDay(for: selectedDate)
+        let end = cloudStorageCalendar.date(byAdding: .day, value: 1, to: start) ?? start.addingTimeInterval(86_400)
         flow.query(
             startTimeMs: Int64(start.timeIntervalSince1970 * 1000),
             endTimeMs: Int64(end.timeIntervalSince1970 * 1000)
@@ -830,7 +851,7 @@ struct TiStoreExampleView: View {
         cleaning = true
         Task { @MainActor in
             _ = await flow.close()
-            _ = TiStore.shutdown()
+            _ = TiCloudStorage.shutdown()
             presentationMode.wrappedValue.dismiss()
         }
     }
@@ -840,49 +861,49 @@ struct TiStoreExampleView: View {
         cleaning = true
         Task { @MainActor in
             _ = await flow.close()
-            _ = TiStore.shutdown()
+            _ = TiCloudStorage.shutdown()
         }
     }
 
-    private func currentTime(_ range: TiStoreRecordingRange) -> Int64 {
+    private func currentTime(_ range: TiCloudStorageRecordingRange) -> Int64 {
         Int64(seekPreview ?? Double(flow.currentTimeMs ?? range.startTimeMs))
     }
 
-    private func seekValue(_ range: TiStoreRecordingRange) -> Double {
+    private func seekValue(_ range: TiCloudStorageRecordingRange) -> Double {
         seekPreview ?? Double(flow.currentTimeMs ?? range.startTimeMs)
     }
 
     private func formatTime(_ timeMs: Int64) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
-        formatter.timeZone = storeTimeZone
+        formatter.timeZone = cloudStorageTimeZone
         return formatter.string(from: Date(timeIntervalSince1970: Double(timeMs) / 1000))
     }
 
-    private var storeTimeZone: TimeZone { TimeZone(identifier: "Asia/Shanghai")! }
+    private var cloudStorageTimeZone: TimeZone { TimeZone(identifier: "Asia/Shanghai")! }
 
-    private var storeCalendar: Calendar {
+    private var cloudStorageCalendar: Calendar {
         var calendar = Calendar(identifier: .gregorian)
-        calendar.timeZone = storeTimeZone
+        calendar.timeZone = cloudStorageTimeZone
         return calendar
     }
 
     private var monthTitle: String {
-        let components = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
+        let components = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
         return "\(components.year ?? 0) 年 \(components.month ?? 0) 月"
     }
 
     private var monthGridDays: [Int?] {
-        let components = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
-        guard let start = storeCalendar.date(from: components),
-            let range = storeCalendar.range(of: .day, in: .month, for: start)
+        let components = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
+        guard let start = cloudStorageCalendar.date(from: components),
+            let range = cloudStorageCalendar.range(of: .day, in: .month, for: start)
         else { return [] }
-        let leading = storeCalendar.component(.weekday, from: start) - 1
+        let leading = cloudStorageCalendar.component(.weekday, from: start) - 1
         return Array(repeating: nil, count: leading) + range.map(Optional.some)
     }
 
     private func dateText(day: Int) -> String {
-        let components = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
+        let components = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
         return String(format: "%04d-%02d-%02d", components.year ?? 0, components.month ?? 0, day)
     }
 
@@ -891,29 +912,29 @@ struct TiStoreExampleView: View {
     }
 
     private func isSelected(day: Int) -> Bool {
-        let selected = storeCalendar.dateComponents([.year, .month, .day], from: selectedDate)
-        let visible = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
+        let selected = cloudStorageCalendar.dateComponents([.year, .month, .day], from: selectedDate)
+        let visible = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
         return selected.year == visible.year && selected.month == visible.month && selected.day == day
     }
 
     private func select(day: Int) {
-        var components = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
+        var components = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
         components.day = day
-        guard let date = storeCalendar.date(from: components) else { return }
+        guard let date = cloudStorageCalendar.date(from: components) else { return }
         selectedDate = date
         querySelectedWindow()
     }
 
     private func changeVisibleMonth(by value: Int) {
-        guard let next = storeCalendar.date(byAdding: .month, value: value, to: visibleMonth) else { return }
+        guard let next = cloudStorageCalendar.date(byAdding: .month, value: value, to: visibleMonth) else { return }
         visibleMonth = next
         queryVisibleMonth()
     }
 
     private func queryVisibleMonth() {
-        let components = storeCalendar.dateComponents([.year, .month], from: visibleMonth)
-        guard let start = storeCalendar.date(from: components),
-            let range = storeCalendar.range(of: .day, in: .month, for: start),
+        let components = cloudStorageCalendar.dateComponents([.year, .month], from: visibleMonth)
+        guard let start = cloudStorageCalendar.date(from: components),
+            let range = cloudStorageCalendar.range(of: .day, in: .month, for: start),
             let last = range.last
         else { return }
         flow.queryDays(startDate: dateText(day: 1), endDate: dateText(day: last))
@@ -921,8 +942,8 @@ struct TiStoreExampleView: View {
 }
 
 #if os(iOS)
-    private struct TiStoreExampleVideoSurface: UIViewRepresentable {
-        let output: TiStoreVideoOutput
+    private struct TiCloudStorageExampleVideoSurface: UIViewRepresentable {
+        let output: TiCloudStorageVideoOutput
 
         func makeUIView(context: Context) -> UIView {
             let view = UIView()
@@ -935,8 +956,8 @@ struct TiStoreExampleView: View {
         static func dismantleUIView(_ uiView: UIView, coordinator: Void) {}
     }
 #elseif os(macOS)
-    private struct TiStoreExampleVideoSurface: NSViewRepresentable {
-        let output: TiStoreVideoOutput
+    private struct TiCloudStorageExampleVideoSurface: NSViewRepresentable {
+        let output: TiCloudStorageVideoOutput
 
         func makeNSView(context: Context) -> NSView {
             let view = NSView()

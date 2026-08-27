@@ -2,25 +2,25 @@ import SwiftUI
 
 struct ExampleClientConfigure: View {
     @ObservedObject var session: ExampleSessionController
-    @State private var isStorePresented = false
+    @State private var isCloudStoragePresented = false
     @State private var selectedProduct = "rtc"
-    @State private var storeAppId: String
-    @State private var storeEndpoint: String
-    @State private var storeToken: String
-    @State private var storeAudioChannelId: String
-    @State private var storeVideoChannelId: String
-    @State private var resolvedStoreToken = ""
-    @State private var storeOpening = false
-    @State private var storeOpenStatus = ""
-    @State private var isStoreQRCodeScannerPresented = false
+    @State private var cloudStorageAppId: String
+    @State private var cloudStorageEndpoint: String
+    @State private var cloudStorageToken: String
+    @State private var cloudStorageAudioChannelId: String
+    @State private var cloudStorageVideoChannelId: String
+    @State private var resolvedCloudStorageToken = ""
+    @State private var cloudStorageOpening = false
+    @State private var cloudStorageOpenStatus = ""
+    @State private var isCloudStorageQRCodeScannerPresented = false
 
     init(session: ExampleSessionController) {
         self.session = session
-        _storeAppId = State(initialValue: session.appId)
-        _storeEndpoint = State(initialValue: session.endpoint)
-        _storeToken = State(initialValue: session.token)
-        _storeAudioChannelId = State(initialValue: session.audioStreamId)
-        _storeVideoChannelId = State(initialValue: session.videoStreamId)
+        _cloudStorageAppId = State(initialValue: session.appId)
+        _cloudStorageEndpoint = State(initialValue: session.endpoint)
+        _cloudStorageToken = State(initialValue: session.token)
+        _cloudStorageAudioChannelId = State(initialValue: session.audioStreamId)
+        _cloudStorageVideoChannelId = State(initialValue: session.videoStreamId)
     }
 
     var body: some View {
@@ -32,10 +32,10 @@ struct ExampleClientConfigure: View {
                         session.applyClientQRCodePayload(payload)
                     }
                 }
-                .sheet(isPresented: $isStoreQRCodeScannerPresented) {
+                .sheet(isPresented: $isCloudStorageQRCodeScannerPresented) {
                     ExampleQRCodeScanner { payload in
-                        isStoreQRCodeScannerPresented = false
-                        applyStoreQRCodePayload(payload)
+                        isCloudStorageQRCodeScannerPresented = false
+                        applyCloudStorageQRCodePayload(payload)
                     }
                 }
         #else
@@ -124,57 +124,57 @@ struct ExampleClientConfigure: View {
                         } else {
                             ExampleTextInput(
                                 "app_id",
-                                hint: "TiStore 应用标识，进入播放页前必须提供。",
-                                text: $storeAppId,
-                                accessibilityIdentifier: "store.app_id"
+                                hint: "Ti Cloud Storage 应用标识，进入播放页前必须提供。",
+                                text: $cloudStorageAppId,
+                                accessibilityIdentifier: "ti-cloud-storage.app_id"
                             )
                             ExampleTextInput(
                                 "endpoint",
                                 hint: "接入的云端环境，留空则使用默认环境。",
-                                text: $storeEndpoint,
-                                accessibilityIdentifier: "store.endpoint"
+                                text: $cloudStorageEndpoint,
+                                accessibilityIdentifier: "ti-cloud-storage.endpoint"
                             )
                             HStack(alignment: .top, spacing: 10) {
                                 ExampleTextInput(
                                     "token",
                                     hint: "粘贴云录像客户端 Token，或点右侧扫码。",
-                                    text: $storeToken,
+                                    text: $cloudStorageToken,
                                     secure: true,
-                                    accessibilityIdentifier: "store.token"
+                                    accessibilityIdentifier: "ti-cloud-storage.token"
                                 )
                                 ExampleInlineScanButton(
                                     enabled: ExamplePlatform.scanSupported,
-                                    action: { isStoreQRCodeScannerPresented = true }
+                                    action: { isCloudStorageQRCodeScannerPresented = true }
                                 )
                             }
                             HStack(spacing: 16) {
                                 ExampleTextInput(
                                     "audio_channel_id",
                                     hint: "音频 Channel，0..255",
-                                    text: $storeAudioChannelId,
-                                    accessibilityIdentifier: "store.audio_channel_id"
+                                    text: $cloudStorageAudioChannelId,
+                                    accessibilityIdentifier: "ti-cloud-storage.audio_channel_id"
                                 )
                                 ExampleTextInput(
                                     "video_channel_id",
                                     hint: "视频 Channel，0..255",
-                                    text: $storeVideoChannelId,
-                                    accessibilityIdentifier: "store.video_channel_id"
+                                    text: $cloudStorageVideoChannelId,
+                                    accessibilityIdentifier: "ti-cloud-storage.video_channel_id"
                                 )
                             }
-                            if !storeOpenStatus.isEmpty {
-                                Text(storeOpenStatus)
+                            if !cloudStorageOpenStatus.isEmpty {
+                                Text(cloudStorageOpenStatus)
                                     .font(.system(size: 12))
                                     .foregroundColor(ExampleColors.textSecondary)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .accessibilityIdentifier("store.configure.status")
+                                    .accessibilityIdentifier("ti-cloud-storage.configure.status")
                             }
-                            ExamplePrimaryButton(title: storeOpening ? "连接中…" : "播放云录像") {
-                                openStore()
+                            ExamplePrimaryButton(title: cloudStorageOpening ? "连接中…" : "播放云录像") {
+                                openCloudStorage()
                             }
                             .padding(.top, 4)
-                            .accessibilityIdentifier("store.enter_player")
-                            .disabled(!storeConfigurationValid || storeOpening)
-                            .opacity(storeConfigurationValid && !storeOpening ? 1 : 0.55)
+                            .accessibilityIdentifier("ti-cloud-storage.enter_player")
+                            .disabled(!cloudStorageConfigurationValid || cloudStorageOpening)
+                            .opacity(cloudStorageConfigurationValid && !cloudStorageOpening ? 1 : 0.55)
                         }
                     }
                 }
@@ -185,46 +185,46 @@ struct ExampleClientConfigure: View {
         .sheet(isPresented: $session.isSettingsPresented) {
             ExampleSettingsSheet(session: session)
         }
-        .sheet(isPresented: $isStorePresented) {
-            TiStoreExampleView(
-                appId: storeAppId,
-                endpoint: storeEndpoint,
-                token: resolvedStoreToken,
-                audioChannelId: UInt8(storeAudioChannelId) ?? ExampleSessionController.StreamDefaults.audio,
-                videoChannelId: UInt8(storeVideoChannelId) ?? ExampleSessionController.StreamDefaults.video
+        .sheet(isPresented: $isCloudStoragePresented) {
+            TiCloudStorageExampleView(
+                appId: cloudStorageAppId,
+                endpoint: cloudStorageEndpoint,
+                token: resolvedCloudStorageToken,
+                audioChannelId: UInt8(cloudStorageAudioChannelId) ?? ExampleSessionController.StreamDefaults.audio,
+                videoChannelId: UInt8(cloudStorageVideoChannelId) ?? ExampleSessionController.StreamDefaults.video
             )
         }
     }
 
-    private var storeConfigurationValid: Bool {
-        !storeAppId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !storeToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && UInt8(storeAudioChannelId) != nil
-            && UInt8(storeVideoChannelId) != nil
+    private var cloudStorageConfigurationValid: Bool {
+        !cloudStorageAppId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !cloudStorageToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && UInt8(cloudStorageAudioChannelId) != nil
+            && UInt8(cloudStorageVideoChannelId) != nil
     }
 
-    private func openStore() {
-        guard storeConfigurationValid, !storeOpening else { return }
-        storeOpening = true
-        storeOpenStatus = ""
+    private func openCloudStorage() {
+        guard cloudStorageConfigurationValid, !cloudStorageOpening else { return }
+        cloudStorageOpening = true
+        cloudStorageOpenStatus = ""
         Task { @MainActor in
-            defer { storeOpening = false }
+            defer { cloudStorageOpening = false }
             do {
-                resolvedStoreToken = try await resolveStoreToken(storeToken)
-                isStorePresented = true
+                resolvedCloudStorageToken = try await resolveCloudStorageToken(cloudStorageToken)
+                isCloudStoragePresented = true
             } catch {
                 #if DEBUG
                     let diagnostic = error as NSError
-                    storeOpenStatus =
+                    cloudStorageOpenStatus =
                         "Token 获取失败，请检查地址与网络（\(diagnostic.domain):\(diagnostic.code)）"
                 #else
-                    storeOpenStatus = "Token 获取失败，请检查地址与网络"
+                    cloudStorageOpenStatus = "Token 获取失败，请检查地址与网络"
                 #endif
             }
         }
     }
 
-    private func resolveStoreToken(_ candidate: String) async throws -> String {
+    private func resolveCloudStorageToken(_ candidate: String) async throws -> String {
         let trimmed = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased(),
             scheme == "http" || scheme == "https"
@@ -259,12 +259,12 @@ struct ExampleClientConfigure: View {
         throw URLError(.cannotConnectToHost)
     }
 
-    private func applyStoreQRCodePayload(_ payload: String) {
+    private func applyCloudStorageQRCodePayload(_ payload: String) {
         let trimmed = payload.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         guard trimmed.first == "{" else {
-            storeToken = trimmed
-            storeOpenStatus = "云录像 Token 已由扫码填入"
+            cloudStorageToken = trimmed
+            cloudStorageOpenStatus = "云录像 Token 已由扫码填入"
             return
         }
         guard let data = trimmed.data(using: .utf8),
@@ -273,13 +273,13 @@ struct ExampleClientConfigure: View {
             let token = object["token"] as? String,
             !token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
         else {
-            storeOpenStatus = "二维码内容无效，请使用云录像客户端 Token"
+            cloudStorageOpenStatus = "二维码内容无效，请使用云录像客户端 Token"
             return
         }
-        storeToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let appId = object["app_id"] as? String, !appId.isEmpty { storeAppId = appId }
-        if let endpoint = object["endpoint"] as? String { storeEndpoint = endpoint }
-        storeOpenStatus = "云录像配置已由扫码填入"
+        cloudStorageToken = token.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let appId = object["app_id"] as? String, !appId.isEmpty { cloudStorageAppId = appId }
+        if let endpoint = object["endpoint"] as? String { cloudStorageEndpoint = endpoint }
+        cloudStorageOpenStatus = "云录像配置已由扫码填入"
     }
 }
 
@@ -370,7 +370,7 @@ private struct ExampleProductTabs: View {
     var body: some View {
         HStack(spacing: 0) {
             tab("RTC", value: "rtc")
-            tab("云录像", value: "store")
+            tab("云录像", value: "ti-cloud-storage")
         }
         .padding(3)
         .frame(height: 44)

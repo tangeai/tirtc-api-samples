@@ -7,8 +7,8 @@ import XCTest
     import AppKit
 #endif
 
-private final class StoreSdkOutputObserver: NSObject, TiStoreAudioOutputDelegate,
-    TiStoreVideoOutputDelegate, @unchecked Sendable
+private final class TiCloudStorageSdkOutputObserver: NSObject, TiCloudStorageAudioOutputDelegate,
+    TiCloudStorageVideoOutputDelegate, @unchecked Sendable
 {
     private let lock = NSLock()
     private var storedReplayError: Int32 = 0
@@ -30,24 +30,24 @@ private final class StoreSdkOutputObserver: NSObject, TiStoreAudioOutputDelegate
     func setReplayError(_ code: Int32) { lock.withLock { storedReplayError = code } }
 
     func audioOutput(
-        _ output: TiStoreAudioOutput,
-        didChangeState state: TiStoreAudioOutputState
+        _ output: TiCloudStorageAudioOutput,
+        didChangeState state: TiCloudStorageAudioOutputState
     ) {}
 
-    func audioOutput(_ output: TiStoreAudioOutput, didFailWithCode code: Int32) {
+    func audioOutput(_ output: TiCloudStorageAudioOutput, didFailWithCode code: Int32) {
         lock.withLock { storedAudioError = code }
     }
 
     func videoOutput(
-        _ output: TiStoreVideoOutput,
-        didChangeState state: TiStoreVideoOutputState
+        _ output: TiCloudStorageVideoOutput,
+        didChangeState state: TiCloudStorageVideoOutputState
     ) {
         lock.withLock {
             if continuousPlayback && state == .buffering { storedBufferingCount += 1 }
         }
     }
 
-    func videoOutput(_ output: TiStoreVideoOutput, didFailWithCode code: Int32) {
+    func videoOutput(_ output: TiCloudStorageVideoOutput, didFailWithCode code: Int32) {
         lock.withLock { storedVideoError = code }
     }
 }
@@ -89,20 +89,20 @@ final class ExampleUITests: XCTestCase {
                 renderWindowSeconds: renderWindowSeconds)
             return
         }
-        if mode == "store_public_smoke" {
+        if mode == "ti-cloud-storage-public-smoke" {
             let payload = try Self.decodeAppEnvironment(
                 environment["TIRTC_XCUITEST_PUBLIC_PAYLOAD_JSON"] ?? "{}")
-            try await runStorePublicSmoke(
+            try await runTiCloudStoragePublicSmoke(
                 appEnvironment: appEnvironment,
                 payload: payload,
                 statusLog: statusLog,
                 timeoutSeconds: timeoutSeconds)
             return
         }
-        if mode == "store_public_integration" {
+        if mode == "ti-cloud-storage-public-integration" {
             let payload = try Self.decodeAppEnvironment(
                 environment["TIRTC_XCUITEST_PUBLIC_PAYLOAD_JSON"] ?? "{}")
-            try await runStorePublicSdkCase(
+            try await runTiCloudStoragePublicSdkCase(
                 payload: payload,
                 statusLog: statusLog,
                 timeoutSeconds: timeoutSeconds)
@@ -306,7 +306,7 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
-    private func runStorePublicSmoke(
+    private func runTiCloudStoragePublicSmoke(
         appEnvironment: [String: String],
         payload: [String: String],
         statusLog: String,
@@ -314,175 +314,184 @@ final class ExampleUITests: XCTestCase {
     ) async throws {
         let app = launchApp(appEnvironment: appEnvironment, attachExternalApp: false)
         XCTAssertTrue(waitForElement(app, "client.configure.page", timeout: 8.0))
-        Self.appendStatus(statusLog, "store_configure_page_ready")
+        Self.appendStatus(statusLog, "ti-cloud-storage-configure-page-ready")
         handleSystemPermissionDialogs(app, attempts: 5)
 
         tap(app, "product.tabs")
-        tapButtonAny(app, ["云录像", "Store"])
-        XCTAssertTrue(waitForElement(app, "store.enter_player", timeout: 8.0))
+        tapButtonAny(app, ["云录像", "Ti Cloud Storage"])
+        XCTAssertTrue(waitForElement(app, "tiCloudStorage.enter_player", timeout: 8.0))
 
-        try replaceText(app, "store.app_id", required(payload, "app_id"))
-        try replaceText(app, "store.endpoint", payload["endpoint"] ?? "")
-        try replaceText(app, "store.token", required(payload, "token_url"))
-        try replaceText(app, "store.audio_channel_id", payload["audio_channel_id"] ?? "10")
-        try replaceText(app, "store.video_channel_id", payload["video_channel_id"] ?? "11")
-        Self.appendStatus(statusLog, "store_payload_applied")
+        try replaceText(app, "tiCloudStorage.app_id", required(payload, "app_id"))
+        try replaceText(app, "tiCloudStorage.endpoint", payload["endpoint"] ?? "")
+        try replaceText(app, "tiCloudStorage.token", required(payload, "token_url"))
+        try replaceText(app, "tiCloudStorage.audio_channel_id", payload["audio_channel_id"] ?? "10")
+        try replaceText(app, "tiCloudStorage.video_channel_id", payload["video_channel_id"] ?? "11")
+        Self.appendStatus(statusLog, "ti-cloud-storage-payload-applied")
 
-        tap(app, "store.enter_player")
+        tap(app, "tiCloudStorage.enter_player")
         handleSystemPermissionDialogs(app, attempts: 5)
         XCTAssertTrue(
-            waitForElement(app, "store.player.page", timeout: 10.0),
-            "Store player did not open: \(statusValue(app, "store.configure.status"))")
+            waitForElement(app, "tiCloudStorage.player.page", timeout: 10.0),
+            "Ti Cloud Storage player did not open: \(statusValue(app, "tiCloudStorage.configure.status"))")
         let startTime = try required(payload, "start_time_ms")
-        let playIdentifier = "store.play.\(startTime)"
+        let playIdentifier = "tiCloudStorage.play.\(startTime)"
         XCTAssertTrue(waitForElement(app, playIdentifier, timeout: timeoutSeconds))
         tap(app, playIdentifier)
         let rendering = waitForStatus(
             app,
-            "store.video_stage",
+            "tiCloudStorage.video_stage",
             statusLog,
             containing: "rendering",
             timeout: timeoutSeconds)
         XCTAssertTrue(
             rendering,
-            "Store replay never entered rendering state: \(statusValue(app, "store.video_stage"))")
-        Self.appendStatus(statusLog, "store_video_rendering")
-        attachScreenshot(app, name: "store-player-rendering")
+            "Ti Cloud Storage replay never entered rendering state: \(statusValue(app, "tiCloudStorage.video_stage"))")
+        Self.appendStatus(statusLog, "ti-cloud-storage-video-rendering")
+        attachScreenshot(app, name: "ti-cloud-storage-player-rendering")
 
         waitForRenderWindow(seconds: 8.0)
-        tap(app, "store.pause")
+        tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
-            waitForStatus(app, "store.video_stage", statusLog, containing: "paused", timeout: 8.0),
-            "Store replay did not pause its output immediately")
-        Self.appendStatus(statusLog, "store_pause_verified")
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "paused", timeout: 8.0),
+            "Ti Cloud Storage replay did not pause its output immediately")
+        Self.appendStatus(statusLog, "ti-cloud-storage-pause-verified")
 
         // Change the menu-backed speed while paused. On a physical iPhone XCTest can
         // otherwise wait for video-surface quiescence until the short smoke recording
         // has already reached its terminal state.
-        tap(app, "store.speed")
+        tap(app, "tiCloudStorage.speed")
         tapButtonAny(app, ["x2"])
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "播放倍速：x2", timeout: 5.0))
-        tap(app, "store.pause")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：x2", timeout: 5.0))
+        tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
-            waitForStatus(app, "store.video_stage", statusLog, containing: "rendering", timeout: 8.0),
-            "Store replay did not resume")
-        Self.appendStatus(statusLog, "store_resume_verified")
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "rendering", timeout: 8.0),
+            "Ti Cloud Storage replay did not resume")
+        Self.appendStatus(statusLog, "ti-cloud-storage-resume-verified")
 
         waitForRenderWindow(seconds: 3.0)
-        tap(app, "store.pause")
+        tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
-            waitForStatus(app, "store.video_stage", statusLog, containing: "paused", timeout: 8.0),
-            "Store replay did not pause before restoring normal speed")
-        tap(app, "store.speed")
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "paused", timeout: 8.0),
+            "Ti Cloud Storage replay did not pause before restoring normal speed")
+        tap(app, "tiCloudStorage.speed")
         tapButtonAny(app, ["x1"])
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "播放倍速：x1", timeout: 5.0))
-        tap(app, "store.pause")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：x1", timeout: 5.0))
+        tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
-            waitForStatus(app, "store.video_stage", statusLog, containing: "rendering", timeout: 8.0),
-            "Store replay did not resume after restoring normal speed")
-        Self.appendStatus(statusLog, "store_speed_verified")
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "rendering", timeout: 8.0),
+            "Ti Cloud Storage replay did not resume after restoring normal speed")
+        Self.appendStatus(statusLog, "ti-cloud-storage-speed-verified")
 
-        tap(app, "store.mute")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "已静音", timeout: 5.0))
+        tap(app, "tiCloudStorage.mute")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已静音", timeout: 5.0))
         waitForRenderWindow(seconds: 2.0)
-        tap(app, "store.mute")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "已恢复声音", timeout: 5.0))
-        Self.appendStatus(statusLog, "store_mute_verified")
+        tap(app, "tiCloudStorage.mute")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已恢复声音", timeout: 5.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-mute-verified")
 
-        let seek = app.descendants(matching: .any)["store.seek"].firstMatch
+        let seek = app.descendants(matching: .any)["tiCloudStorage.seek"].firstMatch
         XCTAssertTrue(seek.waitForExistence(timeout: 5.0))
         seek.adjust(toNormalizedSliderPosition: 0.45)
-        guard waitForStatus(app, "store.status", statusLog, containing: "已跳转", timeout: 8.0) else {
-            XCTFail("Store replay seek failed: \(statusValue(app, "store.status"))")
+        guard waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已跳转", timeout: 8.0) else {
+            XCTFail("Ti Cloud Storage replay seek failed: \(statusValue(app, "tiCloudStorage.status"))")
             return
         }
-        Self.appendStatus(statusLog, "store_seek_verified")
+        Self.appendStatus(statusLog, "ti-cloud-storage-seek-verified")
         waitForRenderWindow(seconds: 4.0)
 
-        tap(app, "store.snapshot")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "截图完成", timeout: 15.0))
-        Self.appendStatus(statusLog, "store_snapshot_verified")
-        tap(app, "store.gallery")
+        tap(app, "tiCloudStorage.snapshot")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "截图完成", timeout: 15.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-snapshot-verified")
+        tap(app, "tiCloudStorage.gallery")
         handleSystemPermissionDialogs(app, attempts: 5)
         XCTAssertTrue(
             waitForStatusHandlingSystemPermissions(
-                app, "store.status", statusLog, containing: "已保存到系统相册", timeout: 20.0),
-            "Store snapshot was not saved to Photos")
-        Self.appendStatus(statusLog, "store_snapshot_gallery_verified source_deleted=true")
+                app, "tiCloudStorage.status", statusLog, containing: "已保存到系统相册", timeout: 20.0),
+            "Ti Cloud Storage snapshot was not saved to Photos")
+        Self.appendStatus(statusLog, "ti-cloud-storage-snapshot-gallery-verified source_deleted=true")
 
-        tap(app, "store.recording")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "边播边录已开始", timeout: 8.0))
+        tap(app, "tiCloudStorage.recording")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "边播边录已开始", timeout: 8.0))
         waitForRenderWindow(seconds: 8.0)
-        tap(app, "store.recording")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "边播边录完成", timeout: 20.0))
-        Self.appendStatus(statusLog, "store_recording_verified")
-        tap(app, "store.gallery")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "已保存到系统相册", timeout: 20.0))
-        Self.appendStatus(statusLog, "store_recording_gallery_verified source_deleted=true")
+        tap(app, "tiCloudStorage.recording")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "边播边录完成", timeout: 20.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-recording-verified")
+        tap(app, "tiCloudStorage.gallery")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已保存到系统相册", timeout: 20.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-recording-gallery-verified source_deleted=true")
 
         guard
             tapUntilVisible(
                 app,
-                sourceIdentifier: "store.recordings",
-                targetIdentifier: "store.recordings.close",
+                sourceIdentifier: "tiCloudStorage.recordings",
+                targetIdentifier: "tiCloudStorage.recordings.close",
                 attempts: 3
             )
         else {
-            XCTFail("Store recordings sheet did not open")
+            XCTFail("Ti Cloud Storage recordings sheet did not open")
             return
         }
-        let exportIdentifier = "store.export.\(startTime)"
+        let exportIdentifier = "tiCloudStorage.export.\(startTime)"
         guard waitForElement(app, exportIdentifier, timeout: 8.0) else {
-            XCTFail("Store range export was not available for \(startTime)")
+            XCTFail("Ti Cloud Storage range export was not available for \(startTime)")
             return
         }
         tap(app, exportIdentifier)
-        tap(app, "store.recordings.close")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "范围下载完成", timeout: timeoutSeconds))
-        Self.appendStatus(statusLog, "store_range_export_verified")
-        tap(app, "store.gallery")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "已保存到系统相册", timeout: 20.0))
-        Self.appendStatus(statusLog, "store_export_gallery_verified source_deleted=true")
+        tap(app, "tiCloudStorage.recordings.close")
+        XCTAssertTrue(
+            waitForStatus(
+                app, "tiCloudStorage.status", statusLog,
+                containing: "范围下载完成", timeout: timeoutSeconds))
+        Self.appendStatus(statusLog, "ti-cloud-storage-range-export-verified")
+        tap(app, "tiCloudStorage.gallery")
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已保存到系统相册", timeout: 20.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-export-gallery-verified source_deleted=true")
 
         XCTAssertTrue(
-            waitForStatus(app, "store.video_stage", statusLog, containing: "completed", timeout: timeoutSeconds),
-            "Store replay did not consume the selected recording through its terminal state")
-        Self.appendStatus(statusLog, "store_replay_completed")
+            waitForStatus(
+                app, "tiCloudStorage.video_stage", statusLog,
+                containing: "completed", timeout: timeoutSeconds),
+            "Ti Cloud Storage replay did not consume the selected recording through its terminal state")
+        Self.appendStatus(statusLog, "ti-cloud-storage-replay-completed")
 
-        tap(app, "store.upload_logs")
-        XCTAssertTrue(waitForStatus(app, "store.status", statusLog, containing: "日志上传完成：", timeout: timeoutSeconds))
-        Self.appendStatus(statusLog, "store_log_upload_verified \(statusValue(app, "store.status"))")
-        attachScreenshot(app, name: "store-player-complete")
+        tap(app, "tiCloudStorage.upload_logs")
+        XCTAssertTrue(
+            waitForStatus(
+                app, "tiCloudStorage.status", statusLog,
+                containing: "日志上传完成：", timeout: timeoutSeconds))
+        let logUploadStatus = statusValue(app, "tiCloudStorage.status")
+        Self.appendStatus(statusLog, "ti-cloud-storage-log-upload-verified \(logUploadStatus)")
+        attachScreenshot(app, name: "ti-cloud-storage-player-complete")
 
-        tap(app, "store.close")
+        tap(app, "tiCloudStorage.close")
         XCTAssertTrue(waitForElement(app, "client.configure.page", timeout: 15.0))
-        XCTAssertTrue(waitForElement(app, "store.enter_player", timeout: 5.0))
-        Self.appendStatus(statusLog, "store_returned_to_configure")
+        XCTAssertTrue(waitForElement(app, "tiCloudStorage.enter_player", timeout: 5.0))
+        Self.appendStatus(statusLog, "ti-cloud-storage-returned-to-configure")
     }
 
     @MainActor
     private func fetchOneTimeToken(_ urlString: String) async throws -> String {
         guard let url = URL(string: urlString) else {
-            throw XCTSkip("invalid Store token URL")
+            throw XCTSkip("invalid Ti Cloud Storage token URL")
         }
         let (data, response) = try await URLSession.shared.data(from: url)
         guard data.count <= 64 * 1024,
             let response = response as? HTTPURLResponse,
             (200..<300).contains(response.statusCode)
         else {
-            throw XCTSkip("Store token endpoint returned an invalid response")
+            throw XCTSkip("Ti Cloud Storage token endpoint returned an invalid response")
         }
         let object = try JSONSerialization.jsonObject(with: data)
         guard let dictionary = object as? [String: String],
             let token = dictionary["token"], !token.isEmpty
         else {
-            throw XCTSkip("Store token endpoint returned no token")
+            throw XCTSkip("Ti Cloud Storage token endpoint returned no token")
         }
         return token
     }
 
     @MainActor
-    private func runStorePublicSdkCase(
+    private func runTiCloudStoragePublicSdkCase(
         payload: [String: String],
         statusLog: String,
         timeoutSeconds: TimeInterval
@@ -495,17 +504,17 @@ final class ExampleUITests: XCTestCase {
         let token = try await fetchOneTimeToken(required(payload, "token_url"))
 
         var initialized = false
-        var store: TiStore?
-        var replay: TiStoreReplay?
-        var audio: TiStoreAudioOutput?
-        var video: TiStoreVideoOutput?
-        var recordingFile: TiStoreRecordingFile?
-        var snapshotFile: TiStoreSnapshotFile?
-        var exportFile: TiStoreRecordingFile?
+        var tiCloudStorage: TiCloudStorage?
+        var replay: TiCloudStorageReplay?
+        var audio: TiCloudStorageAudioOutput?
+        var video: TiCloudStorageVideoOutput?
+        var recordingFile: TiCloudStorageRecordingFile?
+        var snapshotFile: TiCloudStorageSnapshotFile?
+        var exportFile: TiCloudStorageRecordingFile?
         var replayStarted = false
         var audioAttached = false
         var videoAttached = false
-        let observer = StoreSdkOutputObserver()
+        let observer = TiCloudStorageSdkOutputObserver()
 
         func cleanUp() async {
             if let recordingFile { _ = await recordingFile.delete() }
@@ -514,66 +523,66 @@ final class ExampleUITests: XCTestCase {
             if replayStarted { _ = replay?.stop() }
             if videoAttached { _ = video?.detach() }
             if audioAttached { _ = audio?.detach() }
-            _ = retryStoreInUse { video?.dispose() ?? TiStoreErrorCode.ok }
-            _ = retryStoreInUse { audio?.dispose() ?? TiStoreErrorCode.ok }
-            _ = retryStoreInUse { replay?.dispose() ?? TiStoreErrorCode.ok }
-            _ = retryStoreInUse { store?.dispose() ?? TiStoreErrorCode.ok }
-            if initialized { _ = retryStoreInUse(TiStore.shutdown) }
+            _ = retryTiCloudStorageInUse { video?.dispose() ?? TiCloudStorageErrorCode.ok }
+            _ = retryTiCloudStorageInUse { audio?.dispose() ?? TiCloudStorageErrorCode.ok }
+            _ = retryTiCloudStorageInUse { replay?.dispose() ?? TiCloudStorageErrorCode.ok }
+            _ = retryTiCloudStorageInUse { tiCloudStorage?.dispose() ?? TiCloudStorageErrorCode.ok }
+            if initialized { _ = retryTiCloudStorageInUse(TiCloudStorage.shutdown) }
         }
 
         do {
-            try requireStoreOk(
-                TiStore.initialize(
+            try requireTiCloudStorageOk(
+                TiCloudStorage.initialize(
                     appId: required(payload, "app_id"),
                     endpoint: payload["endpoint"] ?? "",
                     consoleLogEnabled: true),
-                "TiStore initialization")
+                "Ti Cloud Storage initialization")
             initialized = true
-            let activeStore = TiStore(token: token)
-            store = activeStore
-            let listed = await activeStore.listRecordings(
+            let activeTiCloudStorage = TiCloudStorage(token: token)
+            tiCloudStorage = activeTiCloudStorage
+            let listed = await activeTiCloudStorage.listRecordings(
                 startTimeMs: queryStartMs,
                 endTimeMs: queryEndMs)
-            try requireStoreOk(listed.code, "exact Store query")
+            try requireTiCloudStorageOk(listed.code, "exact Ti Cloud Storage query")
             let range = try XCTUnwrap(
                 listed.recordings.max { lhs, rhs in
                     lhs.endTimeMs - lhs.startTimeMs < rhs.endTimeMs - rhs.startTimeMs
                 })
             XCTAssertGreaterThanOrEqual(range.endTimeMs - range.startTimeMs, 110_000)
-            Self.appendStatus(statusLog, "store_sdk_query_verified")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-query-verified")
 
-            let activeReplay = activeStore.createReplay()
+            let activeReplay = activeTiCloudStorage.createReplay()
             replay = activeReplay
-            let activeAudio = TiStoreAudioOutput()
+            let activeAudio = TiCloudStorageAudioOutput()
             audio = activeAudio
-            let activeVideo = TiStoreVideoOutput()
+            let activeVideo = TiCloudStorageVideoOutput()
             video = activeVideo
             activeAudio.delegate = observer
             activeVideo.delegate = observer
-            let completed = expectation(description: "Store replay reaches requested end")
+            let completed = expectation(description: "Ti Cloud Storage replay reaches requested end")
             activeReplay.onTimeChanged = { observer.setReplayTime($0) }
             activeReplay.onError = { code in
                 observer.setReplayError(code)
                 completed.fulfill()
             }
             activeReplay.onCompleted = { completed.fulfill() }
-            try requireStoreOk(
+            try requireTiCloudStorageOk(
                 activeAudio.attach(replay: activeReplay, channelId: audioChannel),
                 "audio output attach")
             audioAttached = true
-            try requireStoreOk(
+            try requireTiCloudStorageOk(
                 activeVideo.attach(replay: activeReplay, channelId: videoChannel),
                 "video output attach")
             videoAttached = true
-            try requireStoreOk(
+            try requireTiCloudStorageOk(
                 activeReplay.play(startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs),
-                "Store replay play")
+                "Ti Cloud Storage replay play")
             replayStarted = true
-            try await waitForStoreCondition(timeoutSeconds: 30) {
+            try await waitForTiCloudStorageCondition(timeoutSeconds: 30) {
                 activeAudio.state == .playing && activeVideo.state == .rendering
                     && observer.currentTimeMs >= range.startTimeMs + 800
             }
-            Self.appendStatus(statusLog, "store_sdk_outputs_verified")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-outputs-verified")
             observer.beginContinuousPlayback()
             await fulfillment(
                 of: [completed],
@@ -585,13 +594,13 @@ final class ExampleUITests: XCTestCase {
             XCTAssertEqual(observer.bufferingCount, 0)
             XCTAssertGreaterThanOrEqual(observer.currentTimeMs, range.endTimeMs - 1_000)
             replayStarted = false
-            Self.appendStatus(statusLog, "store_sdk_replay_completed")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-replay-completed")
 
-            try requireStoreOk(
+            try requireTiCloudStorageOk(
                 activeReplay.play(startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs),
                 "replacement replay play")
             replayStarted = true
-            try await waitForStoreCondition(timeoutSeconds: 30) {
+            try await waitForTiCloudStorageCondition(timeoutSeconds: 30) {
                 activeAudio.state == .playing && activeVideo.state == .rendering
                     && observer.currentTimeMs >= range.startTimeMs + 800
                     && observer.currentTimeMs < range.startTimeMs + 15_000
@@ -599,52 +608,52 @@ final class ExampleUITests: XCTestCase {
             let recordingStart = activeReplay.startRecording(
                 videoChannelId: Int(videoChannel),
                 audioChannelId: NSNumber(value: audioChannel))
-            try requireStoreOk(recordingStart.code, "replay recording start")
+            try requireTiCloudStorageOk(recordingStart.code, "replay recording start")
             let recordingTask = try XCTUnwrap(recordingStart.task)
             try await Task.sleep(nanoseconds: 6_000_000_000)
             let recorded = await recordingTask.stop()
-            try requireStoreOk(recorded.code, "replay recording stop")
+            try requireTiCloudStorageOk(recorded.code, "replay recording stop")
             let capturedRecording = try XCTUnwrap(recorded.file)
             recordingFile = capturedRecording
             XCTAssertGreaterThanOrEqual(capturedRecording.durationMs, 4_500)
-            Self.appendStatus(statusLog, "store_sdk_recording_verified")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-recording-verified")
 
-            try requireStoreOk(activeAudio.setVolume(0), "Store mute")
-            try requireStoreOk(activeAudio.setVolume(35), "Store volume restore")
-            try requireStoreOk(activeReplay.pause(), "Store replay pause")
-            try await waitForStoreCondition(timeoutSeconds: 5) {
+            try requireTiCloudStorageOk(activeAudio.setVolume(0), "Ti Cloud Storage mute")
+            try requireTiCloudStorageOk(activeAudio.setVolume(35), "Ti Cloud Storage volume restore")
+            try requireTiCloudStorageOk(activeReplay.pause(), "Ti Cloud Storage replay pause")
+            try await waitForTiCloudStorageCondition(timeoutSeconds: 5) {
                 activeAudio.state == .paused && activeVideo.state == .paused
             }
             let pauseStart = observer.currentTimeMs
             try await Task.sleep(nanoseconds: 1_200_000_000)
             XCTAssertTrue((0...100).contains(observer.currentTimeMs - pauseStart))
-            try requireStoreOk(activeReplay.resume(), "Store replay resume")
-            try await waitForStoreCondition(timeoutSeconds: 5) {
+            try requireTiCloudStorageOk(activeReplay.resume(), "Ti Cloud Storage replay resume")
+            try await waitForTiCloudStorageCondition(timeoutSeconds: 5) {
                 observer.currentTimeMs >= pauseStart + 500
             }
             let midpoint = range.startTimeMs + (range.endTimeMs - range.startTimeMs) / 2
-            try requireStoreOk(activeReplay.seek(toTimeMs: midpoint), "Store replay seek")
-            try requireStoreOk(activeReplay.setSpeed(.x2), "Store replay x2")
-            try requireStoreOk(activeReplay.setSpeed(.x1), "Store replay x1")
-            Self.appendStatus(statusLog, "store_sdk_controls_verified")
+            try requireTiCloudStorageOk(activeReplay.seek(toTimeMs: midpoint), "Ti Cloud Storage replay seek")
+            try requireTiCloudStorageOk(activeReplay.setSpeed(.x0_5), "Ti Cloud Storage replay 1/2x")
+            try requireTiCloudStorageOk(activeReplay.setSpeed(.x1), "Ti Cloud Storage replay x1")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-controls-verified")
 
-            var snapshot: TiStoreSnapshotResult?
+            var snapshot: TiCloudStorageSnapshotResult?
             let snapshotDeadline = Date().addingTimeInterval(10)
             repeat {
                 snapshot = await activeVideo.takeSnapshot()
-                if snapshot?.code == TiStoreErrorCode.ok { break }
-                XCTAssertEqual(snapshot?.code, TiStoreErrorCode.noFrame)
+                if snapshot?.code == TiCloudStorageErrorCode.ok { break }
+                XCTAssertEqual(snapshot?.code, TiCloudStorageErrorCode.noFrame)
                 try await Task.sleep(nanoseconds: 200_000_000)
             } while Date() < snapshotDeadline
             let capturedSnapshot = try XCTUnwrap(snapshot?.file)
             snapshotFile = capturedSnapshot
-            try validateStoreMedia(path: capturedSnapshot.path, kind: "jpeg")
-            Self.appendStatus(statusLog, "store_sdk_snapshot_verified")
+            try validateTiCloudStorageMedia(path: capturedSnapshot.path, kind: "jpeg")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-snapshot-verified")
 
-            var exportTask: TiStoreExportTask?
-            let exported: TiStoreRecordingResult = await withCheckedContinuation { continuation in
-                let started = activeStore.exportRecording(
-                    TiStoreExportRequest(
+            var exportTask: TiCloudStorageExportTask?
+            let exported: TiCloudStorageRecordingResult = await withCheckedContinuation { continuation in
+                let started = activeTiCloudStorage.exportRecording(
+                    TiCloudStorageExportRequest(
                         startTimeMs: range.startTimeMs,
                         endTimeMs: range.endTimeMs,
                         videoChannelId: Int(videoChannel),
@@ -653,16 +662,16 @@ final class ExampleUITests: XCTestCase {
                 ) { result in
                     continuation.resume(returning: result)
                 }
-                XCTAssertEqual(started.code, TiStoreErrorCode.ok)
+                XCTAssertEqual(started.code, TiCloudStorageErrorCode.ok)
                 exportTask = started.task
             }
             _ = exportTask
-            try requireStoreOk(exported.code, "Store range export")
+            try requireTiCloudStorageOk(exported.code, "Ti Cloud Storage range export")
             let capturedExport = try XCTUnwrap(exported.file)
             exportFile = capturedExport
-            try validateStoreMedia(path: capturedRecording.path, kind: "mp4")
-            try validateStoreMedia(path: capturedExport.path, kind: "mp4")
-            Self.appendStatus(statusLog, "store_sdk_export_verified")
+            try validateTiCloudStorageMedia(path: capturedRecording.path, kind: "mp4")
+            try validateTiCloudStorageMedia(path: capturedExport.path, kind: "mp4")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-export-verified")
 
             try await deleteAndVerify(capturedRecording)
             recordingFile = nil
@@ -670,18 +679,18 @@ final class ExampleUITests: XCTestCase {
             snapshotFile = nil
             try await deleteAndVerify(capturedExport)
             exportFile = nil
-            Self.appendStatus(statusLog, "store_sdk_runtime_delete_verified")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-runtime-delete-verified")
 
             let upload: TiRtcLogUploadResult = await withCheckedContinuation { continuation in
                 let code = TiRtcLogging.upload { continuation.resume(returning: $0) }
-                XCTAssertEqual(code, TiStoreErrorCode.ok)
+                XCTAssertEqual(code, TiCloudStorageErrorCode.ok)
             }
-            try requireStoreOk(upload.code, "Store log upload")
+            try requireTiCloudStorageOk(upload.code, "Ti Cloud Storage log upload")
             XCTAssertFalse((upload.logId ?? "").isEmpty)
-            Self.appendStatus(statusLog, "store_sdk_log_upload_verified")
-            try requireStoreOk(activeReplay.stop(), "replacement replay stop")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-log-upload-verified")
+            try requireTiCloudStorageOk(activeReplay.stop(), "replacement replay stop")
             replayStarted = false
-            Self.appendStatus(statusLog, "store_sdk_case_completed")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-case-completed")
         } catch {
             await cleanUp()
             throw error
@@ -706,30 +715,30 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
-    private func requireStoreOk(_ code: Int32, _ operation: String) throws {
-        guard code == TiStoreErrorCode.ok else {
+    private func requireTiCloudStorageOk(_ code: Int32, _ operation: String) throws {
+        guard code == TiCloudStorageErrorCode.ok else {
             XCTFail("\(operation) failed: \(code)")
             throw XCTSkip("\(operation) failed: \(code)")
         }
     }
 
     @MainActor
-    private func waitForStoreCondition(
+    private func waitForTiCloudStorageCondition(
         timeoutSeconds: TimeInterval,
         _ predicate: @MainActor @escaping () -> Bool
     ) async throws {
         let deadline = Date().addingTimeInterval(timeoutSeconds)
         while !predicate() {
             if Date() >= deadline {
-                XCTFail("Store SDK condition timed out")
-                throw XCTSkip("Store SDK condition timed out")
+                XCTFail("Ti Cloud Storage SDK condition timed out")
+                throw XCTSkip("Ti Cloud Storage SDK condition timed out")
             }
             try await Task.sleep(nanoseconds: 50_000_000)
         }
     }
 
     @MainActor
-    private func validateStoreMedia(path: String, kind: String) throws {
+    private func validateTiCloudStorageMedia(path: String, kind: String) throws {
         let handle = try FileHandle(forReadingFrom: URL(fileURLWithPath: path))
         defer { try? handle.close() }
         let data = try handle.read(upToCount: 12) ?? Data()
@@ -742,27 +751,27 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
-    private func deleteAndVerify(_ file: TiStoreRecordingFile) async throws {
+    private func deleteAndVerify(_ file: TiCloudStorageRecordingFile) async throws {
         let path = file.path
-        try requireStoreOk(await file.delete(), "Runtime recording delete")
-        try requireStoreOk(await file.delete(), "repeat Runtime recording delete")
+        try requireTiCloudStorageOk(await file.delete(), "Runtime recording delete")
+        try requireTiCloudStorageOk(await file.delete(), "repeat Runtime recording delete")
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
     }
 
     @MainActor
-    private func deleteAndVerify(_ file: TiStoreSnapshotFile) async throws {
+    private func deleteAndVerify(_ file: TiCloudStorageSnapshotFile) async throws {
         let path = file.path
-        try requireStoreOk(await file.delete(), "Runtime snapshot delete")
-        try requireStoreOk(await file.delete(), "repeat Runtime snapshot delete")
+        try requireTiCloudStorageOk(await file.delete(), "Runtime snapshot delete")
+        try requireTiCloudStorageOk(await file.delete(), "repeat Runtime snapshot delete")
         XCTAssertFalse(FileManager.default.fileExists(atPath: path))
     }
 
     @MainActor
-    private func retryStoreInUse(_ operation: () -> Int32) -> Int32 {
+    private func retryTiCloudStorageInUse(_ operation: () -> Int32) -> Int32 {
         let deadline = Date().addingTimeInterval(5)
         while true {
             let code = operation()
-            if code != TiStoreErrorCode.inUse || Date() >= deadline { return code }
+            if code != TiCloudStorageErrorCode.inUse || Date() >= deadline { return code }
             RunLoop.current.run(until: Date().addingTimeInterval(0.02))
         }
     }

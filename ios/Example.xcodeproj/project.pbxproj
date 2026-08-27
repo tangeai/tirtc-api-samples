@@ -343,6 +343,8 @@
 				Base,
 			);
 			mainGroup = 0E40399B5F2DA82A9DC259F0;
+			minimizedProjectReferenceProxies = 0;
+			preferredProjectObjectVersion = 77;
 			productRefGroup = 17E6D883EB1C4FB0ED485F65 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";

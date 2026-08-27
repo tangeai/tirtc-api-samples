@@ -36,7 +36,7 @@
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Capture microphone audio for TiRTC client talkback.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>Save TiStore recordings and snapshots to the system photo library.</string>
+	<string>Save Ti Cloud Storage recordings and snapshots to the system photo library.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIRequiresFullScreen</key>
