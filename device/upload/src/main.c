@@ -17,6 +17,8 @@
 #define STATUS_INTERVAL_MS UINT64_C(5000)
 #define RESULT_TIMEOUT_MS UINT64_C(180000)
 #define INDEX_SETTLE_MS UINT64_C(35000)
+#define AUDIO_CHANNEL_ID 10
+#define VIDEO_CHANNEL_ID 11
 
 struct Arguments {
     const char *endpoint;
@@ -457,7 +459,9 @@ int main(int argc, char **argv) {
         }
 
         memset(&frame_info, 0, sizeof(frame_info));
-        frame_info.channel_id = 0;
+        frame_info.channel_id = media_frame.kind == SAMPLE_MEDIA_VIDEO
+                                    ? VIDEO_CHANNEL_ID
+                                    : AUDIO_CHANNEL_ID;
         frame_info.media = media_frame.kind == SAMPLE_MEDIA_VIDEO
                                ? TISTORE_VIDEO_H264
                                : TISTORE_AUDIO_ALAW;
@@ -483,7 +487,9 @@ int main(int argc, char **argv) {
             ++video_frames;
             if (video_frames == 1) {
                 printf(
-                    "[feed] first video frame timestamp=%" PRIu64 " key=%d bytes=%zu\n",
+                    "[feed] first video frame channel=%d timestamp=%" PRIu64
+                    " key=%d bytes=%zu\n",
+                    frame_info.channel_id,
                     frame_info.timestamp_ms,
                     media_frame.is_key_frame,
                     media_frame.size
@@ -493,7 +499,8 @@ int main(int argc, char **argv) {
             ++audio_frames;
             if (audio_frames == 1) {
                 printf(
-                    "[feed] first audio frame timestamp=%" PRIu64 " bytes=%zu\n",
+                    "[feed] first audio frame channel=%d timestamp=%" PRIu64 " bytes=%zu\n",
+                    frame_info.channel_id,
                     frame_info.timestamp_ms,
                     media_frame.size
                 );

@@ -2,6 +2,8 @@
 
 这个示例持续向 Nano SDK 送入 H.264 视频帧和 G.711A 音频帧，上传一段两分钟的云录像。macOS ARM64 和 Linux x86_64 使用同一份 C 源码，运行脚本根据当前平台选择对应 SDK。
 
+示例使用音频通道 `10` 和视频通道 `11`，与 TiRTC 客户端的默认播放通道保持一致。
+
 示例所需的两份编码素材已经放在 `assets/`，来源于公开的 [tirtc-example-device assets](https://github.com/tangeai/tirtc-example-device/tree/main/assets)。运行时不下载媒体，也不依赖 FFmpeg。
 
 ## 下载 SDK
