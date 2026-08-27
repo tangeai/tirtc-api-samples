@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "media_reader.h"
-#include "tistore.h"
+#include "ticloudstorage.h"
 
 #include <errno.h>
 #include <inttypes.h>
@@ -133,7 +133,7 @@ static int parse_arguments(int argc, char **argv, struct Arguments *arguments) {
 
 static void on_upload_progress(
     int service_id,
-    const struct TiStoreUploadRange *range,
+    const struct TiCloudStorageUploadRange *range,
     int error,
     void *user_data
 ) {
@@ -154,7 +154,7 @@ static void on_upload_progress(
 
 static void on_upload_result(
     int service_id,
-    const struct TiStoreUploadResult *result,
+    const struct TiCloudStorageUploadResult *result,
     void *user_data
 ) {
     struct UploadState *state = (struct UploadState *)user_data;
@@ -204,10 +204,10 @@ static int print_upload_updates(struct UploadState *state, uint64_t *seen_sequen
             start_time_ms,
             end_time_ms,
             size_bytes,
-            error == TISTORE_OK ? "ok" : "failed"
+            error == TICLOUDSTORAGE_OK ? "ok" : "failed"
         );
-        if (error != TISTORE_OK) {
-            printf(" error=%d (%s)", error, TiStoreGetErrorString(error));
+        if (error != TICLOUDSTORAGE_OK) {
+            printf(" error=%d (%s)", error, TiCloudStorageGetErrorString(error));
         }
         printf("\n");
         *seen_sequence = sequence;
@@ -222,10 +222,10 @@ static void print_queue_status(
     uint64_t audio_frames,
     uint64_t media_bytes
 ) {
-    struct TiStoreQueueInfo queue_info;
-    int error = TiStoreQueueGetInfo(service_id, &queue_info);
+    struct TiCloudStorageQueueInfo queue_info;
+    int error = TiCloudStorageQueueGetInfo(service_id, &queue_info);
 
-    if (error == TISTORE_OK) {
+    if (error == TICLOUDSTORAGE_OK) {
         printf(
             "[feed] elapsed=%" PRIu64 "ms video=%" PRIu64 " audio=%" PRIu64
             " bytes=%" PRIu64 " queue=%" PRIu64 "/%" PRIu64
@@ -247,22 +247,22 @@ static void print_queue_status(
             audio_frames,
             media_bytes,
             error,
-            TiStoreGetErrorString(error)
+            TiCloudStorageGetErrorString(error)
         );
     }
 }
 
 static int write_frame_with_retry(
     int service_id,
-    const struct TiStoreFrameInfo *frame_info,
+    const struct TiCloudStorageFrameInfo *frame_info,
     const void *frame
 ) {
     for (;;) {
-        int error = TiStoreQueueWriteFrame(service_id, frame_info, frame);
-        if (error == TISTORE_OK) {
-            return TISTORE_OK;
+        int error = TiCloudStorageQueueWriteFrame(service_id, frame_info, frame);
+        if (error == TICLOUDSTORAGE_OK) {
+            return TICLOUDSTORAGE_OK;
         }
-        if (error != TISTORE_E_QUEUE_FULL || interrupted) {
+        if (error != TICLOUDSTORAGE_E_QUEUE_FULL || interrupted) {
             return error;
         }
         sleep_milliseconds(20);
@@ -273,8 +273,8 @@ static int result_is_success(struct UploadState *state) {
     int success;
 
     (void)pthread_mutex_lock(&state->mutex);
-    success = state->finished && state->result_code == TISTORE_UPLOAD_COMPLETE &&
-              state->result_error == TISTORE_OK;
+    success = state->finished && state->result_code == TICLOUDSTORAGE_UPLOAD_COMPLETE &&
+              state->result_error == TICLOUDSTORAGE_OK;
     (void)pthread_mutex_unlock(&state->mutex);
     return success;
 }
@@ -318,9 +318,9 @@ int main(int argc, char **argv) {
     struct Arguments arguments;
     struct SampleMediaReader *media_reader = NULL;
     struct UploadState upload_state;
-    struct TiStoreOptions store_options = TISTORE_OPTIONS_INITIALIZER;
-    struct TiStoreServiceOptions service_options = TISTORE_SERVICE_OPTIONS_INITIALIZER;
-    struct TiStoreUploadRequestOptions upload_options = TISTORE_UPLOAD_REQUEST_OPTIONS_INITIALIZER;
+    struct TiCloudStorageOptions store_options = TICLOUDSTORAGE_OPTIONS_INITIALIZER;
+    struct TiCloudStorageServiceOptions service_options = TICLOUDSTORAGE_SERVICE_OPTIONS_INITIALIZER;
+    struct TiCloudStorageUploadRequestOptions upload_options = TICLOUDSTORAGE_UPLOAD_REQUEST_OPTIONS_INITIALIZER;
     struct sigaction signal_action;
     uint64_t utc_base_ms;
     uint64_t monotonic_base_ms;
@@ -368,61 +368,61 @@ int main(int argc, char **argv) {
 
     store_options.endpoint = arguments.endpoint;
     /* Keep credentials and signed upload responses out of developer console logs. */
-    store_options.log_level = TISTORE_LOG_NONE;
-    error = TiStoreInit(&store_options);
-    if (error != TISTORE_OK) {
-        fprintf(stderr, "[error] TiStoreInit: %d (%s)\n", error, TiStoreGetErrorString(error));
+    store_options.log_level = TICLOUDSTORAGE_LOG_NONE;
+    error = TiCloudStorageInit(&store_options);
+    if (error != TICLOUDSTORAGE_OK) {
+        fprintf(stderr, "[error] TiCloudStorageInit: %d (%s)\n", error, TiCloudStorageGetErrorString(error));
         goto cleanup;
     }
     store_initialized = 1;
-    printf("[init] TiStore %s\n", TiStoreGetVersion());
+    printf("[init] TiCloudStorage %s\n", TiCloudStorageGetVersion());
 
     service_options.device_secret_key = arguments.device_secret_key;
-    service_id = TiStoreServiceCreate(arguments.device_id, &service_options);
+    service_id = TiCloudStorageServiceCreate(arguments.device_id, &service_options);
     if (service_id < 0) {
         fprintf(
             stderr,
-            "[error] TiStoreServiceCreate: %d (%s)\n",
+            "[error] TiCloudStorageServiceCreate: %d (%s)\n",
             service_id,
-            TiStoreGetErrorString(service_id)
+            TiCloudStorageGetErrorString(service_id)
         );
         goto cleanup;
     }
 
-    error = TiStoreServiceUpdateToken(service_id, arguments.token);
-    if (error != TISTORE_OK) {
+    error = TiCloudStorageServiceUpdateToken(service_id, arguments.token);
+    if (error != TICLOUDSTORAGE_OK) {
         fprintf(
             stderr,
-            "[error] TiStoreServiceUpdateToken: %d (%s)\n",
+            "[error] TiCloudStorageServiceUpdateToken: %d (%s)\n",
             error,
-            TiStoreGetErrorString(error)
+            TiCloudStorageGetErrorString(error)
         );
         goto cleanup;
     }
-    error = TiStoreServiceStart(service_id);
-    if (error != TISTORE_OK) {
+    error = TiCloudStorageServiceStart(service_id);
+    if (error != TICLOUDSTORAGE_OK) {
         fprintf(
             stderr,
-            "[error] TiStoreServiceStart: %d (%s)\n",
+            "[error] TiCloudStorageServiceStart: %d (%s)\n",
             error,
-            TiStoreGetErrorString(error)
+            TiCloudStorageGetErrorString(error)
         );
         goto cleanup;
     }
     service_started = 1;
 
-    upload_options.start_time_ms = TISTORE_TIME_EARLIEST;
+    upload_options.start_time_ms = TICLOUDSTORAGE_TIME_EARLIEST;
     upload_options.duration_ms = SAMPLE_DURATION_MS;
     upload_options.on_progress = on_upload_progress;
     upload_options.on_result = on_upload_result;
     upload_options.user_data = &upload_state;
-    error = TiStoreUploadRequest(service_id, &upload_options);
+    error = TiCloudStorageUploadRequest(service_id, &upload_options);
     if (error < 0) {
         fprintf(
             stderr,
-            "[error] TiStoreUploadRequest: %d (%s)\n",
+            "[error] TiCloudStorageUploadRequest: %d (%s)\n",
             error,
-            TiStoreGetErrorString(error)
+            TiCloudStorageGetErrorString(error)
         );
         goto cleanup;
     }
@@ -437,7 +437,7 @@ int main(int argc, char **argv) {
 
     for (;;) {
         struct SampleMediaFrame media_frame;
-        struct TiStoreFrameInfo frame_info;
+        struct TiCloudStorageFrameInfo frame_info;
         int read_result = sample_media_reader_next(
             media_reader,
             &media_frame,
@@ -463,22 +463,22 @@ int main(int argc, char **argv) {
                                     ? VIDEO_CHANNEL_ID
                                     : AUDIO_CHANNEL_ID;
         frame_info.media = media_frame.kind == SAMPLE_MEDIA_VIDEO
-                               ? TISTORE_VIDEO_H264
-                               : TISTORE_AUDIO_ALAW;
+                               ? TICLOUDSTORAGE_VIDEO_H264
+                               : TICLOUDSTORAGE_AUDIO_ALAW;
         frame_info.flags = media_frame.kind == SAMPLE_MEDIA_VIDEO
-                               ? (media_frame.is_key_frame ? TISTORE_FRAME_FLAG_KEY_FRAME : 0)
-                               : TISTORE_AUDIO_SAMPLE_8K16B1C;
+                               ? (media_frame.is_key_frame ? TICLOUDSTORAGE_FRAME_FLAG_KEY_FRAME : 0)
+                               : TICLOUDSTORAGE_AUDIO_SAMPLE_8K16B1C;
         frame_info.timestamp_ms = utc_base_ms + media_frame.offset_ms;
         frame_info.length = (uint32_t)media_frame.size;
 
         error = write_frame_with_retry(service_id, &frame_info, media_frame.data);
-        if (error != TISTORE_OK) {
+        if (error != TICLOUDSTORAGE_OK) {
             fprintf(
                 stderr,
-                "[error] TiStoreQueueWriteFrame at %" PRIu64 "ms: %d (%s)\n",
+                "[error] TiCloudStorageQueueWriteFrame at %" PRIu64 "ms: %d (%s)\n",
                 media_frame.offset_ms,
                 error,
-                TiStoreGetErrorString(error)
+                TiCloudStorageGetErrorString(error)
             );
             goto cleanup;
         }
@@ -583,28 +583,28 @@ int main(int argc, char **argv) {
 cleanup:
     sample_media_reader_close(media_reader);
     if (service_started) {
-        error = TiStoreServiceStop(service_id);
-        if (error != TISTORE_OK) {
-            fprintf(stderr, "[error] TiStoreServiceStop: %d (%s)\n", error, TiStoreGetErrorString(error));
+        error = TiCloudStorageServiceStop(service_id);
+        if (error != TICLOUDSTORAGE_OK) {
+            fprintf(stderr, "[error] TiCloudStorageServiceStop: %d (%s)\n", error, TiCloudStorageGetErrorString(error));
             exit_code = 1;
         }
     }
     if (service_id > 0) {
-        error = TiStoreServiceDestroy(service_id);
-        if (error != TISTORE_OK) {
+        error = TiCloudStorageServiceDestroy(service_id);
+        if (error != TICLOUDSTORAGE_OK) {
             fprintf(
                 stderr,
-                "[error] TiStoreServiceDestroy: %d (%s)\n",
+                "[error] TiCloudStorageServiceDestroy: %d (%s)\n",
                 error,
-                TiStoreGetErrorString(error)
+                TiCloudStorageGetErrorString(error)
             );
             exit_code = 1;
         }
     }
     if (store_initialized) {
-        error = TiStoreUninit();
-        if (error != TISTORE_OK) {
-            fprintf(stderr, "[error] TiStoreUninit: %d (%s)\n", error, TiStoreGetErrorString(error));
+        error = TiCloudStorageUninit();
+        if (error != TICLOUDSTORAGE_OK) {
+            fprintf(stderr, "[error] TiCloudStorageUninit: %d (%s)\n", error, TiCloudStorageGetErrorString(error));
             exit_code = 1;
         }
     }

@@ -99,7 +99,7 @@ case "$host_os/$host_arch" in
     ;;
 esac
 
-header="$sdk_dir/include/tirtc/tistore.h"
+header="$sdk_dir/include/tirtc/ticloudstorage.h"
 if [[ ! -f "$header" || ! -f "$sdk_library" ]]; then
   printf 'Nano SDK is incomplete under %s\n' "$sdk_dir" >&2
   printf 'Read %s/README.md and extract the latest standard package first.\n' "$script_dir" >&2

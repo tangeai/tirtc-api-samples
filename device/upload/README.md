@@ -24,15 +24,15 @@ tar -xzf <下载的-macOS-standard.tgz> \
   --strip-components=1
 ```
 
-Linux 使用相同方式解压到 `sdk/linux-x86_64/`。解压后应当能看到 `include/tirtc/tistore.h` 和 `lib/`。
+Linux 使用相同方式解压到 `sdk/linux-x86_64/`。解压后应当能看到 `include/tirtc/ticloudstorage.h` 和 `lib/`。
 
 ## 准备运行参数
 
-运行示例前，从已经开通 TiStore 的应用和设备中取得下面四项输入：
+运行示例前，从已经开通 Ti Cloud Storage 的应用和设备中取得下面四项输入：
 
 | 参数 | 来源 |
 | --- | --- |
-| `endpoint` | 当前应用使用的 TiStore 服务地址 |
+| `endpoint` | 当前应用使用的 Ti Cloud Storage 服务地址 |
 | `device_id` | 要上传录像的设备 ID |
 | `device_secret_key` | 与该设备 ID 配对的设备密钥 |
 | `device_access_token` | 业务服务端为该设备签发的短期 Device Access Token |
