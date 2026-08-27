@@ -53,9 +53,9 @@ import com.tange.ai.tirtc.TiRtcVideoOutput
 import com.tange.ai.tirtc.TiRtcVideoOutputOptions
 import com.tange.ai.tirtc.TiRtcVideoOutputRenderSizeListener
 import com.tange.ai.tirtc.TiRtcVideoOutputStateListener
-import com.tange.ai.tirtc.TiStoreRecordingRange
-import com.tange.ai.tirtc.TiStoreReplaySpeed
-import com.tange.ai.tirtc.TiStoreVideoOutputState
+import com.tange.ai.tirtc.TiCloudStorageRecordingRange
+import com.tange.ai.tirtc.TiCloudStorageReplaySpeed
+import com.tange.ai.tirtc.TiCloudStorageVideoOutputState
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
@@ -76,7 +76,7 @@ class MainActivity : AppCompatActivity() {
             videoStreamId = DEFAULT_VIDEO_STREAM_ID,
             token = "",
         )
-    private var storeConfig = StoreConfiguration()
+    private var cloudStorageConfig = CloudStorageConfiguration()
     private var conn: TiRtcConn? = null
     private var audioOutput: TiRtcAudioOutput? = null
     private var videoOutput: TiRtcVideoOutput? = null
@@ -102,29 +102,29 @@ class MainActivity : AppCompatActivity() {
     private var commandHistory = "暂无命令记录"
     private var activeScanner: DecoratedBarcodeView? = null
     private var scannerProcessing = false
-    private var storeFlow: TiStoreExampleFlow? = null
-    private var storeSelectedRange: TiStoreRecordingRange? = null
-    private val storeSelectedDate: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
-    private val storeVisibleMonth: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
-    private var storeRecordingsDialog: Dialog? = null
-    private var storeRecordingsContent: LinearLayout? = null
-    private var storeDayQueryGeneration = 0
-    private var storeMonthQueryGeneration = 0
-    private var storeExportProgress = -1
-    private var storeRecordings: List<TiStoreRecordingRange> = emptyList()
-    private var storeStatusView: TextView? = null
-    private var storePlaybackStatus = "请选择录像"
-    private var storeActionStatusGeneration = 0L
-    private var storeActionStatusUntilMs = 0L
-    private var storeTimeView: TextView? = null
-    private var storeSeekBar: SeekBar? = null
-    private var storeStage: FrameLayout? = null
-    private var storeRecordingButton: TextView? = null
-    private var storeSnapshotButton: TextView? = null
-    private var storeGalleryButton: TextView? = null
-    private var storeMuteButton: TextView? = null
-    private var storeSpeedButton: TextView? = null
-    private var storePauseButton: TextView? = null
+    private var cloudStorageFlow: TiCloudStorageExampleFlow? = null
+    private var cloudStorageSelectedRange: TiCloudStorageRecordingRange? = null
+    private val cloudStorageSelectedDate: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
+    private val cloudStorageVisibleMonth: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
+    private var cloudStorageRecordingsDialog: Dialog? = null
+    private var cloudStorageRecordingsContent: LinearLayout? = null
+    private var cloudStorageDayQueryGeneration = 0
+    private var cloudStorageMonthQueryGeneration = 0
+    private var cloudStorageExportProgress = -1
+    private var cloudStorageRecordings: List<TiCloudStorageRecordingRange> = emptyList()
+    private var cloudStorageStatusView: TextView? = null
+    private var cloudStoragePlaybackStatus = "请选择录像"
+    private var cloudStorageActionStatusGeneration = 0L
+    private var cloudStorageActionStatusUntilMs = 0L
+    private var cloudStorageTimeView: TextView? = null
+    private var cloudStorageSeekBar: SeekBar? = null
+    private var cloudStorageStage: FrameLayout? = null
+    private var cloudStorageRecordingButton: TextView? = null
+    private var cloudStorageSnapshotButton: TextView? = null
+    private var cloudStorageGalleryButton: TextView? = null
+    private var cloudStorageMuteButton: TextView? = null
+    private var cloudStorageSpeedButton: TextView? = null
+    private var cloudStoragePauseButton: TextView? = null
 
     private val permissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
@@ -147,18 +147,18 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         clearActiveScanner()
-        closeStoreFlow()
+        closeCloudStorageFlow()
         stopPlayer()
         super.onDestroy()
     }
 
     private fun showConfigure() {
         clearActiveScanner()
-        closeStoreFlow()
+        closeCloudStorageFlow()
         stopPlayer()
         statusView = null
-        if (configureProduct == ConfigureProduct.STORE) {
-            showStoreConfigure()
+        if (configureProduct == ConfigureProduct.CLOUD_STORAGE) {
+            showCloudStorageConfigure()
         } else {
             showRtcConfigure()
         }
@@ -245,29 +245,29 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showStoreConfigure() {
-        val appIdField = editText("TiStore 应用标识", storeConfig.appId, viewId = R.id.field_store_app_id)
+    private fun showCloudStorageConfigure() {
+        val appIdField = editText("Ti Cloud Storage 应用标识", cloudStorageConfig.appId, viewId = R.id.field_cloud_storage_app_id)
         val endpointField =
-            editText("留空则使用默认环境", storeConfig.endpoint, viewId = R.id.field_store_endpoint)
+            editText("留空则使用默认环境", cloudStorageConfig.endpoint, viewId = R.id.field_cloud_storage_endpoint)
         val tokenField =
             editText(
-                "粘贴 TiStore APP Token",
-                storeConfig.token,
+                "粘贴 Ti Cloud Storage APP Token",
+                cloudStorageConfig.token,
                 multiLine = true,
                 isSecret = true,
-                viewId = R.id.field_store_token,
+                viewId = R.id.field_cloud_storage_token,
             )
         val audioChannelField =
             editText(
                 "音频 Channel ID",
-                storeConfig.audioChannelId.toString(),
-                viewId = R.id.field_store_audio_channel_id,
+                cloudStorageConfig.audioChannelId.toString(),
+                viewId = R.id.field_cloud_storage_audio_channel_id,
             )
         val videoChannelField =
             editText(
                 "视频 Channel ID",
-                storeConfig.videoChannelId.toString(),
-                viewId = R.id.field_store_video_channel_id,
+                cloudStorageConfig.videoChannelId.toString(),
+                viewId = R.id.field_cloud_storage_video_channel_id,
             )
         setContentView(
             page {
@@ -291,7 +291,7 @@ class MainActivity : AppCompatActivity() {
                         addView(fieldBlock("token", tokenField), LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                         addView(space(dp(10)))
                         addView(
-                            outlinedButton("扫码") { showStoreQr(appIdField, endpointField, tokenField) },
+                            outlinedButton("扫码") { showCloudStorageQr(appIdField, endpointField, tokenField) },
                             LinearLayout.LayoutParams(dp(68), dp(56)),
                         )
                     },
@@ -317,15 +317,15 @@ class MainActivity : AppCompatActivity() {
                             return@primaryButton
                         }
                         val next =
-                            StoreConfiguration(
+                            CloudStorageConfiguration(
                                 appId = appId,
                                 endpoint = endpointField.text.toString().trim(),
                                 token = token,
                                 audioChannelId = audioChannel!!,
                                 videoChannelId = videoChannel!!,
                             )
-                        storeConfig = next
-                        showStorePlayer(next)
+                        cloudStorageConfig = next
+                        showCloudStoragePlayer(next)
                     },
                 )
                 addView(linkButton("上传日志") { uploadLogs() })
@@ -333,27 +333,27 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showStorePlayer(config: StoreConfiguration) {
+    private fun showCloudStoragePlayer(config: CloudStorageConfiguration) {
         clearActiveScanner()
         stopPlayer()
-        closeStoreFlow()
-        val flow = TiStoreExampleFlow()
-        storeFlow = flow
-        storeSelectedRange = null
-        val status = body("正在初始化云录像…").apply { id = R.id.store_status }
-        val time = body("--:--:-- / --:--:--").apply { id = R.id.store_seek_time }
-        val seek = storeSeekBar(flow)
+        closeCloudStorageFlow()
+        val flow = TiCloudStorageExampleFlow()
+        cloudStorageFlow = flow
+        cloudStorageSelectedRange = null
+        val status = body("正在初始化云录像…").apply { id = R.id.cloud_storage_status }
+        val time = body("--:--:-- / --:--:--").apply { id = R.id.cloud_storage_seek_time }
+        val seek = cloudStorageSeekBar(flow)
         val recording =
-            outlinedButton("录屏") { toggleStoreRecording(flow, config) }.apply {
-                id = R.id.store_recording_button
+            outlinedButton("录屏") { toggleCloudStorageRecording(flow, config) }.apply {
+                id = R.id.cloud_storage_recording_button
             }
         val snapshot =
-            outlinedButton("截图") { takeStoreSnapshot(flow) }.apply {
-                id = R.id.store_snapshot_button
+            outlinedButton("截图") { takeCloudStorageSnapshot(flow) }.apply {
+                id = R.id.cloud_storage_snapshot_button
             }
         val gallery =
-            outlinedButton("保存到系统相册") { saveStoreMediaToGallery(flow) }.apply {
-                id = R.id.store_gallery_button
+            outlinedButton("保存到系统相册") { saveCloudStorageMediaToGallery(flow) }.apply {
+                id = R.id.cloud_storage_gallery_button
             }
         val mute =
             outlinedButton("静音") {
@@ -364,69 +364,69 @@ class MainActivity : AppCompatActivity() {
                     } else {
                         "音量设置失败：$code"
                     }
-                updateStoreStatus(message)
-                updateStoreControls()
-            }.apply { id = R.id.store_mute_button }
+                updateCloudStorageStatus(message)
+                updateCloudStorageControls()
+            }.apply { id = R.id.cloud_storage_mute_button }
         val speed =
             outlinedButton("倍速 x1") {
-                val values = TiStoreReplaySpeed.entries
+                val values = TiCloudStorageReplaySpeed.entries
                 val next = values[(values.indexOf(flow.speed) + 1) % values.size]
                 val code = flow.setSpeed(next)
-                updateStoreStatus(if (code == 0) "播放倍速：${storeSpeedLabel(next)}" else "倍速设置失败：$code")
-                updateStoreControls()
-            }.apply { id = R.id.store_speed_button }
+                updateCloudStorageStatus(if (code == 0) "播放倍速：${cloudStorageSpeedLabel(next)}" else "倍速设置失败：$code")
+                updateCloudStorageControls()
+            }.apply { id = R.id.cloud_storage_speed_button }
         val pause =
             outlinedButton("暂停播放") {
                 val code = if (flow.paused) flow.resume() else flow.pause()
-                if (code != 0) updateStoreStatus("暂停操作失败：$code")
-                updateStoreControls()
-            }.apply { id = R.id.store_pause_button }
-        storeStatusView = status
-        storeTimeView = time
-        storeSeekBar = seek
-        storeRecordingButton = recording
-        storeSnapshotButton = snapshot
-        storeGalleryButton = gallery
-        storeMuteButton = mute
-        storeSpeedButton = speed
-        storePauseButton = pause
-        val stage = videoPanel("请选择录像").apply { id = R.id.store_video_stage }
-        storeStage = stage
-        val controls = storePlayerControls(time, seek, recording, snapshot, gallery, mute, speed, pause)
+                if (code != 0) updateCloudStorageStatus("暂停操作失败：$code")
+                updateCloudStorageControls()
+            }.apply { id = R.id.cloud_storage_pause_button }
+        cloudStorageStatusView = status
+        cloudStorageTimeView = time
+        cloudStorageSeekBar = seek
+        cloudStorageRecordingButton = recording
+        cloudStorageSnapshotButton = snapshot
+        cloudStorageGalleryButton = gallery
+        cloudStorageMuteButton = mute
+        cloudStorageSpeedButton = speed
+        cloudStoragePauseButton = pause
+        val stage = videoPanel("请选择录像").apply { id = R.id.cloud_storage_video_stage }
+        cloudStorageStage = stage
+        val controls = cloudStoragePlayerControls(time, seek, recording, snapshot, gallery, mute, speed, pause)
         setContentView(
             frameScreen(
                 top =
-                    storePlayerTopBar(
+                    cloudStoragePlayerTopBar(
                         onBack = {
-                            closeStoreFlow {
-                                configureProduct = ConfigureProduct.STORE
+                            closeCloudStorageFlow {
+                                configureProduct = ConfigureProduct.CLOUD_STORAGE
                                 showConfigure()
                             }
                         },
-                        onSelectRecording = { showStoreRecordingsDialog(flow, config, query = false) },
-                        onUploadLogs = { uploadStoreLogs() },
+                        onSelectRecording = { showCloudStorageRecordingsDialog(flow, config, query = false) },
+                        onUploadLogs = { uploadCloudStorageLogs() },
                     ),
                 stage = stage,
                 overlay = surface { addView(status) },
                 bottom = controls,
             ),
         )
-        bindStoreFlowCallbacks(flow)
+        bindCloudStorageFlowCallbacks(flow)
         val initCode = flow.initialize(this, config.appId, config.endpoint, config.token)
         if (initCode != 0) {
-            updateStoreStatus("初始化失败：$initCode")
-            updateStoreControls()
+            updateCloudStorageStatus("初始化失败：$initCode")
+            updateCloudStorageControls()
             return
         }
-        updateStoreStatus("请选择录像")
-        updateStoreControls()
-        mainHandler.post { if (storeFlow === flow) showStoreRecordingsDialog(flow, config, query = true) }
+        updateCloudStorageStatus("请选择录像")
+        updateCloudStorageControls()
+        mainHandler.post { if (cloudStorageFlow === flow) showCloudStorageRecordingsDialog(flow, config, query = true) }
     }
 
-    private fun storeSeekBar(flow: TiStoreExampleFlow): SeekBar =
+    private fun cloudStorageSeekBar(flow: TiCloudStorageExampleFlow): SeekBar =
         SeekBar(this).apply {
-            id = R.id.store_seek_bar
-            max = STORE_SEEK_MAX
+            id = R.id.cloud_storage_seek_bar
+            max = CLOUD_STORAGE_SEEK_MAX
             isEnabled = false
             setOnSeekBarChangeListener(
                 object : SeekBar.OnSeekBarChangeListener {
@@ -435,23 +435,23 @@ class MainActivity : AppCompatActivity() {
                         progress: Int,
                         fromUser: Boolean,
                     ) {
-                        if (fromUser) updateStoreSeekLabel(progress)
+                        if (fromUser) updateCloudStorageSeekLabel(progress)
                     }
 
                     override fun onStartTrackingTouch(seekBar: SeekBar?) = Unit
 
                     override fun onStopTrackingTouch(seekBar: SeekBar?) {
-                        val range = storeSelectedRange ?: return
+                        val range = cloudStorageSelectedRange ?: return
                         val progress = seekBar?.progress ?: return
-                        val target = range.startTimeMs + (range.endTimeMs - range.startTimeMs) * progress / STORE_SEEK_MAX
+                        val target = range.startTimeMs + (range.endTimeMs - range.startTimeMs) * progress / CLOUD_STORAGE_SEEK_MAX
                         val code = flow.seek(target)
-                        updateStoreStatus(if (code == 0) "已跳转到 ${formatStoreTime(target)}" else "跳转失败：$code")
+                        updateCloudStorageStatus(if (code == 0) "已跳转到 ${formatCloudStorageTime(target)}" else "跳转失败：$code")
                     }
                 },
             )
         }
 
-    private fun storePlayerControls(
+    private fun cloudStoragePlayerControls(
         time: TextView,
         seek: SeekBar,
         recording: TextView,
@@ -464,11 +464,11 @@ class MainActivity : AppCompatActivity() {
         surface {
             addView(time)
             addView(seek)
-            addView(storeControlRow(recording, snapshot, gallery))
-            addViewWithMargin(storeControlRow(mute, speed, pause), top = 8, bottom = 0)
+            addView(cloudStorageControlRow(recording, snapshot, gallery))
+            addViewWithMargin(cloudStorageControlRow(mute, speed, pause), top = 8, bottom = 0)
         }
 
-    private fun storeControlRow(
+    private fun cloudStorageControlRow(
         first: View,
         second: View,
         third: View,
@@ -482,37 +482,37 @@ class MainActivity : AppCompatActivity() {
             addView(third, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
         }
 
-    private fun bindStoreFlowCallbacks(flow: TiStoreExampleFlow) {
+    private fun bindCloudStorageFlowCallbacks(flow: TiCloudStorageExampleFlow) {
         flow.onTimeChanged = { timeMs ->
-            if (storeFlow === flow) updateStoreProgress(timeMs)
+            if (cloudStorageFlow === flow) updateCloudStorageProgress(timeMs)
         }
         flow.onReplayCompleted = {
-            if (storeFlow === flow) updateStorePlaybackStatus("录像播放完成")
+            if (cloudStorageFlow === flow) updateCloudStoragePlaybackStatus("录像播放完成")
         }
         flow.onVideoStateChanged = { state ->
-            if (storeFlow === flow) {
-                updateStorePlaybackStatus(storeVideoStateLabel(state))
-                updateStoreControls()
+            if (cloudStorageFlow === flow) {
+                updateCloudStoragePlaybackStatus(cloudStorageVideoStateLabel(state))
+                updateCloudStorageControls()
             }
         }
         flow.onAudioStateChanged = { state ->
-            if (storeFlow === flow && state.name == "FAILED") updateStoreStatus("音频输出失败")
+            if (cloudStorageFlow === flow && state.name == "FAILED") updateCloudStorageStatus("音频输出失败")
         }
         flow.onError = { code ->
-            if (storeFlow === flow) updateStoreStatus("播放失败：$code")
+            if (cloudStorageFlow === flow) updateCloudStorageStatus("播放失败：$code")
         }
     }
 
-    private fun showStoreRecordingsDialog(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
+    private fun showCloudStorageRecordingsDialog(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
         query: Boolean,
     ) {
-        if (storeFlow !== flow || isFinishing) return
-        storeRecordingsDialog?.dismiss()
+        if (cloudStorageFlow !== flow || isFinishing) return
+        cloudStorageRecordingsDialog?.dismiss()
         val dateRow =
             LinearLayout(this).apply {
-                id = R.id.store_recordings_date_row
+                id = R.id.cloud_storage_recordings_date_row
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 addView(
@@ -520,7 +520,7 @@ class MainActivity : AppCompatActivity() {
                         orientation = LinearLayout.VERTICAL
                         addView(
                             TextView(context).apply {
-                                text = storeDateLabel()
+                                text = cloudStorageDateLabel()
                                 setTextColor(ExampleTheme.textPrimary)
                                 textSize = 15f
                             },
@@ -537,28 +537,28 @@ class MainActivity : AppCompatActivity() {
                 )
                 addView(
                     appBarActionButton("重新查询") {
-                        queryStoreRecordings(flow, config)
-                    }.apply { id = R.id.store_query_button },
+                        queryCloudStorageRecordings(flow, config)
+                    }.apply { id = R.id.cloud_storage_query_button },
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT, dp(40)),
                 )
             }
         val content =
             LinearLayout(this).apply {
-                id = R.id.store_recordings_list
+                id = R.id.cloud_storage_recordings_list
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(18), dp(8), dp(18), dp(12))
             }
-        storeRecordingsContent = content
+        cloudStorageRecordingsContent = content
         val root =
             LinearLayout(this).apply {
-                id = R.id.store_recordings_sheet
+                id = R.id.cloud_storage_recordings_sheet
                 orientation = LinearLayout.VERTICAL
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 setPadding(0, dp(6), 0, dp(12))
                 setBackgroundColor(ExampleTheme.background)
                 addView(
                     View(context).apply {
-                        id = R.id.store_sheet_drag_handle
+                        id = R.id.cloud_storage_sheet_drag_handle
                         importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                         setBackgroundColor(ExampleTheme.inputBorder)
                     },
@@ -573,7 +573,7 @@ class MainActivity : AppCompatActivity() {
                     top = dp(2),
                     bottom = 0,
                 )
-                addView(storeMonthCalendar(flow, config))
+                addView(cloudStorageMonthCalendar(flow, config))
                 addView(
                     View(context).apply { setBackgroundColor(ExampleTheme.inputBorder) },
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 1),
@@ -594,56 +594,56 @@ class MainActivity : AppCompatActivity() {
         val dialog = BottomSheetDialog(this)
         dialog.setContentView(root)
         dialog.setOnDismissListener {
-            if (storeRecordingsDialog === dialog) {
-                storeRecordingsDialog = null
-                storeRecordingsContent = null
+            if (cloudStorageRecordingsDialog === dialog) {
+                cloudStorageRecordingsDialog = null
+                cloudStorageRecordingsContent = null
             }
         }
         dialog.behavior.apply {
             peekHeight = root.layoutParams.height
             isFitToContents = true
         }
-        storeRecordingsDialog = dialog
+        cloudStorageRecordingsDialog = dialog
         dialog.show()
         dialog.behavior.state = BottomSheetBehavior.STATE_EXPANDED
-        if (query) queryStoreRecordings(flow, config) else renderStoreRecordings(storeRecordings, null, flow, config)
+        if (query) queryCloudStorageRecordings(flow, config) else renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
     }
 
-    private fun queryStoreRecordings(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
+    private fun queryCloudStorageRecordings(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
     ) {
-        if (storeFlow !== flow) return
-        val generation = ++storeDayQueryGeneration
-        renderStoreRecordings(emptyList(), "正在查询…")
-        val bounds = storeQueryBounds()
+        if (cloudStorageFlow !== flow) return
+        val generation = ++cloudStorageDayQueryGeneration
+        renderCloudStorageRecordings(emptyList(), "正在查询…")
+        val bounds = cloudStorageQueryBounds()
         val accepted =
             flow.query(bounds.first, bounds.second) { result ->
-                if (storeFlow !== flow || generation != storeDayQueryGeneration) return@query
+                if (cloudStorageFlow !== flow || generation != cloudStorageDayQueryGeneration) return@query
                 if (result.code != 0) {
-                    storeRecordings = emptyList()
-                    renderStoreRecordings(emptyList(), "查询失败：${result.code}")
-                    updateStoreStatus("查询失败：${result.code}")
+                    cloudStorageRecordings = emptyList()
+                    renderCloudStorageRecordings(emptyList(), "查询失败：${result.code}")
+                    updateCloudStorageStatus("查询失败：${result.code}")
                 } else {
                     val recordings =
                         result.recordings.sortedWith(
-                            compareByDescending<TiStoreRecordingRange> { it.startTimeMs }
+                            compareByDescending<TiCloudStorageRecordingRange> { it.startTimeMs }
                                 .thenByDescending { it.endTimeMs },
                         )
-                    storeRecordings = recordings
-                    renderStoreRecordings(recordings, null, flow, config)
-                    updateStoreStatus("查询完成：${result.recordings.size} 段录像")
+                    cloudStorageRecordings = recordings
+                    renderCloudStorageRecordings(recordings, null, flow, config)
+                    updateCloudStorageStatus("查询完成：${result.recordings.size} 段录像")
                 }
             }
         if (accepted != 0) {
-            renderStoreRecordings(emptyList(), "查询启动失败：$accepted")
-            updateStoreStatus("查询启动失败：$accepted")
+            renderCloudStorageRecordings(emptyList(), "查询启动失败：$accepted")
+            updateCloudStorageStatus("查询启动失败：$accepted")
         }
     }
 
-    private fun storeMonthCalendar(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
+    private fun cloudStorageMonthCalendar(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
     ): View {
         val title = body("").apply { gravity = Gravity.CENTER }
         val grid = GridLayout(this).apply { columnCount = 7 }
@@ -653,9 +653,9 @@ class MainActivity : AppCompatActivity() {
         render = {
             title.text = SimpleDateFormat("yyyy-MM", Locale.ROOT).apply {
                 timeZone = TimeZone.getTimeZone("Asia/Shanghai")
-            }.format(storeVisibleMonth.time)
+            }.format(cloudStorageVisibleMonth.time)
             grid.removeAllViews()
-            val first = storeVisibleMonth.clone() as Calendar
+            val first = cloudStorageVisibleMonth.clone() as Calendar
             first.set(Calendar.DAY_OF_MONTH, 1)
             val leading = first.get(Calendar.DAY_OF_WEEK) - Calendar.SUNDAY
             repeat(leading) {
@@ -669,8 +669,8 @@ class MainActivity : AppCompatActivity() {
             for (day in 1..lastDay) {
                 val date = first.clone() as Calendar
                 date.set(Calendar.DAY_OF_MONTH, day)
-                val key = storeDateKey(date)
-                val selected = key == storeDateLabel()
+                val key = cloudStorageDateKey(date)
+                val selected = key == cloudStorageDateLabel()
                 val available = key in availableDays
                 val button =
                     if (selected) {
@@ -685,9 +685,9 @@ class MainActivity : AppCompatActivity() {
                     isEnabled = available
                     alpha = if (isEnabled) 1f else 0.34f
                     setOnClickListener {
-                        storeSelectedDate.timeInMillis = date.timeInMillis
+                        cloudStorageSelectedDate.timeInMillis = date.timeInMillis
                         render()
-                        queryStoreRecordings(flow, config)
+                        queryCloudStorageRecordings(flow, config)
                     }
                 }
                 grid.addView(button, GridLayout.LayoutParams().apply {
@@ -699,21 +699,21 @@ class MainActivity : AppCompatActivity() {
             }
         }
         load = {
-            val generation = ++storeMonthQueryGeneration
+            val generation = ++cloudStorageMonthQueryGeneration
             availableDays = emptySet()
             render()
-            val first = storeVisibleMonth.clone() as Calendar
+            val first = cloudStorageVisibleMonth.clone() as Calendar
             first.set(Calendar.DAY_OF_MONTH, 1)
             val last = first.clone() as Calendar
             last.set(Calendar.DAY_OF_MONTH, last.getActualMaximum(Calendar.DAY_OF_MONTH))
             val accepted =
-                flow.queryDays(storeDateKey(first), storeDateKey(last), "Asia/Shanghai") { result ->
-                    if (storeFlow !== flow || generation != storeMonthQueryGeneration) return@queryDays
+                flow.queryDays(cloudStorageDateKey(first), cloudStorageDateKey(last), "Asia/Shanghai") { result ->
+                    if (cloudStorageFlow !== flow || generation != cloudStorageMonthQueryGeneration) return@queryDays
                     availableDays = result.days.filter { it.hasRecording }.map { it.date }.toSet()
                     render()
-                    if (result.code != 0) updateStoreStatus("月份加载失败：${result.code}，切换月份可重试")
+                    if (result.code != 0) updateCloudStorageStatus("月份加载失败：${result.code}，切换月份可重试")
                 }
-            if (accepted != 0) updateStoreStatus("月份加载启动失败：$accepted")
+            if (accepted != 0) updateCloudStorageStatus("月份加载启动失败：$accepted")
         }
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -723,12 +723,12 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.HORIZONTAL
                     gravity = Gravity.CENTER_VERTICAL
                     addView(appBarActionButton("上个月") {
-                        storeVisibleMonth.add(Calendar.MONTH, -1)
+                        cloudStorageVisibleMonth.add(Calendar.MONTH, -1)
                         load()
                     })
                     addView(title, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                     addView(appBarActionButton("下个月") {
-                        storeVisibleMonth.add(Calendar.MONTH, 1)
+                        cloudStorageVisibleMonth.add(Calendar.MONTH, 1)
                         load()
                     })
                 },
@@ -742,13 +742,13 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun renderStoreRecordings(
-        recordings: List<TiStoreRecordingRange>,
+    private fun renderCloudStorageRecordings(
+        recordings: List<TiCloudStorageRecordingRange>,
         message: String?,
-        flow: TiStoreExampleFlow? = null,
-        config: StoreConfiguration? = null,
+        flow: TiCloudStorageExampleFlow? = null,
+        config: CloudStorageConfiguration? = null,
     ) {
-        val content = storeRecordingsContent ?: return
+        val content = cloudStorageRecordingsContent ?: return
         content.removeAllViews()
         if (message != null) {
             val state =
@@ -767,8 +767,8 @@ class MainActivity : AppCompatActivity() {
                     } else if (message.contains("查询失败")) {
                         addViewWithMargin(
                             appBarActionButton("重试") {
-                                if (flow != null && config != null) queryStoreRecordings(flow, config)
-                            }.apply { id = R.id.store_query_retry_button },
+                                if (flow != null && config != null) queryCloudStorageRecordings(flow, config)
+                            }.apply { id = R.id.cloud_storage_query_retry_button },
                             top = dp(12),
                             bottom = 0,
                         )
@@ -781,36 +781,36 @@ class MainActivity : AppCompatActivity() {
             content.addView(body("当天没有可用录像"))
             return
         }
-        val exportBusy = storeExportProgress >= 0
+        val exportBusy = cloudStorageExportProgress >= 0
         recordings.forEachIndexed { index, range ->
             val row =
                 LinearLayout(this).apply {
-                    id = R.id.store_recording_play
+                    id = R.id.cloud_storage_recording_play
                     contentDescription = "播放录像"
                     gravity = Gravity.CENTER_VERTICAL
                     orientation = LinearLayout.HORIZONTAL
                     isClickable = true
                     isFocusable = true
                     setOnClickListener {
-                        storeRecordingsDialog?.dismiss()
-                        if (flow != null && config != null) playStoreRecording(flow, config, range)
+                        cloudStorageRecordingsDialog?.dismiss()
+                        if (flow != null && config != null) playCloudStorageRecording(flow, config, range)
                     }
                     val label =
                         TextView(context).apply {
-                            id = R.id.store_recording_row_label
+                            id = R.id.cloud_storage_recording_row_label
                             text =
-                                "${formatStoreTime(range.startTimeMs)} — ${formatStoreTime(range.endTimeMs)}\n" +
-                                formatStoreDuration(range.endTimeMs - range.startTimeMs)
+                                "${formatCloudStorageTime(range.startTimeMs)} — ${formatCloudStorageTime(range.endTimeMs)}\n" +
+                                formatCloudStorageDuration(range.endTimeMs - range.startTimeMs)
                             setTextColor(ExampleTheme.textPrimary)
                             textSize = 14f
                             setPadding(dp(8), dp(12), dp(8), dp(12))
                         }
                     addView(label, LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f))
                     addView(
-                        appBarActionButton(if (exportBusy) "${storeExportProgress}%" else "下载") {
-                            if (flow != null && config != null) exportStoreRecording(flow, config, range)
+                        appBarActionButton(if (exportBusy) "${cloudStorageExportProgress}%" else "下载") {
+                            if (flow != null && config != null) exportCloudStorageRecording(flow, config, range)
                         }.apply {
-                            id = R.id.store_range_export
+                            id = R.id.cloud_storage_range_export
                             isEnabled = !exportBusy
                             alpha = if (exportBusy) 0.6f else 1f
                         },
@@ -827,183 +827,183 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun playStoreRecording(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
-        range: TiStoreRecordingRange,
+    private fun playCloudStorageRecording(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
+        range: TiCloudStorageRecordingRange,
     ) {
-        val stage = storeStage
+        val stage = cloudStorageStage
         if (stage == null) {
-            updateStoreStatus("播放区域不可用")
+            updateCloudStorageStatus("播放区域不可用")
             return
         }
         val code = flow.play(range, stage, config.videoChannelId, config.audioChannelId)
         if (code == 0) {
-            storeSelectedRange = range
-            updateStoreProgress(range.startTimeMs)
+            cloudStorageSelectedRange = range
+            updateCloudStorageProgress(range.startTimeMs)
         } else {
-            updateStoreStatus("播放启动失败：$code")
+            updateCloudStorageStatus("播放启动失败：$code")
         }
-        updateStoreControls()
+        updateCloudStorageControls()
     }
 
-    private fun toggleStoreRecording(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
+    private fun toggleCloudStorageRecording(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
     ) {
         val code =
             flow.toggleRecording(config.videoChannelId, config.audioChannelId) { started, resultCode, path ->
-                if (storeFlow !== flow) return@toggleRecording
-                updateStoreStatus(
+                if (cloudStorageFlow !== flow) return@toggleRecording
+                updateCloudStorageStatus(
                     when {
                         resultCode != 0 -> "边播边录失败：$resultCode"
                         started -> "边播边录已开始"
                         else -> "边播边录完成${path?.let { "：$it" }.orEmpty()}"
                     },
                 )
-                updateStoreControls()
+                updateCloudStorageControls()
             }
-        if (code != 0) updateStoreStatus("边播边录操作失败：$code")
-        updateStoreControls()
+        if (code != 0) updateCloudStorageStatus("边播边录操作失败：$code")
+        updateCloudStorageControls()
     }
 
-    private fun takeStoreSnapshot(flow: TiStoreExampleFlow) {
+    private fun takeCloudStorageSnapshot(flow: TiCloudStorageExampleFlow) {
         val code =
             flow.takeSnapshot { resultCode, path ->
-                if (storeFlow !== flow) return@takeSnapshot
-                updateStoreStatus(if (resultCode == 0) "截图完成${path?.let { "：$it" }.orEmpty()}" else "截图失败：$resultCode")
-                updateStoreControls()
+                if (cloudStorageFlow !== flow) return@takeSnapshot
+                updateCloudStorageStatus(if (resultCode == 0) "截图完成${path?.let { "：$it" }.orEmpty()}" else "截图失败：$resultCode")
+                updateCloudStorageControls()
             }
-        if (code != 0) updateStoreStatus("截图启动失败：$code")
+        if (code != 0) updateCloudStorageStatus("截图启动失败：$code")
     }
 
-    private fun exportStoreRecording(
-        flow: TiStoreExampleFlow,
-        config: StoreConfiguration,
-        range: TiStoreRecordingRange,
+    private fun exportCloudStorageRecording(
+        flow: TiCloudStorageExampleFlow,
+        config: CloudStorageConfiguration,
+        range: TiCloudStorageRecordingRange,
     ) {
-        if (storeExportProgress >= 0) return
-        storeExportProgress = 0
-        renderStoreRecordings(storeRecordings, null, flow, config)
+        if (cloudStorageExportProgress >= 0) return
+        cloudStorageExportProgress = 0
+        renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
         val code =
             flow.export(
                 range,
                 config.videoChannelId,
                 config.audioChannelId,
                 onProgress = { progress ->
-                    if (storeFlow !== flow) return@export
-                    storeExportProgress = ((progress * 100).toInt()).coerceIn(0, 99)
-                    renderStoreRecordings(storeRecordings, null, flow, config)
-                    updateStoreStatus("范围下载 ${storeExportProgress}%")
+                    if (cloudStorageFlow !== flow) return@export
+                    cloudStorageExportProgress = ((progress * 100).toInt()).coerceIn(0, 99)
+                    renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
+                    updateCloudStorageStatus("范围下载 ${cloudStorageExportProgress}%")
                 },
             ) { resultCode, path ->
-                if (storeFlow !== flow) return@export
-                storeExportProgress = -1
-                renderStoreRecordings(storeRecordings, null, flow, config)
-                updateStoreStatus(if (resultCode == 0) "范围下载完成${path?.let { "：$it" }.orEmpty()}" else "范围下载失败：$resultCode")
-                updateStoreControls()
+                if (cloudStorageFlow !== flow) return@export
+                cloudStorageExportProgress = -1
+                renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
+                updateCloudStorageStatus(if (resultCode == 0) "范围下载完成${path?.let { "：$it" }.orEmpty()}" else "范围下载失败：$resultCode")
+                updateCloudStorageControls()
             }
         if (code == 0) {
-            updateStoreStatus("范围下载已开始")
+            updateCloudStorageStatus("范围下载已开始")
         } else {
-            storeExportProgress = -1
-            renderStoreRecordings(storeRecordings, null, flow, config)
-            updateStoreStatus("范围下载启动失败：$code")
+            cloudStorageExportProgress = -1
+            renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
+            updateCloudStorageStatus("范围下载启动失败：$code")
         }
-        updateStoreControls()
+        updateCloudStorageControls()
     }
 
-    private fun saveStoreMediaToGallery(flow: TiStoreExampleFlow) {
+    private fun saveCloudStorageMediaToGallery(flow: TiCloudStorageExampleFlow) {
         val code =
             flow.saveLatestToGallery { resultCode ->
-                if (storeFlow !== flow) return@saveLatestToGallery
-                updateStoreStatus(if (resultCode == 0) "已保存到系统相册" else "保存到相册失败：$resultCode")
-                updateStoreControls()
+                if (cloudStorageFlow !== flow) return@saveLatestToGallery
+                updateCloudStorageStatus(if (resultCode == 0) "已保存到系统相册" else "保存到相册失败：$resultCode")
+                updateCloudStorageControls()
             }
-        if (code != 0) updateStoreStatus("保存到相册启动失败：$code")
+        if (code != 0) updateCloudStorageStatus("保存到相册启动失败：$code")
     }
 
-    private fun uploadStoreLogs() {
-        updateStoreStatus("正在上传日志…")
+    private fun uploadCloudStorageLogs() {
+        updateCloudStorageStatus("正在上传日志…")
         val code =
             TiRtcLogging.upload(
                 TiRtcLogUploadCallback { resultCode, logId ->
-                    updateStoreStatus(
+                    updateCloudStorageStatus(
                         if (resultCode == 0) "日志上传完成：${logId.orEmpty()}" else "日志上传失败：$resultCode",
                     )
                 },
             )
-        if (code != 0) updateStoreStatus("日志上传启动失败：$code")
+        if (code != 0) updateCloudStorageStatus("日志上传启动失败：$code")
     }
 
-    private fun updateStoreStatus(message: String) {
+    private fun updateCloudStorageStatus(message: String) {
         mainHandler.post {
-            val target = storeStatusView ?: return@post
-            storeActionStatusGeneration += 1
-            val generation = storeActionStatusGeneration
-            storeActionStatusUntilMs = SystemClock.uptimeMillis() + STORE_ACTION_STATUS_DURATION_MS
+            val target = cloudStorageStatusView ?: return@post
+            cloudStorageActionStatusGeneration += 1
+            val generation = cloudStorageActionStatusGeneration
+            cloudStorageActionStatusUntilMs = SystemClock.uptimeMillis() + CLOUD_STORAGE_ACTION_STATUS_DURATION_MS
             target.text = message
             mainHandler.postDelayed(
                 {
-                    if (storeStatusView === target && storeActionStatusGeneration == generation) {
-                        storeActionStatusUntilMs = 0L
-                        target.text = storePlaybackStatus
+                    if (cloudStorageStatusView === target && cloudStorageActionStatusGeneration == generation) {
+                        cloudStorageActionStatusUntilMs = 0L
+                        target.text = cloudStoragePlaybackStatus
                     }
                 },
-                STORE_ACTION_STATUS_DURATION_MS,
+                CLOUD_STORAGE_ACTION_STATUS_DURATION_MS,
             )
         }
     }
 
-    private fun updateStorePlaybackStatus(message: String) {
+    private fun updateCloudStoragePlaybackStatus(message: String) {
         mainHandler.post {
-            storePlaybackStatus = message
-            if (SystemClock.uptimeMillis() >= storeActionStatusUntilMs) {
-                storeStatusView?.text = message
+            cloudStoragePlaybackStatus = message
+            if (SystemClock.uptimeMillis() >= cloudStorageActionStatusUntilMs) {
+                cloudStorageStatusView?.text = message
             }
         }
     }
 
-    private fun updateStoreProgress(timeMs: Long) {
-        val range = storeSelectedRange ?: return
+    private fun updateCloudStorageProgress(timeMs: Long) {
+        val range = cloudStorageSelectedRange ?: return
         val duration = (range.endTimeMs - range.startTimeMs).coerceAtLeast(1L)
-        val progress = (((timeMs - range.startTimeMs).coerceIn(0L, duration) * STORE_SEEK_MAX) / duration).toInt()
-        storeSeekBar?.progress = progress
-        storeTimeView?.text = "${formatStoreTime(timeMs)} / ${formatStoreTime(range.endTimeMs)}"
+        val progress = (((timeMs - range.startTimeMs).coerceIn(0L, duration) * CLOUD_STORAGE_SEEK_MAX) / duration).toInt()
+        cloudStorageSeekBar?.progress = progress
+        cloudStorageTimeView?.text = "${formatCloudStorageTime(timeMs)} / ${formatCloudStorageTime(range.endTimeMs)}"
     }
 
-    private fun updateStoreSeekLabel(progress: Int) {
-        val range = storeSelectedRange ?: return
-        val target = range.startTimeMs + (range.endTimeMs - range.startTimeMs) * progress / STORE_SEEK_MAX
-        storeTimeView?.text = "${formatStoreTime(target)} / ${formatStoreTime(range.endTimeMs)}"
+    private fun updateCloudStorageSeekLabel(progress: Int) {
+        val range = cloudStorageSelectedRange ?: return
+        val target = range.startTimeMs + (range.endTimeMs - range.startTimeMs) * progress / CLOUD_STORAGE_SEEK_MAX
+        cloudStorageTimeView?.text = "${formatCloudStorageTime(target)} / ${formatCloudStorageTime(range.endTimeMs)}"
     }
 
-    private fun updateStoreControls() {
-        val flow = storeFlow
-        val playing = flow != null && storeSelectedRange != null
+    private fun updateCloudStorageControls() {
+        val flow = cloudStorageFlow
+        val playing = flow != null && cloudStorageSelectedRange != null
 
         fun TextView?.enabled(value: Boolean) {
             this?.isEnabled = value
             this?.alpha = if (value) 1f else 0.5f
         }
-        storeSeekBar?.isEnabled = playing
-        storeRecordingButton.enabled(playing)
-        storeSnapshotButton.enabled(playing)
-        storeRecordingButton?.text = if (flow?.isRecording == true) "结束录屏" else "录屏"
-        storeGalleryButton.enabled(flow?.hasLatestMedia == true)
-        storeMuteButton.enabled(playing && flow?.speed == TiStoreReplaySpeed.X1)
-        storeMuteButton?.text = if (flow?.muted == true) "恢复声音" else "静音"
-        storeSpeedButton.enabled(playing)
-        storeSpeedButton?.text = "倍速 ${storeSpeedLabel(flow?.speed ?: TiStoreReplaySpeed.X1)}"
-        storePauseButton.enabled(playing)
-        storePauseButton?.text = if (flow?.paused == true) "继续播放" else "暂停播放"
+        cloudStorageSeekBar?.isEnabled = playing
+        cloudStorageRecordingButton.enabled(playing)
+        cloudStorageSnapshotButton.enabled(playing)
+        cloudStorageRecordingButton?.text = if (flow?.isRecording == true) "结束录屏" else "录屏"
+        cloudStorageGalleryButton.enabled(flow?.hasLatestMedia == true)
+        cloudStorageMuteButton.enabled(playing && flow?.speed == TiCloudStorageReplaySpeed.X1)
+        cloudStorageMuteButton?.text = if (flow?.muted == true) "恢复声音" else "静音"
+        cloudStorageSpeedButton.enabled(playing)
+        cloudStorageSpeedButton?.text = "倍速 ${cloudStorageSpeedLabel(flow?.speed ?: TiCloudStorageReplaySpeed.X1)}"
+        cloudStoragePauseButton.enabled(playing)
+        cloudStoragePauseButton?.text = if (flow?.paused == true) "继续播放" else "暂停播放"
     }
 
-    private fun storeQueryBounds(): Pair<Long, Long> {
-        val exactStart = intent.getLongExtra("store_query_start_ms", -1L)
-        val exactEnd = intent.getLongExtra("store_query_end_ms", -1L)
+    private fun cloudStorageQueryBounds(): Pair<Long, Long> {
+        val exactStart = intent.getLongExtra("cloud_storage_query_start_ms", -1L)
+        val exactEnd = intent.getLongExtra("cloud_storage_query_end_ms", -1L)
         if (exactStart >= 0 && exactEnd > exactStart) return exactStart to exactEnd
-        val start = storeSelectedDate.clone() as Calendar
+        val start = cloudStorageSelectedDate.clone() as Calendar
         start.set(Calendar.HOUR_OF_DAY, 0)
         start.set(Calendar.MINUTE, 0)
         start.set(Calendar.SECOND, 0)
@@ -1013,69 +1013,72 @@ class MainActivity : AppCompatActivity() {
         return start.timeInMillis to end.timeInMillis
     }
 
-    private fun storeDateKey(calendar: Calendar): String =
+    private fun cloudStorageDateKey(calendar: Calendar): String =
         SimpleDateFormat("yyyy-MM-dd", Locale.ROOT).apply {
             timeZone = TimeZone.getTimeZone("Asia/Shanghai")
         }.format(calendar.time)
 
-    private fun storeDateLabel(): String = storeDateKey(storeSelectedDate)
+    private fun cloudStorageDateLabel(): String = cloudStorageDateKey(cloudStorageSelectedDate)
 
-    private fun formatStoreTime(timeMs: Long): String =
+    private fun formatCloudStorageTime(timeMs: Long): String =
         SimpleDateFormat("HH:mm:ss", Locale.ROOT).apply {
             timeZone = TimeZone.getTimeZone("Asia/Shanghai")
         }.format(timeMs)
 
-    private fun formatStoreDuration(durationMs: Long): String {
+    private fun formatCloudStorageDuration(durationMs: Long): String {
         val seconds = (durationMs / 1000L).coerceAtLeast(0L)
         return "%02d:%02d".format(seconds / 60L, seconds % 60L)
     }
 
-    private fun storeSpeedLabel(speed: TiStoreReplaySpeed): String =
+    private fun cloudStorageSpeedLabel(speed: TiCloudStorageReplaySpeed): String =
         when (speed) {
-            TiStoreReplaySpeed.X1 -> "x1"
-            TiStoreReplaySpeed.X2 -> "x2"
-            TiStoreReplaySpeed.X4 -> "x4"
-            TiStoreReplaySpeed.X8 -> "x8"
+            TiCloudStorageReplaySpeed.X0_125 -> "1/8×"
+            TiCloudStorageReplaySpeed.X0_25 -> "1/4×"
+            TiCloudStorageReplaySpeed.X0_5 -> "1/2×"
+            TiCloudStorageReplaySpeed.X1 -> "1×"
+            TiCloudStorageReplaySpeed.X2 -> "2×"
+            TiCloudStorageReplaySpeed.X4 -> "4×"
+            TiCloudStorageReplaySpeed.X8 -> "8×"
         }
 
-    private fun storeVideoStateLabel(state: TiStoreVideoOutputState): String =
+    private fun cloudStorageVideoStateLabel(state: TiCloudStorageVideoOutputState): String =
         when (state) {
-            TiStoreVideoOutputState.IDLE -> "等待播放"
-            TiStoreVideoOutputState.BUFFERING -> "缓冲中"
-            TiStoreVideoOutputState.RENDERING -> "正在播放"
-            TiStoreVideoOutputState.FAILED -> "视频输出失败"
-            TiStoreVideoOutputState.PAUSED -> "已暂停"
-            TiStoreVideoOutputState.COMPLETED -> "录像播放完成"
+            TiCloudStorageVideoOutputState.IDLE -> "等待播放"
+            TiCloudStorageVideoOutputState.BUFFERING -> "缓冲中"
+            TiCloudStorageVideoOutputState.RENDERING -> "正在播放"
+            TiCloudStorageVideoOutputState.FAILED -> "视频输出失败"
+            TiCloudStorageVideoOutputState.PAUSED -> "已暂停"
+            TiCloudStorageVideoOutputState.COMPLETED -> "录像播放完成"
         }
 
-    private fun closeStoreFlow(completion: () -> Unit = {}) {
-        val flow = storeFlow
-        storeFlow = null
-        storeDayQueryGeneration += 1
-        storeMonthQueryGeneration += 1
-        storeRecordingsDialog?.dismiss()
-        storeRecordingsDialog = null
-        storeRecordingsContent = null
-        storeSelectedRange = null
-        storeExportProgress = -1
-        storeActionStatusGeneration += 1
-        storeActionStatusUntilMs = 0L
-        storePlaybackStatus = "请选择录像"
-        storeStatusView = null
-        storeTimeView = null
-        storeSeekBar = null
-        storeStage = null
-        storeRecordingButton = null
-        storeSnapshotButton = null
-        storeGalleryButton = null
-        storeMuteButton = null
-        storeSpeedButton = null
-        storePauseButton = null
+    private fun closeCloudStorageFlow(completion: () -> Unit = {}) {
+        val flow = cloudStorageFlow
+        cloudStorageFlow = null
+        cloudStorageDayQueryGeneration += 1
+        cloudStorageMonthQueryGeneration += 1
+        cloudStorageRecordingsDialog?.dismiss()
+        cloudStorageRecordingsDialog = null
+        cloudStorageRecordingsContent = null
+        cloudStorageSelectedRange = null
+        cloudStorageExportProgress = -1
+        cloudStorageActionStatusGeneration += 1
+        cloudStorageActionStatusUntilMs = 0L
+        cloudStoragePlaybackStatus = "请选择录像"
+        cloudStorageStatusView = null
+        cloudStorageTimeView = null
+        cloudStorageSeekBar = null
+        cloudStorageStage = null
+        cloudStorageRecordingButton = null
+        cloudStorageSnapshotButton = null
+        cloudStorageGalleryButton = null
+        cloudStorageMuteButton = null
+        cloudStorageSpeedButton = null
+        cloudStoragePauseButton = null
         if (flow == null) {
             completion()
         } else {
             flow.close { code ->
-                if (code != 0) Log.w("TiStoreExample", "store cleanup failed code=$code")
+                if (code != 0) Log.w("TiCloudStorageExample", "cloudStorage cleanup failed code=$code")
                 completion()
             }
         }
@@ -1145,18 +1148,18 @@ class MainActivity : AppCompatActivity() {
         activateScanner(scannerView)
     }
 
-    private fun showStoreQr(
+    private fun showCloudStorageQr(
         appIdField: EditText,
         endpointField: EditText,
         tokenField: EditText,
     ) {
         val payloadField = editText("粘贴云录像 Token", "", multiLine = true)
         fun applyToken(raw: String): Boolean {
-            val payload = parseStoreQrPayload(raw, storeConfig, ::toast) ?: return false
+            val payload = parseCloudStorageQrPayload(raw, cloudStorageConfig, ::toast) ?: return false
             appIdField.setText(payload.appId)
             endpointField.setText(payload.endpoint)
             tokenField.setText(payload.token)
-            storeConfig = payload
+            cloudStorageConfig = payload
             showConfigure()
             return true
         }
@@ -1904,8 +1907,8 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val DEFAULT_AUDIO_STREAM_ID = 10
         private const val DEFAULT_VIDEO_STREAM_ID = 11
-        private const val STORE_SEEK_MAX = 1000
-        private const val STORE_ACTION_STATUS_DURATION_MS = 4000L
+        private const val CLOUD_STORAGE_SEEK_MAX = 1000
+        private const val CLOUD_STORAGE_ACTION_STATUS_DURATION_MS = 4000L
         private const val METRICS_PERIOD_MS = 1000L
         private const val SCANNER_RETRY_DELAY_MS = 900L
         private const val AUDIO_VOLUME_EVIDENCE_TAG = "TiRtcVolumeEvidence"

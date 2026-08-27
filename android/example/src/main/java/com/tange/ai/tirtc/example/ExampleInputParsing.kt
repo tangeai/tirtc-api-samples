@@ -46,11 +46,11 @@ internal fun parseClientQrPayload(
     }
 }
 
-internal fun parseStoreQrPayload(
+internal fun parseCloudStorageQrPayload(
     payload: String,
-    current: StoreConfiguration,
+    current: CloudStorageConfiguration,
     onError: (String) -> Unit,
-): StoreConfiguration? {
+): CloudStorageConfiguration? {
     val text = payload.trim()
     if (!text.startsWith("{")) {
         if (text.isEmpty() || text.any(Char::isWhitespace)) {
@@ -68,7 +68,7 @@ internal fun parseStoreQrPayload(
         val appId = json.optString("app_id").trim()
         val endpoint = json.optString("endpoint").trim()
         val token = json.optString("token").trim()
-        if (appId.isEmpty() || token.isEmpty() || token.any(Char::isWhitespace) || !validStoreEndpoint(endpoint)) {
+        if (appId.isEmpty() || token.isEmpty() || token.any(Char::isWhitespace) || !validCloudStorageEndpoint(endpoint)) {
             onError("二维码缺少有效的 app_id、endpoint 或 token")
             null
         } else {
@@ -83,7 +83,7 @@ internal fun parseStoreQrPayload(
 private fun validRtcEndpoint(value: String): Boolean =
     value.isEmpty() || validHttpEndpoint(value, httpsOnly = false)
 
-private fun validStoreEndpoint(value: String): Boolean =
+private fun validCloudStorageEndpoint(value: String): Boolean =
     value.isEmpty() || validHttpEndpoint(value, httpsOnly = true)
 
 private fun validHttpEndpoint(

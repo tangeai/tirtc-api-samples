@@ -17,7 +17,7 @@ data class ClientConfiguration(
     val oneTimeToken: String = token,
 )
 
-data class StoreConfiguration(
+data class CloudStorageConfiguration(
     val appId: String = "",
     val endpoint: String = "",
     val token: String = "",
@@ -25,7 +25,7 @@ data class StoreConfiguration(
     val videoChannelId: Int = 11,
 )
 
-enum class ConfigureProduct { RTC, STORE }
+enum class ConfigureProduct { RTC, CLOUD_STORAGE }
 
 data class ExampleSettings(
     val decoderPreference: DecoderPreference = DecoderPreference.AUTO,

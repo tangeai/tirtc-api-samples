@@ -143,14 +143,14 @@ internal fun Context.productTabs(
             }
         val rtc = tab("RTC", ConfigureProduct.RTC)
         rtc.id = R.id.tab_rtc
-        val store = tab("云录像", ConfigureProduct.STORE)
-        store.id = R.id.tab_store
+        val cloudStorage = tab("云录像", ConfigureProduct.CLOUD_STORAGE)
+        cloudStorage.id = R.id.tab_cloud_storage
         addView(rtc, LinearLayout.LayoutParams(0, dp(38), 1f))
         addView(space(dp(3)))
-        addView(store, LinearLayout.LayoutParams(0, dp(38), 1f))
+        addView(cloudStorage, LinearLayout.LayoutParams(0, dp(38), 1f))
     }
 
-internal fun Context.storePlayerTopBar(
+internal fun Context.cloudStoragePlayerTopBar(
     onBack: () -> Unit,
     onSelectRecording: () -> Unit,
     onUploadLogs: () -> Unit,
@@ -160,7 +160,7 @@ internal fun Context.storePlayerTopBar(
         orientation = LinearLayout.HORIZONTAL
         setPadding(dp(16), statusBarInset() + dp(12), dp(12), dp(10))
         setBackgroundColor(ExampleTheme.background)
-        addView(appBarBackButton(onBack).apply { id = R.id.store_back_button }, appBarBackLayoutParams())
+        addView(appBarBackButton(onBack).apply { id = R.id.cloud_storage_back_button }, appBarBackLayoutParams())
         addView(
             TextView(context).apply {
                 text = "云录像"
@@ -171,11 +171,11 @@ internal fun Context.storePlayerTopBar(
             LinearLayout.LayoutParams(0, wrap(), 1f),
         )
         addView(
-            appBarActionButton("选择录像", onSelectRecording).apply { id = R.id.store_recordings_button },
+            appBarActionButton("选择录像", onSelectRecording).apply { id = R.id.cloud_storage_recordings_button },
             appBarActionLayoutParams(),
         )
         addView(
-            appBarActionButton("上传日志", onUploadLogs).apply { id = R.id.store_upload_logs_button },
+            appBarActionButton("上传日志", onUploadLogs).apply { id = R.id.cloud_storage_upload_logs_button },
             appBarActionLayoutParams(),
         )
     }

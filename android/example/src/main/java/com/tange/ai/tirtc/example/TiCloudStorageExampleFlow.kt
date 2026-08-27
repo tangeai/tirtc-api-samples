@@ -8,28 +8,28 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.MediaStore
 import android.view.ViewGroup
-import com.tange.ai.tirtc.TiStore
-import com.tange.ai.tirtc.TiStoreAudioOutput
-import com.tange.ai.tirtc.TiStoreAudioOutputState
-import com.tange.ai.tirtc.TiStoreAudioOutputStateListener
-import com.tange.ai.tirtc.TiStoreErrorCode
-import com.tange.ai.tirtc.TiStoreExportRequest
-import com.tange.ai.tirtc.TiStoreExportTask
-import com.tange.ai.tirtc.TiStoreOutputErrorListener
-import com.tange.ai.tirtc.TiStoreRecordingFile
-import com.tange.ai.tirtc.TiStoreRecordingDaysResult
-import com.tange.ai.tirtc.TiStoreRecordingRange
-import com.tange.ai.tirtc.TiStoreRecordingRangesResult
-import com.tange.ai.tirtc.TiStoreRecordingTask
-import com.tange.ai.tirtc.TiStoreReplay
-import com.tange.ai.tirtc.TiStoreReplayCompletedListener
-import com.tange.ai.tirtc.TiStoreReplayErrorListener
-import com.tange.ai.tirtc.TiStoreReplaySpeed
-import com.tange.ai.tirtc.TiStoreSnapshotFile
-import com.tange.ai.tirtc.TiStoreTimeChangedListener
-import com.tange.ai.tirtc.TiStoreVideoOutput
-import com.tange.ai.tirtc.TiStoreVideoOutputState
-import com.tange.ai.tirtc.TiStoreVideoOutputStateListener
+import com.tange.ai.tirtc.TiCloudStorage
+import com.tange.ai.tirtc.TiCloudStorageAudioOutput
+import com.tange.ai.tirtc.TiCloudStorageAudioOutputState
+import com.tange.ai.tirtc.TiCloudStorageAudioOutputStateListener
+import com.tange.ai.tirtc.TiCloudStorageErrorCode
+import com.tange.ai.tirtc.TiCloudStorageExportRequest
+import com.tange.ai.tirtc.TiCloudStorageExportTask
+import com.tange.ai.tirtc.TiCloudStorageOutputErrorListener
+import com.tange.ai.tirtc.TiCloudStorageRecordingFile
+import com.tange.ai.tirtc.TiCloudStorageRecordingDaysResult
+import com.tange.ai.tirtc.TiCloudStorageRecordingRange
+import com.tange.ai.tirtc.TiCloudStorageRecordingRangesResult
+import com.tange.ai.tirtc.TiCloudStorageRecordingTask
+import com.tange.ai.tirtc.TiCloudStorageReplay
+import com.tange.ai.tirtc.TiCloudStorageReplayCompletedListener
+import com.tange.ai.tirtc.TiCloudStorageReplayErrorListener
+import com.tange.ai.tirtc.TiCloudStorageReplaySpeed
+import com.tange.ai.tirtc.TiCloudStorageSnapshotFile
+import com.tange.ai.tirtc.TiCloudStorageTimeChangedListener
+import com.tange.ai.tirtc.TiCloudStorageVideoOutput
+import com.tange.ai.tirtc.TiCloudStorageVideoOutputState
+import com.tange.ai.tirtc.TiCloudStorageVideoOutputStateListener
 import java.io.File
 import kotlin.concurrent.thread
 
@@ -39,7 +39,7 @@ internal fun copyPathToGallery(
     isVideo: Boolean,
 ): Int {
     val source = File(sourcePath)
-    if (!source.isFile) return TiStoreErrorCode.FILE_WRITE_FAILED
+    if (!source.isFile) return TiCloudStorageErrorCode.FILE_WRITE_FAILED
     val resolver = context.contentResolver
     val collection =
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -66,7 +66,7 @@ internal fun copyPathToGallery(
             }
         }
     return try {
-        val uri = resolver.insert(collection, values) ?: return TiStoreErrorCode.FILE_WRITE_FAILED
+        val uri = resolver.insert(collection, values) ?: return TiCloudStorageErrorCode.FILE_WRITE_FAILED
         try {
             resolver.openOutputStream(uri)?.use { output -> source.inputStream().use { it.copyTo(output) } }
                 ?: throw IllegalStateException("gallery output unavailable")
@@ -78,30 +78,30 @@ internal fun copyPathToGallery(
                     null,
                 )
             }
-            TiStoreErrorCode.OK
+            TiCloudStorageErrorCode.OK
         } catch (_: Throwable) {
             resolver.delete(uri, null, null)
-            TiStoreErrorCode.FILE_WRITE_FAILED
+            TiCloudStorageErrorCode.FILE_WRITE_FAILED
         }
     } catch (_: Throwable) {
-        TiStoreErrorCode.FILE_WRITE_FAILED
+        TiCloudStorageErrorCode.FILE_WRITE_FAILED
     }
 }
 
-/** Public-SDK-only TiStore flow used by the Android Example. */
-internal class TiStoreExampleFlow {
+/** Public-SDK-only Ti Cloud Storage flow used by the Android Example. */
+internal class TiCloudStorageExampleFlow {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var context: Context? = null
     private var initialized = false
-    private var store: TiStore? = null
-    private var replay: TiStoreReplay? = null
-    private var audio: TiStoreAudioOutput? = null
-    private var video: TiStoreVideoOutput? = null
-    private var recordingTask: TiStoreRecordingTask? = null
-    private var exportTask: TiStoreExportTask? = null
+    private var cloudStorage: TiCloudStorage? = null
+    private var replay: TiCloudStorageReplay? = null
+    private var audio: TiCloudStorageAudioOutput? = null
+    private var video: TiCloudStorageVideoOutput? = null
+    private var recordingTask: TiCloudStorageRecordingTask? = null
+    private var exportTask: TiCloudStorageExportTask? = null
     private var latestMedia: OwnedMedia? = null
     private val ownedMedia = mutableListOf<OwnedMedia>()
-    private var cleanupError = TiStoreErrorCode.OK
+    private var cleanupError = TiCloudStorageErrorCode.OK
     private var pendingOperations = 0
     private var closing = false
     private var closeDeadlineMs = 0L
@@ -113,16 +113,16 @@ internal class TiStoreExampleFlow {
         private set
     var onTimeChanged: ((Long) -> Unit)? = null
     var onReplayCompleted: (() -> Unit)? = null
-    var onVideoStateChanged: ((TiStoreVideoOutputState) -> Unit)? = null
-    var onAudioStateChanged: ((TiStoreAudioOutputState) -> Unit)? = null
+    var onVideoStateChanged: ((TiCloudStorageVideoOutputState) -> Unit)? = null
+    var onAudioStateChanged: ((TiCloudStorageAudioOutputState) -> Unit)? = null
     var onError: ((Int) -> Unit)? = null
 
     val currentTimeMs: Long?
         get() = replay?.currentTimeMs
-    val speed: TiStoreReplaySpeed
-        get() = replay?.speed ?: TiStoreReplaySpeed.X1
-    val videoState: TiStoreVideoOutputState
-        get() = video?.state ?: TiStoreVideoOutputState.IDLE
+    val speed: TiCloudStorageReplaySpeed
+        get() = replay?.speed ?: TiCloudStorageReplaySpeed.X1
+    val videoState: TiCloudStorageVideoOutputState
+        get() = video?.state ?: TiCloudStorageVideoOutputState.IDLE
     val isRecording: Boolean
         get() = recordingTask != null
     val isExporting: Boolean
@@ -136,70 +136,70 @@ internal class TiStoreExampleFlow {
         endpoint: String,
         token: String,
     ): Int {
-        if (closing || initialized) return TiStoreErrorCode.IN_USE
-        val code = TiStore.init(context, appId, endpoint)
-        if (code != TiStoreErrorCode.OK) return code
+        if (closing || initialized) return TiCloudStorageErrorCode.IN_USE
+        val code = TiCloudStorage.init(context, appId, endpoint)
+        if (code != TiCloudStorageErrorCode.OK) return code
         this.context = context.applicationContext
         initialized = true
-        store = TiStore(token)
-        return TiStoreErrorCode.OK
+        cloudStorage = TiCloudStorage(token)
+        return TiCloudStorageErrorCode.OK
     }
 
     fun query(
         startMs: Long,
         endMs: Long,
-        callback: (TiStoreRecordingRangesResult) -> Unit,
+        callback: (TiCloudStorageRecordingRangesResult) -> Unit,
     ): Int {
-        val owner = store ?: return TiStoreErrorCode.NOT_INITIALIZED
-        if (closing) return TiStoreErrorCode.IN_USE
+        val owner = cloudStorage ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
+        if (closing) return TiCloudStorageErrorCode.IN_USE
         beginOperation()
         owner.listRecordings(startMs, endMs) { result ->
             callback(result)
             endOperation()
         }
-        return TiStoreErrorCode.OK
+        return TiCloudStorageErrorCode.OK
     }
 
     fun queryDays(
         startDate: String,
         endDate: String,
         timeZoneId: String = "Asia/Shanghai",
-        callback: (TiStoreRecordingDaysResult) -> Unit,
+        callback: (TiCloudStorageRecordingDaysResult) -> Unit,
     ): Int {
-        val owner = store ?: return TiStoreErrorCode.NOT_INITIALIZED
-        if (closing) return TiStoreErrorCode.IN_USE
+        val owner = cloudStorage ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
+        if (closing) return TiCloudStorageErrorCode.IN_USE
         beginOperation()
         owner.listRecordingDays(startDate, endDate, timeZoneId) { result ->
             callback(result)
             endOperation()
         }
-        return TiStoreErrorCode.OK
+        return TiCloudStorageErrorCode.OK
     }
 
     fun play(
-        range: TiStoreRecordingRange,
+        range: TiCloudStorageRecordingRange,
         stage: ViewGroup,
         videoChannel: Int,
         audioChannel: Int,
     ): Int {
-        if (closing) return TiStoreErrorCode.IN_USE
-        val owner = store ?: return TiStoreErrorCode.NOT_INITIALIZED
+        if (closing) return TiCloudStorageErrorCode.IN_USE
+        val owner = cloudStorage ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
         var activeReplay = replay
         if (activeReplay == null) {
             activeReplay = owner.createReplay()
-            val activeVideo = TiStoreVideoOutput()
-            val activeAudio = TiStoreAudioOutput()
-            activeReplay.onTimeChanged = TiStoreTimeChangedListener { time -> onTimeChanged?.invoke(time) }
-            activeReplay.onCompleted = TiStoreReplayCompletedListener { onReplayCompleted?.invoke() }
-            activeReplay.onError = TiStoreReplayErrorListener { code -> onError?.invoke(code) }
-            activeVideo.onStateChanged = TiStoreVideoOutputStateListener { state -> onVideoStateChanged?.invoke(state) }
-            activeVideo.onError = TiStoreOutputErrorListener { code -> onError?.invoke(code) }
-            activeAudio.onStateChanged = TiStoreAudioOutputStateListener { state -> onAudioStateChanged?.invoke(state) }
-            activeAudio.onError = TiStoreOutputErrorListener { code -> onError?.invoke(code) }
+            val activeVideo = TiCloudStorageVideoOutput()
+            val activeAudio = TiCloudStorageAudioOutput()
+            activeReplay.onTimeChanged = TiCloudStorageTimeChangedListener { time -> onTimeChanged?.invoke(time) }
+            activeReplay.onCompleted = TiCloudStorageReplayCompletedListener { onReplayCompleted?.invoke() }
+            activeReplay.onError = TiCloudStorageReplayErrorListener { code -> onError?.invoke(code) }
+            activeVideo.onStateChanged = TiCloudStorageVideoOutputStateListener { state -> onVideoStateChanged?.invoke(state) }
+            activeVideo.onError = TiCloudStorageOutputErrorListener { code -> onError?.invoke(code) }
+            activeAudio.onStateChanged = TiCloudStorageAudioOutputStateListener { state -> onAudioStateChanged?.invoke(state) }
+            activeAudio.onError = TiCloudStorageOutputErrorListener { code -> onError?.invoke(code) }
             var code = activeVideo.attachView(stage)
-            if (code == TiStoreErrorCode.OK) code = activeVideo.attach(activeReplay, videoChannel)
-            if (code == TiStoreErrorCode.OK) code = activeAudio.attach(activeReplay, audioChannel)
-            if (code != TiStoreErrorCode.OK) {
+            if (code == TiCloudStorageErrorCode.OK) code = activeVideo.attach(activeReplay, videoChannel)
+            if (code == TiCloudStorageErrorCode.OK) code = activeAudio.attach(activeReplay, audioChannel)
+            if (code != TiCloudStorageErrorCode.OK) {
                 activeAudio.detach()
                 activeVideo.detach()
                 activeVideo.detachView()
@@ -213,53 +213,53 @@ internal class TiStoreExampleFlow {
             audio = activeAudio
         }
         val code = activeReplay.play(range.startTimeMs, range.endTimeMs)
-        if (code == TiStoreErrorCode.OK) paused = false
+        if (code == TiCloudStorageErrorCode.OK) paused = false
         return code
     }
 
     fun pause(): Int {
-        val active = replay ?: return TiStoreErrorCode.NOT_STARTED
+        val active = replay ?: return TiCloudStorageErrorCode.NOT_STARTED
         return active.pause().also { code ->
-            if (code == TiStoreErrorCode.OK) paused = true
+            if (code == TiCloudStorageErrorCode.OK) paused = true
         }
     }
 
     fun resume(): Int {
-        val active = replay ?: return TiStoreErrorCode.NOT_STARTED
+        val active = replay ?: return TiCloudStorageErrorCode.NOT_STARTED
         return active.resume().also { code ->
-            if (code == TiStoreErrorCode.OK) paused = false
+            if (code == TiCloudStorageErrorCode.OK) paused = false
         }
     }
 
-    fun seek(timeMs: Long): Int = replay?.seek(timeMs) ?: TiStoreErrorCode.NOT_STARTED
+    fun seek(timeMs: Long): Int = replay?.seek(timeMs) ?: TiCloudStorageErrorCode.NOT_STARTED
 
-    fun setSpeed(next: TiStoreReplaySpeed): Int = replay?.setSpeed(next) ?: TiStoreErrorCode.NOT_STARTED
+    fun setSpeed(next: TiCloudStorageReplaySpeed): Int = replay?.setSpeed(next) ?: TiCloudStorageErrorCode.NOT_STARTED
 
     fun toggleMute(): Int {
-        val output = audio ?: return TiStoreErrorCode.NOT_STARTED
+        val output = audio ?: return TiCloudStorageErrorCode.NOT_STARTED
         val next = !muted
         return output.setVolume(if (next) 0 else 100).also { code ->
-            if (code == TiStoreErrorCode.OK) muted = next
+            if (code == TiCloudStorageErrorCode.OK) muted = next
         }
     }
 
     fun takeSnapshot(callback: (Int, String?) -> Unit): Int {
-        val output = video ?: return TiStoreErrorCode.NOT_STARTED
-        if (closing) return TiStoreErrorCode.IN_USE
+        val output = video ?: return TiCloudStorageErrorCode.NOT_STARTED
+        if (closing) return TiCloudStorageErrorCode.IN_USE
         beginOperation()
         output.takeSnapshot { result ->
             val file = result.file
-            if (result.code != TiStoreErrorCode.OK || file == null) {
+            if (result.code != TiCloudStorageErrorCode.OK || file == null) {
                 callback(result.code, null)
                 endOperation()
                 return@takeSnapshot
             }
             replaceLatest(SnapshotMedia(file)) { code ->
-                callback(code, if (code == TiStoreErrorCode.OK) file.path else null)
+                callback(code, if (code == TiCloudStorageErrorCode.OK) file.path else null)
                 endOperation()
             }
         }
-        return TiStoreErrorCode.OK
+        return TiCloudStorageErrorCode.OK
     }
 
     fun toggleRecording(
@@ -269,18 +269,18 @@ internal class TiStoreExampleFlow {
     ): Int {
         val active = recordingTask
         if (active == null) {
-            val activeReplay = replay ?: return TiStoreErrorCode.NOT_STARTED
-            if (closing) return TiStoreErrorCode.IN_USE
+            val activeReplay = replay ?: return TiCloudStorageErrorCode.NOT_STARTED
+            if (closing) return TiCloudStorageErrorCode.IN_USE
             val result = activeReplay.startRecording(videoChannel, audioChannel)
-            if (result.code == TiStoreErrorCode.OK) recordingTask = result.task
-            callback(result.code == TiStoreErrorCode.OK, result.code, null)
+            if (result.code == TiCloudStorageErrorCode.OK) recordingTask = result.task
+            callback(result.code == TiCloudStorageErrorCode.OK, result.code, null)
             return result.code
         }
         recordingTask = null
         beginOperation()
         active.stop { result ->
             val file = result.file
-            if (result.code != TiStoreErrorCode.OK || file == null) {
+            if (result.code != TiCloudStorageErrorCode.OK || file == null) {
                 callback(false, result.code, null)
                 endOperation()
                 return@stop
@@ -292,32 +292,32 @@ internal class TiStoreExampleFlow {
                 }
             } else {
                 replaceLatest(RecordingMedia(file)) { code ->
-                    callback(false, code, if (code == TiStoreErrorCode.OK) file.path else null)
+                    callback(false, code, if (code == TiCloudStorageErrorCode.OK) file.path else null)
                     endOperation()
                 }
             }
         }
-        return TiStoreErrorCode.OK
+        return TiCloudStorageErrorCode.OK
     }
 
     fun export(
-        range: TiStoreRecordingRange,
+        range: TiCloudStorageRecordingRange,
         videoChannel: Int,
         audioChannel: Int,
         onProgress: (Double) -> Unit,
         callback: (Int, String?) -> Unit,
     ): Int {
-        val owner = store ?: return TiStoreErrorCode.NOT_INITIALIZED
-        if (closing || exportTask != null) return TiStoreErrorCode.IN_USE
+        val owner = cloudStorage ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
+        if (closing || exportTask != null) return TiCloudStorageErrorCode.IN_USE
         beginOperation()
         val started =
             owner.exportRecording(
-                TiStoreExportRequest(range.startTimeMs, range.endTimeMs, videoChannel, audioChannel),
+                TiCloudStorageExportRequest(range.startTimeMs, range.endTimeMs, videoChannel, audioChannel),
                 { progress -> onProgress(progress) },
             ) { result ->
                 exportTask = null
                 val file = result.file
-                if (result.code != TiStoreErrorCode.OK || file == null) {
+                if (result.code != TiCloudStorageErrorCode.OK || file == null) {
                     callback(result.code, null)
                     endOperation()
                     return@exportRecording
@@ -329,13 +329,13 @@ internal class TiStoreExampleFlow {
                     }
                 } else {
                     replaceLatest(RecordingMedia(file)) { code ->
-                        callback(code, if (code == TiStoreErrorCode.OK) file.path else null)
+                        callback(code, if (code == TiCloudStorageErrorCode.OK) file.path else null)
                         endOperation()
                     }
                 }
             }
         exportTask = started.task
-        if (started.code != TiStoreErrorCode.OK || started.task == null) {
+        if (started.code != TiCloudStorageErrorCode.OK || started.task == null) {
             exportTask = null
             endOperation()
         }
@@ -343,20 +343,20 @@ internal class TiStoreExampleFlow {
     }
 
     fun saveLatestToGallery(callback: (Int) -> Unit): Int {
-        val ownerContext = context ?: return TiStoreErrorCode.NOT_INITIALIZED
-        val media = latestMedia ?: return TiStoreErrorCode.NOT_STARTED
-        if (closing) return TiStoreErrorCode.IN_USE
+        val ownerContext = context ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
+        val media = latestMedia ?: return TiCloudStorageErrorCode.NOT_STARTED
+        if (closing) return TiCloudStorageErrorCode.IN_USE
         beginOperation()
-        thread(name = "tistore-example-gallery", isDaemon = true) {
+        thread(name = "ti-cloud-storage-example-gallery", isDaemon = true) {
             val copyCode = copyToGallery(ownerContext, media)
             mainHandler.post {
-                if (copyCode != TiStoreErrorCode.OK) {
+                if (copyCode != TiCloudStorageErrorCode.OK) {
                     callback(copyCode)
                     endOperation()
                     return@post
                 }
                 media.delete { deleteCode ->
-                    if (deleteCode == TiStoreErrorCode.OK) {
+                    if (deleteCode == TiCloudStorageErrorCode.OK) {
                         if (latestMedia === media) latestMedia = null
                         ownedMedia.remove(media)
                     }
@@ -365,14 +365,14 @@ internal class TiStoreExampleFlow {
                 }
             }
         }
-        return TiStoreErrorCode.OK
+        return TiCloudStorageErrorCode.OK
     }
 
     fun close(callback: (Int) -> Unit = {}) {
         closeCallbacks += callback
         if (closing) return
         closing = true
-        cleanupError = TiStoreErrorCode.OK
+        cleanupError = TiCloudStorageErrorCode.OK
         closeDeadlineMs = android.os.SystemClock.uptimeMillis() + CLOSE_RETRY_MS
         val activeRecording = recordingTask
         if (activeRecording != null) {
@@ -411,11 +411,11 @@ internal class TiStoreExampleFlow {
         latestMedia = next
         if (ownedMedia.none { it.path == next.path }) ownedMedia += next
         if (previous == null || previous.path == next.path) {
-            callback(TiStoreErrorCode.OK)
+            callback(TiCloudStorageErrorCode.OK)
             return
         }
         previous.delete { code ->
-            if (code == TiStoreErrorCode.OK) ownedMedia.remove(previous)
+            if (code == TiCloudStorageErrorCode.OK) ownedMedia.remove(previous)
             callback(code)
         }
     }
@@ -428,58 +428,58 @@ internal class TiStoreExampleFlow {
             beginOperation()
             media.delete { code ->
                 ownedMedia.remove(media)
-                if (code != TiStoreErrorCode.OK) captureCleanupError(code)
+                if (code != TiCloudStorageErrorCode.OK) captureCleanupError(code)
                 endOperation()
             }
             return
         }
         val code = releaseOnce()
-        if (code == TiStoreErrorCode.IN_USE && android.os.SystemClock.uptimeMillis() < closeDeadlineMs) {
+        if (code == TiCloudStorageErrorCode.IN_USE && android.os.SystemClock.uptimeMillis() < closeDeadlineMs) {
             mainHandler.post(::continueClose)
             return
         }
-        finishClose(if (cleanupError != TiStoreErrorCode.OK) cleanupError else code)
+        finishClose(if (cleanupError != TiCloudStorageErrorCode.OK) cleanupError else code)
     }
 
     private fun captureCleanupError(code: Int) {
-        if (code != TiStoreErrorCode.OK && cleanupError == TiStoreErrorCode.OK) cleanupError = code
+        if (code != TiCloudStorageErrorCode.OK && cleanupError == TiCloudStorageErrorCode.OK) cleanupError = code
     }
 
     private fun releaseOnce(): Int {
-        var firstError = TiStoreErrorCode.OK
+        var firstError = TiCloudStorageErrorCode.OK
 
         fun capture(code: Int) {
-            if (code == TiStoreErrorCode.OK || code == TiStoreErrorCode.NOT_STARTED || code == TiStoreErrorCode.NOT_BOUND) return
-            if (firstError == TiStoreErrorCode.OK || code == TiStoreErrorCode.IN_USE) firstError = code
+            if (code == TiCloudStorageErrorCode.OK || code == TiCloudStorageErrorCode.NOT_STARTED || code == TiCloudStorageErrorCode.NOT_BOUND) return
+            if (firstError == TiCloudStorageErrorCode.OK || code == TiCloudStorageErrorCode.IN_USE) firstError = code
         }
-        capture(replay?.stop() ?: TiStoreErrorCode.OK)
-        capture(audio?.detach() ?: TiStoreErrorCode.OK)
-        capture(video?.detach() ?: TiStoreErrorCode.OK)
-        capture(video?.detachView() ?: TiStoreErrorCode.OK)
+        capture(replay?.stop() ?: TiCloudStorageErrorCode.OK)
+        capture(audio?.detach() ?: TiCloudStorageErrorCode.OK)
+        capture(video?.detach() ?: TiCloudStorageErrorCode.OK)
+        capture(video?.detachView() ?: TiCloudStorageErrorCode.OK)
         audio?.let { output ->
             val code = output.dispose()
             capture(code)
-            if (code == TiStoreErrorCode.OK) audio = null
+            if (code == TiCloudStorageErrorCode.OK) audio = null
         }
         video?.let { output ->
             val code = output.dispose()
             capture(code)
-            if (code == TiStoreErrorCode.OK) video = null
+            if (code == TiCloudStorageErrorCode.OK) video = null
         }
         replay?.let { active ->
             val code = active.dispose()
             capture(code)
-            if (code == TiStoreErrorCode.OK) replay = null
+            if (code == TiCloudStorageErrorCode.OK) replay = null
         }
-        store?.let { owner ->
+        cloudStorage?.let { owner ->
             val code = owner.dispose()
             capture(code)
-            if (code == TiStoreErrorCode.OK) store = null
+            if (code == TiCloudStorageErrorCode.OK) cloudStorage = null
         }
-        if (store == null && replay == null && audio == null && video == null && initialized) {
-            val code = TiStore.shutdown()
+        if (cloudStorage == null && replay == null && audio == null && video == null && initialized) {
+            val code = TiCloudStorage.shutdown()
             capture(code)
-            if (code == TiStoreErrorCode.OK) initialized = false
+            if (code == TiCloudStorageErrorCode.OK) initialized = false
         }
         return firstError
     }
@@ -505,11 +505,11 @@ internal class TiStoreExampleFlow {
         abstract fun delete(callback: (Int) -> Unit)
     }
 
-    private class RecordingMedia(private val file: TiStoreRecordingFile) : OwnedMedia(file.path) {
+    private class RecordingMedia(private val file: TiCloudStorageRecordingFile) : OwnedMedia(file.path) {
         override fun delete(callback: (Int) -> Unit) = file.delete { code -> callback(code) }
     }
 
-    private class SnapshotMedia(private val file: TiStoreSnapshotFile) : OwnedMedia(file.path) {
+    private class SnapshotMedia(private val file: TiCloudStorageSnapshotFile) : OwnedMedia(file.path) {
         override fun delete(callback: (Int) -> Unit) = file.delete { code -> callback(code) }
     }
 
