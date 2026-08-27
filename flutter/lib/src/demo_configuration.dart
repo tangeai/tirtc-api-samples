@@ -1,7 +1,7 @@
 export 'demo_token_acquisition.dart'
     show
         DemoScanPayload,
-        DemoStoreScanPayload,
+        DemoCloudStorageScanPayload,
         DemoTokenAcquirer,
         normalizeDemoConnectionToken,
         normalizeDemoTokenServerAddress;

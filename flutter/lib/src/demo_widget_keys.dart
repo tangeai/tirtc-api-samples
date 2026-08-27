@@ -2,34 +2,69 @@ import 'package:flutter/widgets.dart';
 
 abstract final class DemoWidgetKeys {
   static const ValueKey<String> rtcProductTab = ValueKey<String>('tirtc_example_product_tab_rtc');
-  static const ValueKey<String> storeProductTab = ValueKey<String>('tirtc_example_product_tab_store');
-  static const ValueKey<String> storeAppIdField = ValueKey<String>('tirtc_example_store_app_id_field');
-  static const ValueKey<String> storeEndpointField = ValueKey<String>('tirtc_example_store_endpoint_field');
-  static const ValueKey<String> storeTokenField = ValueKey<String>('tirtc_example_store_token_field');
-  static const ValueKey<String> storeAudioChannelField = ValueKey<String>('tirtc_example_store_audio_channel_field');
-  static const ValueKey<String> storeVideoChannelField = ValueKey<String>('tirtc_example_store_video_channel_field');
-  static const ValueKey<String> storeScanButton = ValueKey<String>('tirtc_example_store_scan_button');
-  static const ValueKey<String> storeEnterButton = ValueKey<String>('tirtc_example_store_enter_button');
-  static const ValueKey<String> storeRecordingsPage = ValueKey<String>('tirtc_example_store_recordings_page');
-  static const ValueKey<String> storeCalendarButton = ValueKey<String>('tirtc_example_store_calendar_button');
-  static const ValueKey<String> storeDatePickerButton = ValueKey<String>('tirtc_example_store_date_picker_button');
-  static const ValueKey<String> storeQueryButton = ValueKey<String>('tirtc_example_store_query_button');
-  static const ValueKey<String> storeQueryRetryButton = ValueKey<String>('tirtc_example_store_query_retry_button');
-  static const ValueKey<String> storeCalendarMonthPrevious = ValueKey<String>(
-    'tirtc_example_store_calendar_month_previous',
+  static const ValueKey<String> cloudStorageProductTab = ValueKey<String>('tirtc-example-product-tab-ti-cloud-storage');
+  static const ValueKey<String> cloudStorageAppIdField = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-app-id-field',
   );
-  static const ValueKey<String> storeCalendarMonthNext = ValueKey<String>('tirtc_example_store_calendar_month_next');
-  static const ValueKey<String> storeCalendarRetryButton = ValueKey<String>(
-    'tirtc_example_store_calendar_retry_button',
+  static const ValueKey<String> cloudStorageEndpointField = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-endpoint-field',
   );
-  static ValueKey<String> storeCalendarDay(String date) => ValueKey<String>('tirtc_example_store_calendar_day_$date');
-  static const ValueKey<String> storeSeekSlider = ValueKey<String>('tirtc_example_store_seek_slider');
-  static const ValueKey<String> storeSpeedSelector = ValueKey<String>('tirtc_example_store_speed_selector');
-  static const ValueKey<String> storePauseButton = ValueKey<String>('tirtc_example_store_pause_button');
-  static const ValueKey<String> storeRecordingButton = ValueKey<String>('tirtc_example_store_recording_button');
-  static const ValueKey<String> storeSnapshotButton = ValueKey<String>('tirtc_example_store_snapshot_button');
-  static const ValueKey<String> storeGalleryButton = ValueKey<String>('tirtc_example_store_gallery_button');
-  static const ValueKey<String> storeAudioVolumeButton = ValueKey<String>('tirtc_example_store_audio_volume_button');
+  static const ValueKey<String> cloudStorageTokenField = ValueKey<String>('tirtc-example-ti-cloud-storage-token-field');
+  static const ValueKey<String> cloudStorageAudioChannelField = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-audio-channel-field',
+  );
+  static const ValueKey<String> cloudStorageVideoChannelField = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-video-channel-field',
+  );
+  static const ValueKey<String> cloudStorageScanButton = ValueKey<String>('tirtc-example-ti-cloud-storage-scan-button');
+  static const ValueKey<String> cloudStorageEnterButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-enter-button',
+  );
+  static const ValueKey<String> cloudStorageRecordingsPage = ValueKey<String>(
+    'tirtc_example_cloud_storage_recordings_page',
+  );
+  static const ValueKey<String> cloudStorageCalendarButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-calendar-button',
+  );
+  static const ValueKey<String> cloudStorageDatePickerButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-date-picker-button',
+  );
+  static const ValueKey<String> cloudStorageQueryButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-query-button',
+  );
+  static const ValueKey<String> cloudStorageQueryRetryButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-query-retry-button',
+  );
+  static const ValueKey<String> cloudStorageCalendarMonthPrevious = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-calendar-month-previous',
+  );
+  static const ValueKey<String> cloudStorageCalendarMonthNext = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-calendar-month-next',
+  );
+  static const ValueKey<String> cloudStorageCalendarRetryButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-calendar-retry-button',
+  );
+  static ValueKey<String> cloudStorageCalendarDay(String date) =>
+      ValueKey<String>('tirtc-example-ti-cloud-storage-calendar-day_$date');
+  static const ValueKey<String> cloudStorageSeekSlider = ValueKey<String>('tirtc-example-ti-cloud-storage-seek-slider');
+  static const ValueKey<String> cloudStorageSpeedSelector = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-speed-selector',
+  );
+  static const ValueKey<String> cloudStoragePauseButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-pause-button',
+  );
+  static const ValueKey<String> cloudStorageRecordingButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-recording-button',
+  );
+  static const ValueKey<String> cloudStorageSnapshotButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-snapshot-button',
+  );
+  static const ValueKey<String> cloudStorageGalleryButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-gallery-button',
+  );
+  static const ValueKey<String> cloudStorageAudioVolumeButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-audio-volume-button',
+  );
   static const ValueKey<String> noticeDialogConfirmButton = ValueKey<String>('tirtc_example_notice_dialog_confirm');
   static const ValueKey<String> playerPage = ValueKey<String>('tirtc_example_player_page');
   static const ValueKey<String> playerCommandButton = ValueKey<String>('tirtc_example_player_command_button');
@@ -54,8 +89,8 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> configureLogUploadButton = ValueKey<String>(
     'tirtc_example_configure_log_upload_button',
   );
-  static const ValueKey<String> storeConfigureLogUploadButton = ValueKey<String>(
-    'tirtc_example_store_configure_log_upload_button',
+  static const ValueKey<String> cloudStorageConfigureLogUploadButton = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-configure-log-upload-button',
   );
   static const ValueKey<String> endpointField = ValueKey<String>('tirtc_example_endpoint_field');
   static const ValueKey<String> appIdField = ValueKey<String>('tirtc_example_app_id_field');

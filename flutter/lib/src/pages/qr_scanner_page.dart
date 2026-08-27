@@ -25,23 +25,23 @@ class DemoQrScannerPage extends StatelessWidget {
   }
 }
 
-class DemoStoreQrScannerPage extends StatelessWidget {
-  const DemoStoreQrScannerPage({super.key});
+class DemoCloudStorageQrScannerPage extends StatelessWidget {
+  const DemoCloudStorageQrScannerPage({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return DemoQrScannerPayloadPage<DemoStoreScanPayload>(
+    return DemoQrScannerPayloadPage<DemoCloudStorageScanPayload>(
       leadText: '对准 DevTools 签发的云录像客户端 Token 二维码，或整张码只有一段 Token。',
       guideText: 'JSON 会填充 app_id、token 和可选的云录像 endpoint；纯 Token 只会填充 Token。不要使用 RTC 连接码。',
       samplePayloadText:
           '{\n'
           '  "app_id": "flutter-example-app",\n'
           '  "token": "eyJhbGciOiJxxx",\n'
-          '  "endpoint": "https://store.xxx.com"\n'
+          '  "endpoint": "https://cloud-storage.xxx.com"\n'
           '}\n\n'
           '// 或只提供云录像客户端 Token\n'
           'eyJhbGciOiJxxx',
-      parsePayload: DemoStoreScanPayload.tryParse,
+      parsePayload: DemoCloudStorageScanPayload.tryParse,
       invalidPayloadText: '二维码内容无效，请使用包含 app_id、token 的 JSON，或云录像客户端 Token。不要使用 RTC 连接码。',
     );
   }

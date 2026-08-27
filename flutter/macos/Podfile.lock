@@ -3,10 +3,10 @@ PODS:
   - mobile_scanner (7.0.0):
     - Flutter
     - FlutterMacOS
-  - TiRTC (2.4.0-alpha.3)
+  - TiRTC (2.4.0-alpha.4)
   - tirtc_flutter (1.0.0):
     - FlutterMacOS
-    - TiRTC (= 2.4.0-alpha.3)
+    - TiRTC (= 2.4.0-alpha.4)
 
 DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)

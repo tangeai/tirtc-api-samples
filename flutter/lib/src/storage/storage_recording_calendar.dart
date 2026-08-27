@@ -4,8 +4,8 @@ import 'package:tirtc_flutter/tirtc_flutter.dart';
 import '../app_theme.dart';
 import '../demo_widget_keys.dart';
 
-final class DemoStoreRecordingCalendar extends StatelessWidget {
-  const DemoStoreRecordingCalendar({
+final class DemoCloudStorageRecordingCalendar extends StatelessWidget {
+  const DemoCloudStorageRecordingCalendar({
     super.key,
     required this.visibleMonth,
     required this.selectedDate,
@@ -22,7 +22,7 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
   final DateTime visibleMonth;
   final DateTime selectedDate;
   final DateTime today;
-  final List<TiStoreRecordingDay> days;
+  final List<TiCloudStorageRecordingDay> days;
   final bool loading;
   final int? errorCode;
   final VoidCallback onPreviousMonth;
@@ -39,9 +39,13 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              Text('月份查询失败 · ${TiStore.errorToString(errorCode!)} ($errorCode)'),
+              Text('月份查询失败 · ${TiCloudStorage.errorToString(errorCode!)} ($errorCode)'),
               const SizedBox(height: 12),
-              FilledButton(key: DemoWidgetKeys.storeCalendarRetryButton, onPressed: onRetry, child: const Text('重试月份')),
+              FilledButton(
+                key: DemoWidgetKeys.cloudStorageCalendarRetryButton,
+                onPressed: onRetry,
+                child: const Text('重试月份'),
+              ),
             ],
           ),
         ),
@@ -50,7 +54,7 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
     final int firstWeekday = DateTime.utc(visibleMonth.year, visibleMonth.month, 1).weekday % 7;
     final int dayCount = DateTime.utc(visibleMonth.year, visibleMonth.month + 1, 0).day;
     final Map<String, bool> availability = <String, bool>{
-      for (final TiStoreRecordingDay day in days) day.date: day.hasRecording,
+      for (final TiCloudStorageRecordingDay day in days) day.date: day.hasRecording,
     };
     final String month = _monthText(visibleMonth);
     return Padding(
@@ -61,7 +65,7 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
           Row(
             children: <Widget>[
               IconButton(
-                key: DemoWidgetKeys.storeCalendarMonthPrevious,
+                key: DemoWidgetKeys.cloudStorageCalendarMonthPrevious,
                 tooltip: '上个月',
                 onPressed: loading ? null : onPreviousMonth,
                 icon: const Icon(Icons.chevron_left),
@@ -74,7 +78,7 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
                 ),
               ),
               IconButton(
-                key: DemoWidgetKeys.storeCalendarMonthNext,
+                key: DemoWidgetKeys.cloudStorageCalendarMonthNext,
                 tooltip: '下个月',
                 onPressed: loading ? null : onNextMonth,
                 icon: const Icon(Icons.chevron_right),
@@ -127,7 +131,7 @@ final class DemoStoreRecordingCalendar extends StatelessWidget {
                 selected: selected,
                 label: '$date，${hasRecording ? '有录像' : '无录像'}${isToday ? '，今天' : ''}',
                 child: InkWell(
-                  key: DemoWidgetKeys.storeCalendarDay(date),
+                  key: DemoWidgetKeys.cloudStorageCalendarDay(date),
                   borderRadius: BorderRadius.circular(12),
                   onTap: enabled ? () => onSelectDay(dayNumber) : null,
                   child: AnimatedContainer(

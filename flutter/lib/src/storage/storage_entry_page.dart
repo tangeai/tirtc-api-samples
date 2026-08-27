@@ -9,28 +9,28 @@ import '../demo_widget_keys.dart';
 import '../pages/qr_scanner_page.dart';
 import '../widgets/configure_page_widgets.dart';
 import '../widgets/token_acquisition_section.dart';
-import 'store_configuration_store.dart';
-import 'store_recordings_page.dart';
+import 'storage_configuration.dart';
+import 'storage_recordings_page.dart';
 
-final class DemoStoreEntryPage extends StatefulWidget {
-  const DemoStoreEntryPage({
+final class DemoCloudStorageEntryPage extends StatefulWidget {
+  const DemoCloudStorageEntryPage({
     super.key,
     this.enabled = true,
     this.uploadingLogs = false,
     this.onUploadLogs,
-    this.configurationStore = const DemoStoreConfigurationStore(),
+    this.configurationPersistence = const DemoCloudStorageConfigurationPersistence(),
   });
 
   final bool enabled;
   final bool uploadingLogs;
   final VoidCallback? onUploadLogs;
-  final DemoStoreConfigurationStore configurationStore;
+  final DemoCloudStorageConfigurationPersistence configurationPersistence;
 
   @override
-  State<DemoStoreEntryPage> createState() => _DemoStoreEntryPageState();
+  State<DemoCloudStorageEntryPage> createState() => _DemoCloudStorageEntryPageState();
 }
 
-final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
+final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryPage> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
   final TextEditingController _appIdController = TextEditingController();
   final TextEditingController _endpointController = TextEditingController();
@@ -65,17 +65,17 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           TextFormField(
-            key: DemoWidgetKeys.storeAppIdField,
+            key: DemoWidgetKeys.cloudStorageAppIdField,
             controller: _appIdController,
             enabled: widget.enabled && !_loading,
             textInputAction: TextInputAction.next,
             style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(labelText: 'app_id', hintText: 'TiStore 应用标识，进入播放页前必须提供。'),
+            decoration: const InputDecoration(labelText: 'app_id', hintText: 'Ti Cloud Storage 应用标识，进入播放页前必须提供。'),
             validator: _validateAppId,
           ),
           const SizedBox(height: 16),
           TextFormField(
-            key: DemoWidgetKeys.storeEndpointField,
+            key: DemoWidgetKeys.cloudStorageEndpointField,
             controller: _endpointController,
             enabled: widget.enabled && !_loading,
             keyboardType: TextInputType.url,
@@ -90,7 +90,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
             children: <Widget>[
               Expanded(
                 child: TextFormField(
-                  key: DemoWidgetKeys.storeTokenField,
+                  key: DemoWidgetKeys.cloudStorageTokenField,
                   controller: _tokenController,
                   enabled: widget.enabled && !_loading,
                   obscureText: true,
@@ -103,9 +103,9 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
               ),
               const SizedBox(width: 10),
               ConfigureScanButton(
-                buttonKey: DemoWidgetKeys.storeScanButton,
+                buttonKey: DemoWidgetKeys.cloudStorageScanButton,
                 enabled: widget.enabled && !_loading && _scanSupported,
-                onPressed: _scanStoreToken,
+                onPressed: _scanCloudStorageToken,
               ),
             ],
           ),
@@ -114,7 +114,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
             children: <Widget>[
               Expanded(
                 child: TextFormField(
-                  key: DemoWidgetKeys.storeAudioChannelField,
+                  key: DemoWidgetKeys.cloudStorageAudioChannelField,
                   controller: _audioChannelController,
                   enabled: widget.enabled && !_loading,
                   keyboardType: TextInputType.number,
@@ -128,7 +128,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
               const SizedBox(width: 16),
               Expanded(
                 child: TextFormField(
-                  key: DemoWidgetKeys.storeVideoChannelField,
+                  key: DemoWidgetKeys.cloudStorageVideoChannelField,
                   controller: _videoChannelController,
                   enabled: widget.enabled && !_loading,
                   keyboardType: TextInputType.number,
@@ -143,8 +143,8 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
           ),
           const SizedBox(height: 20),
           FilledButton(
-            key: DemoWidgetKeys.storeEnterButton,
-            onPressed: widget.enabled && !_loading ? _enterStore : null,
+            key: DemoWidgetKeys.cloudStorageEnterButton,
+            onPressed: widget.enabled && !_loading ? _enterCloudStorage : null,
             child: const Text('播放云录像'),
           ),
           if (widget.onUploadLogs != null) ...<Widget>[
@@ -153,7 +153,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
               enabled: widget.enabled && !_loading,
               uploading: widget.uploadingLogs,
               onUpload: widget.onUploadLogs!,
-              buttonKey: DemoWidgetKeys.storeConfigureLogUploadButton,
+              buttonKey: DemoWidgetKeys.cloudStorageConfigureLogUploadButton,
             ),
           ],
         ],
@@ -162,7 +162,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
   }
 
   Future<void> _loadPersistedConfiguration() async {
-    final DemoStoreConfigurationSnapshot snapshot = await widget.configurationStore.load();
+    final DemoCloudStorageConfigurationSnapshot snapshot = await widget.configurationPersistence.load();
     if (!mounted) {
       return;
     }
@@ -175,15 +175,15 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
     });
   }
 
-  Future<void> _enterStore() async {
+  Future<void> _enterCloudStorage() async {
     setState(() {
       _submitted = true;
     });
     if (!(_formKey.currentState?.validate() ?? false)) {
       return;
     }
-    await widget.configurationStore.save(
-      DemoStoreConfigurationSnapshot(
+    await widget.configurationPersistence.save(
+      DemoCloudStorageConfigurationSnapshot(
         appId: _appIdController.text.trim(),
         endpoint: _endpointController.text.trim(),
         audioChannelId: _audioChannelController.text.trim(),
@@ -196,7 +196,7 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
     await Navigator.of(context).push<void>(
       MaterialPageRoute<void>(
         builder:
-            (BuildContext context) => DemoStoreRecordingsPage(
+            (BuildContext context) => DemoCloudStorageRecordingsPage(
               appId: _appIdController.text.trim(),
               endpoint: _endpointController.text.trim(),
               token: _tokenController.text,
@@ -209,12 +209,14 @@ final class _DemoStoreEntryPageState extends State<DemoStoreEntryPage> {
 
   bool get _scanSupported => Platform.isAndroid || Platform.isIOS;
 
-  Future<void> _scanStoreToken() async {
+  Future<void> _scanCloudStorageToken() async {
     if (!_scanSupported || !widget.enabled || _loading) {
       return;
     }
-    final DemoStoreScanPayload? payload = await Navigator.of(context).push<DemoStoreScanPayload>(
-      MaterialPageRoute<DemoStoreScanPayload>(builder: (BuildContext context) => const DemoStoreQrScannerPage()),
+    final DemoCloudStorageScanPayload? payload = await Navigator.of(context).push<DemoCloudStorageScanPayload>(
+      MaterialPageRoute<DemoCloudStorageScanPayload>(
+        builder: (BuildContext context) => const DemoCloudStorageQrScannerPage(),
+      ),
     );
     if (!mounted || payload == null) {
       return;

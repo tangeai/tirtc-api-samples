@@ -11,7 +11,7 @@ import '../demo_permissions.dart';
 import '../demo_test_hooks.dart';
 import '../settings/downlink_configuration_store.dart';
 import '../settings/demo_example_settings_store.dart';
-import '../store/store_entry_page.dart';
+import '../storage/storage_entry_page.dart';
 import '../widgets/configure_page_widgets.dart';
 import '../widgets/notice_dialog.dart';
 import 'player_page.dart';
@@ -150,7 +150,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
                               ),
                             ],
                           ),
-                          DemoStoreEntryPage(
+                          DemoCloudStorageEntryPage(
                             enabled: !runtimeBusy,
                             uploadingLogs: _uploadingLogs,
                             onUploadLogs: _uploadLogsFromConfigurePage,

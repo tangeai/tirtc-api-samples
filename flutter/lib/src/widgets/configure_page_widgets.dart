@@ -83,7 +83,7 @@ class ConfigureProductTabBar extends StatelessWidget {
                             onTap: () => controller.animateTo(0),
                           ),
                           _ConfigureProductTab(
-                            tabKey: DemoWidgetKeys.storeProductTab,
+                            tabKey: DemoWidgetKeys.cloudStorageProductTab,
                             label: '云录像',
                             selected: controller.index == 1,
                             onTap: () => controller.animateTo(1),

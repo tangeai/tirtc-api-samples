@@ -16,19 +16,19 @@ import '../pages/player_log_upload_controller.dart';
 import '../widgets/downlink_center_loading.dart';
 import '../widgets/notice_dialog.dart';
 import '../widgets/player_page_widgets.dart';
-import 'store_recording_calendar.dart';
+import 'storage_recording_calendar.dart';
 
-List<TiStoreRecordingRange> _newestFirstRecordingRanges(Iterable<TiStoreRecordingRange> ranges) {
-  final List<TiStoreRecordingRange> sorted = ranges.toList();
-  sorted.sort((TiStoreRecordingRange left, TiStoreRecordingRange right) {
+List<TiCloudStorageRecordingRange> _newestFirstRecordingRanges(Iterable<TiCloudStorageRecordingRange> ranges) {
+  final List<TiCloudStorageRecordingRange> sorted = ranges.toList();
+  sorted.sort((TiCloudStorageRecordingRange left, TiCloudStorageRecordingRange right) {
     final int startOrder = right.startTimeMs.compareTo(left.startTimeMs);
     return startOrder != 0 ? startOrder : right.endTimeMs.compareTo(left.endTimeMs);
   });
   return sorted;
 }
 
-final class DemoStoreRecordingsPage extends StatefulWidget {
-  const DemoStoreRecordingsPage({
+final class DemoCloudStorageRecordingsPage extends StatefulWidget {
+  const DemoCloudStorageRecordingsPage({
     super.key,
     required this.appId,
     required this.endpoint,
@@ -44,27 +44,27 @@ final class DemoStoreRecordingsPage extends StatefulWidget {
   final int videoChannelId;
 
   @override
-  State<DemoStoreRecordingsPage> createState() => _DemoStoreRecordingsPageState();
+  State<DemoCloudStorageRecordingsPage> createState() => _DemoCloudStorageRecordingsPageState();
 }
 
-enum _LatestStoreMedia { recording, snapshot }
+enum _LatestCloudStorageMedia { recording, snapshot }
 
-final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
-    with WidgetsBindingObserver, ExampleRouteLifecycleState<DemoStoreRecordingsPage> {
+final class _DemoCloudStorageRecordingsPageState extends State<DemoCloudStorageRecordingsPage>
+    with WidgetsBindingObserver, ExampleRouteLifecycleState<DemoCloudStorageRecordingsPage> {
   final DemoDownlinkAudioSession _audioSession = DemoDownlinkAudioSession();
-  TiStore? _store;
-  TiStoreReplay? _replay;
-  TiStoreAudioOutput? _audioOutput;
-  TiStoreVideoOutput? _videoOutput;
-  TiStoreRecordingTask? _recordingTask;
-  TiStoreExportTask? _exportTask;
-  TiStoreRecordingRange? _exportingRange;
-  TiStoreRecordingFile? _latestRecording;
-  TiStoreSnapshotFile? _latestSnapshot;
-  _LatestStoreMedia? _latestMedia;
-  List<TiStoreRecordingRange> _recordings = <TiStoreRecordingRange>[];
-  List<TiStoreRecordingDay> _recordingDays = <TiStoreRecordingDay>[];
-  TiStoreRecordingRange? _selected;
+  TiCloudStorage? _cloudStorage;
+  TiCloudStorageReplay? _replay;
+  TiCloudStorageAudioOutput? _audioOutput;
+  TiCloudStorageVideoOutput? _videoOutput;
+  TiCloudStorageRecordingTask? _recordingTask;
+  TiCloudStorageExportTask? _exportTask;
+  TiCloudStorageRecordingRange? _exportingRange;
+  TiCloudStorageRecordingFile? _latestRecording;
+  TiCloudStorageSnapshotFile? _latestSnapshot;
+  _LatestCloudStorageMedia? _latestMedia;
+  List<TiCloudStorageRecordingRange> _recordings = <TiCloudStorageRecordingRange>[];
+  List<TiCloudStorageRecordingDay> _recordingDays = <TiCloudStorageRecordingDay>[];
+  TiCloudStorageRecordingRange? _selected;
   static const String _timeZoneId = 'Asia/Shanghai';
   late final tz.Location _timeZone;
   late tz.TZDateTime _selectedDate;
@@ -140,9 +140,9 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
 
   @override
   Widget build(BuildContext context) {
-    final TiStoreRecordingRange? selected = _selected;
+    final TiCloudStorageRecordingRange? selected = _selected;
     return Scaffold(
-      key: DemoWidgetKeys.storeRecordingsPage,
+      key: DemoWidgetKeys.cloudStorageRecordingsPage,
       backgroundColor: ExampleTheme.background,
       appBar: AppBar(
         title: const Text(
@@ -151,7 +151,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         ),
         actions: <Widget>[
           IconButton(
-            key: DemoWidgetKeys.storeCalendarButton,
+            key: DemoWidgetKeys.cloudStorageCalendarButton,
             tooltip: '选择录像',
             onPressed: _initCode == 0 ? _showRecordingsSheet : null,
             icon: const Icon(Icons.calendar_month_outlined),
@@ -159,7 +159,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
           PlayerLogUploadButton(
             buttonKey: DemoWidgetKeys.playerLogUploadButton,
             uploadingLogs: _logUploadController.uploading,
-            onUploadLogs: () => _logUploadController.upload(remoteId: 'tistore'),
+            onUploadLogs: () => _logUploadController.upload(remoteId: 'ti-cloud-storage'),
           ),
         ],
       ),
@@ -204,7 +204,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     );
   }
 
-  Widget _buildSeekPanel(TiStoreRecordingRange range) {
+  Widget _buildSeekPanel(TiCloudStorageRecordingRange range) {
     final int maximum = range.endTimeMs - 1;
     final int current = (_seekPreview?.round() ?? _replay?.currentTimeMs ?? range.startTimeMs).clamp(
       range.startTimeMs,
@@ -219,20 +219,20 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
           Text(_formatClock(current), style: const TextStyle(color: Colors.white70, fontSize: 12)),
           Expanded(
             child: Slider(
-              key: DemoWidgetKeys.storeSeekSlider,
+              key: DemoWidgetKeys.cloudStorageSeekSlider,
               min: range.startTimeMs.toDouble(),
               max: maximum.toDouble(),
               value: current.toDouble(),
               onChanged: (double value) => setState(() => _seekPreview = value),
               onChangeEnd: (double value) {
-                final int code = _replay?.seek(value.round()) ?? kTiStoreErrorNotStarted;
+                final int code = _replay?.seek(value.round()) ?? kTiCloudStorageErrorNotStarted;
                 setState(() {
                   _seekPreview = null;
                   _lastCode = code == 0 ? null : code;
                 });
                 if (code == 0) {
                   DemoExampleSmokeHooks.current?.markerSink.passed(
-                    'tistore_smoke_seek_completed',
+                    'ti-cloud-storage-smoke-seek-completed',
                     payload: <String, Object?>{'time_ms': value.round()},
                   );
                 }
@@ -254,48 +254,50 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         alignment: WrapAlignment.end,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: <Widget>[
-          _StoreMediaActionButton(
-            buttonKey: DemoWidgetKeys.storeRecordingButton,
+          _CloudStorageMediaActionButton(
+            buttonKey: DemoWidgetKeys.cloudStorageRecordingButton,
             enabled: playing && !_mediaFileBusy,
             active: _recordingTask != null,
             icon: _recordingTask == null ? Icons.fiber_manual_record : Icons.stop_circle_outlined,
             label: _recordingTask == null ? '录屏' : '结束录屏',
             onPressed: _toggleRecording,
           ),
-          _StoreMediaActionButton(
-            buttonKey: DemoWidgetKeys.storeSnapshotButton,
+          _CloudStorageMediaActionButton(
+            buttonKey: DemoWidgetKeys.cloudStorageSnapshotButton,
             enabled: playing && !_mediaFileBusy,
             icon: Icons.camera_alt_outlined,
             label: '截图',
             onPressed: _snapshot,
           ),
           AudioOutputVolumeButton(
-            key: DemoWidgetKeys.storeAudioVolumeButton,
-            enabled: playing && _replay?.speed == TiStoreReplaySpeed.x1,
-            muted: _audioMuted || _replay?.speed != TiStoreReplaySpeed.x1,
+            key: DemoWidgetKeys.cloudStorageAudioVolumeButton,
+            enabled: playing && _replay?.speed == TiCloudStorageReplaySpeed.x1,
+            muted: _audioMuted || _replay?.speed != TiCloudStorageReplaySpeed.x1,
             onPressed: _toggleAudioOutputVolume,
           ),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: ExampleTheme.videoPanelDecoration,
             child: DropdownButtonHideUnderline(
-              child: DropdownButton<TiStoreReplaySpeed>(
-                key: DemoWidgetKeys.storeSpeedSelector,
-                value: _replay?.speed ?? TiStoreReplaySpeed.x1,
+              child: DropdownButton<TiCloudStorageReplaySpeed>(
+                key: DemoWidgetKeys.cloudStorageSpeedSelector,
+                value: _replay?.speed ?? TiCloudStorageReplaySpeed.x1,
                 dropdownColor: ExampleTheme.videoBackground,
                 iconEnabledColor: Colors.white,
                 style: const TextStyle(color: Colors.white),
                 items:
-                    TiStoreReplaySpeed.values
+                    TiCloudStorageReplaySpeed.values
                         .map(
-                          (TiStoreReplaySpeed speed) =>
-                              DropdownMenuItem<TiStoreReplaySpeed>(value: speed, child: Text(speed.name)),
+                          (TiCloudStorageReplaySpeed speed) => DropdownMenuItem<TiCloudStorageReplaySpeed>(
+                            value: speed,
+                            child: Text(_replaySpeedLabel(speed)),
+                          ),
                         )
                         .toList(),
                 onChanged:
                     !playing
                         ? null
-                        : (TiStoreReplaySpeed? speed) {
+                        : (TiCloudStorageReplaySpeed? speed) {
                           if (speed == null) return;
                           unawaited(_setReplaySpeed(speed));
                         },
@@ -303,7 +305,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
             ),
           ),
           FilledButton.icon(
-            key: DemoWidgetKeys.storePauseButton,
+            key: DemoWidgetKeys.cloudStoragePauseButton,
             onPressed: playing ? _togglePause : null,
             icon: Icon(_paused ? Icons.play_circle_fill_rounded : Icons.pause_circle_filled_rounded),
             label: Text(_paused ? '继续播放' : '暂停播放'),
@@ -314,14 +316,14 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _initialize() async {
-    final int code = await TiStore.init(appId: widget.appId, endpoint: widget.endpoint);
+    final int code = await TiCloudStorage.init(appId: widget.appId, endpoint: widget.endpoint);
     if (!_canUpdateUi) {
-      if (code == 0) TiStore.shutdown();
+      if (code == 0) TiCloudStorage.shutdown();
       return;
     }
     setState(() {
       _initCode = code;
-      if (code == 0) _store = TiStore(token: widget.token);
+      if (code == 0) _cloudStorage = TiCloudStorage(token: widget.token);
     });
     if (code == 0) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -341,8 +343,8 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _runMonthQuery() async {
-    final TiStore? store = _store;
-    if (store == null) return;
+    final TiCloudStorage? cloudStorage = _cloudStorage;
+    if (cloudStorage == null) return;
     final int generation = ++_calendarGeneration;
     final int lastDay = DateTime.utc(_visibleMonth.year, _visibleMonth.month + 1, 0).day;
     final String startDate = _dateText(_visibleMonth.year, _visibleMonth.month, 1);
@@ -350,10 +352,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     setState(() {
       _calendarQuerying = true;
       _calendarCode = null;
-      _recordingDays = <TiStoreRecordingDay>[];
+      _recordingDays = <TiCloudStorageRecordingDay>[];
     });
     _refreshSheet();
-    final Resp<List<TiStoreRecordingDay>> result = await store.listRecordingDays(
+    final Resp<List<TiCloudStorageRecordingDay>> result = await cloudStorage.listRecordingDays(
       startDate: startDate,
       endDate: endDate,
       timeZoneId: _timeZoneId,
@@ -362,15 +364,15 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     setState(() {
       _calendarQuerying = false;
       _calendarCode = result.code;
-      _recordingDays = result.data ?? <TiStoreRecordingDay>[];
+      _recordingDays = result.data ?? <TiCloudStorageRecordingDay>[];
     });
     _refreshSheet();
     DemoExampleSmokeHooks.current?.markerSink.passed(
-      'tistore_smoke_recording_days_completed',
+      'ti-cloud-storage-smoke-recording-days-completed',
       payload: <String, Object?>{
-        'code': result.success ? kTiStoreErrorOk : result.code ?? kTiStoreErrorIoFailed,
+        'code': result.success ? kTiCloudStorageErrorOk : result.code ?? kTiCloudStorageErrorIoFailed,
         'month': _monthText(_visibleMonth),
-        'available_day_count': _recordingDays.where((TiStoreRecordingDay day) => day.hasRecording).length,
+        'available_day_count': _recordingDays.where((TiCloudStorageRecordingDay day) => day.hasRecording).length,
       },
     );
   }
@@ -399,30 +401,30 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _runQuery(int generation) async {
-    final TiStore? store = _store;
-    if (store == null) return;
+    final TiCloudStorage? cloudStorage = _cloudStorage;
+    if (cloudStorage == null) return;
     final ({int start, int end}) bounds = _selectedDayBounds;
     setState(() {
       _querying = true;
       _queryCode = null;
-      _recordings = <TiStoreRecordingRange>[];
+      _recordings = <TiCloudStorageRecordingRange>[];
     });
     _refreshSheet();
-    final Resp<List<TiStoreRecordingRange>> result = await store.listRecordings(
+    final Resp<List<TiCloudStorageRecordingRange>> result = await cloudStorage.listRecordings(
       startTimeMs: bounds.start,
       endTimeMs: bounds.end,
     );
     if (!_canUpdateUi || generation != _queryGeneration) return;
     setState(() {
       _querying = false;
-      _recordings = _newestFirstRecordingRanges(result.data ?? <TiStoreRecordingRange>[]);
+      _recordings = _newestFirstRecordingRanges(result.data ?? <TiCloudStorageRecordingRange>[]);
       _queryCode = result.code;
     });
     _refreshSheet();
     DemoExampleSmokeHooks.current?.markerSink.passed(
-      'tistore_smoke_query_completed',
+      'ti-cloud-storage-smoke-query-completed',
       payload: <String, Object?>{
-        'code': result.success ? kTiStoreErrorOk : result.code ?? kTiStoreErrorIoFailed,
+        'code': result.success ? kTiCloudStorageErrorOk : result.code ?? kTiCloudStorageErrorIoFailed,
         'recording_count': result.data?.length ?? 0,
         'start_time_ms': bounds.start,
         'end_time_ms': bounds.end,
@@ -430,62 +432,62 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     );
   }
 
-  Future<void> _play(TiStoreRecordingRange range) async {
+  Future<void> _play(TiCloudStorageRecordingRange range) async {
     await _stopActiveRecording(keepFile: true);
     if (!_canUpdateUi) return;
 
-    TiStoreReplay? replay = _replay;
+    TiCloudStorageReplay? replay = _replay;
     if (replay == null) {
-      final TiStore? store = _store;
-      if (store == null) return;
+      final TiCloudStorage? cloudStorage = _cloudStorage;
+      if (cloudStorage == null) return;
       final int audioSessionCode = await _audioSession.retainIfNeeded();
       if (!_canUpdateUi) {
-        _audioSession.releaseIfNeeded(reason: 'store_page_unmounted');
+        _audioSession.releaseIfNeeded(reason: 'cloud_storage_page_unmounted');
         return;
       }
-      if (audioSessionCode != kTiStoreErrorOk) {
+      if (audioSessionCode != kTiCloudStorageErrorOk) {
         setState(() => _lastCode = audioSessionCode);
-        _reportSmokeFailure('tistore_audio_session', audioSessionCode);
+        _reportSmokeFailure('ti-cloud-storage-audio-session', audioSessionCode);
         return;
       }
-      replay = store.createReplay();
-      final TiStoreAudioOutput audio = TiStoreAudioOutput();
-      final TiStoreVideoOutput video = TiStoreVideoOutput();
+      replay = cloudStorage.createReplay();
+      final TiCloudStorageAudioOutput audio = TiCloudStorageAudioOutput();
+      final TiCloudStorageVideoOutput video = TiCloudStorageVideoOutput();
       replay.onTimeChanged = (_) {
         if (_canUpdateUi) setState(() {});
       };
       replay.onError = (int code) {
         if (!_canUpdateUi) return;
         setState(() => _lastCode = code);
-        _reportSmokeFailure('tistore_replay', code);
+        _reportSmokeFailure('ti-cloud-storage-replay', code);
       };
       replay.onCompleted = () {
         if (_canUpdateUi) {
           setState(() {});
           DemoExampleSmokeHooks.current?.markerSink.passed(
-            'tistore_smoke_replay_completed',
+            'ti-cloud-storage-smoke-replay-completed',
             payload: <String, Object?>{'time_ms': replay?.currentTimeMs ?? 0},
           );
         }
       };
-      video.onStateChanged = (TiStoreVideoOutputState state) {
+      video.onStateChanged = (TiCloudStorageVideoOutputState state) {
         if (!_canUpdateUi) return;
         setState(() {});
         DemoExampleSmokeHooks.current?.markerSink.passed(
-          'tistore_smoke_video_state',
+          'ti-cloud-storage-smoke-video-state',
           payload: <String, Object?>{'state': state.name},
         );
-        if (video.state == TiStoreVideoOutputState.rendering) {
+        if (video.state == TiCloudStorageVideoOutputState.rendering) {
           final Size? size = video.renderSize;
           DemoExampleSmokeHooks.current?.markerSink.passed(
-            'tistore_smoke_video_rendering',
+            'ti-cloud-storage-smoke-video-rendering',
             payload: <String, Object?>{'width': size?.width.round() ?? 0, 'height': size?.height.round() ?? 0},
           );
         }
       };
       video.onRenderSizeChanged = (Size size) {
         DemoExampleSmokeHooks.current?.markerSink.passed(
-          'tistore_smoke_video_size',
+          'ti-cloud-storage-smoke-video-size',
           payload: <String, Object?>{'width': size.width.round(), 'height': size.height.round()},
         );
       };
@@ -505,9 +507,9 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         audio.dispose();
         video.dispose();
         replay.dispose();
-        _audioSession.releaseIfNeeded(reason: 'store_output_attach_failed');
+        _audioSession.releaseIfNeeded(reason: 'cloud_storage_output_attach_failed');
         setState(() => _lastCode = code);
-        _reportSmokeFailure('tistore_play_attach', code);
+        _reportSmokeFailure('ti-cloud-storage-play-attach', code);
         return;
       }
       _replay = replay;
@@ -528,11 +530,11 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     });
     if (code == 0) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_play_started',
+        'ti-cloud-storage-smoke-play-started',
         payload: <String, Object?>{'start_time_ms': range.startTimeMs, 'end_time_ms': range.endTimeMs},
       );
     } else {
-      _reportSmokeFailure('tistore_play', code);
+      _reportSmokeFailure('ti-cloud-storage-play', code);
     }
   }
 
@@ -543,7 +545,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       if (_canUpdateUi) setState(() => _mediaFileBusy = false);
       return;
     }
-    final Resp<TiStoreRecordingTask>? result = _replay?.startRecording(
+    final Resp<TiCloudStorageRecordingTask>? result = _replay?.startRecording(
       videoChannelId: widget.videoChannelId,
       audioChannelId: widget.audioChannelId,
     );
@@ -553,44 +555,44 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       _lastCode = result?.code;
     });
     if (result?.success == true) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_recording_started');
+      DemoExampleSmokeHooks.current?.markerSink.passed('ti-cloud-storage-smoke-recording-started');
     } else {
-      _reportSmokeFailure('tistore_recording_start', result?.code);
+      _reportSmokeFailure('ti-cloud-storage-recording-start', result?.code);
     }
   }
 
   Future<int> _stopActiveRecording({required bool keepFile}) async {
-    final TiStoreRecordingTask? task = _recordingTask;
-    if (task == null) return kTiStoreErrorOk;
+    final TiCloudStorageRecordingTask? task = _recordingTask;
+    if (task == null) return kTiCloudStorageErrorOk;
     _recordingTask = null;
     if (_canUpdateUi) setState(() {});
-    final Resp<TiStoreRecordingFile> result = await task.stop();
-    final TiStoreRecordingFile? file = result.data;
+    final Resp<TiCloudStorageRecordingFile> result = await task.stop();
+    final TiCloudStorageRecordingFile? file = result.data;
     if (!keepFile || !_canUpdateUi) {
-      final int deleteCode = await file?.delete() ?? kTiStoreErrorOk;
-      return _firstError(result.code ?? kTiStoreErrorOk, deleteCode);
+      final int deleteCode = await file?.delete() ?? kTiCloudStorageErrorOk;
+      return _firstError(result.code ?? kTiCloudStorageErrorOk, deleteCode);
     }
     if (file != null) await _replaceLatestRecording(file);
-    if (!_canUpdateUi) return result.code ?? kTiStoreErrorOk;
+    if (!_canUpdateUi) return result.code ?? kTiCloudStorageErrorOk;
     setState(() => _lastCode = result.code);
     if (result.success && file != null) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_recording_completed',
+        'ti-cloud-storage-smoke-recording-completed',
         payload: <String, Object?>{'duration_ms': file.duration.inMilliseconds},
       );
       await _saveLatestMediaToGallery();
     } else {
-      _reportSmokeFailure('tistore_recording_stop', result.code);
+      _reportSmokeFailure('ti-cloud-storage-recording-stop', result.code);
     }
-    return result.code ?? kTiStoreErrorOk;
+    return result.code ?? kTiCloudStorageErrorOk;
   }
 
-  Future<void> _export(TiStoreRecordingRange range) async {
-    final TiStore? store = _store;
-    if (store == null || _exportTask != null || _exportingRange != null) return;
+  Future<void> _export(TiCloudStorageRecordingRange range) async {
+    final TiCloudStorage? cloudStorage = _cloudStorage;
+    if (cloudStorage == null || _exportTask != null || _exportingRange != null) return;
     setState(() => _exportingRange = range);
     _refreshSheet();
-    final Resp<TiStoreExportTask> started = store.exportRecording(
+    final Resp<TiCloudStorageExportTask> started = cloudStorage.exportRecording(
       startTimeMs: range.startTimeMs,
       endTimeMs: range.endTimeMs,
       videoChannelId: widget.videoChannelId,
@@ -612,12 +614,12 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       _lastCode = started.code;
     });
     if (started.success) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_export_started');
+      DemoExampleSmokeHooks.current?.markerSink.passed('ti-cloud-storage-smoke-export-started');
     } else {
-      _reportSmokeFailure('tistore_export_start', started.code);
+      _reportSmokeFailure('ti-cloud-storage-export-start', started.code);
     }
     _refreshSheet();
-    final Resp<TiStoreRecordingFile>? result = await started.data?.result;
+    final Resp<TiCloudStorageRecordingFile>? result = await started.data?.result;
     if (result == null) {
       if (_canUpdateUi) {
         setState(() {
@@ -628,7 +630,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       }
       return;
     }
-    final TiStoreRecordingFile? file = result.data;
+    final TiCloudStorageRecordingFile? file = result.data;
     if (!_canUpdateUi) {
       await file?.delete();
       return;
@@ -642,19 +644,19 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     if (file != null) await _replaceLatestRecording(file);
     if (result.success && file != null) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_export_completed',
+        'ti-cloud-storage-smoke-export-completed',
         payload: <String, Object?>{'duration_ms': file.duration.inMilliseconds},
       );
       await _saveLatestMediaToGallery();
     } else {
-      _reportSmokeFailure('tistore_export', result.code);
+      _reportSmokeFailure('ti-cloud-storage-export', result.code);
     }
   }
 
   Future<void> _snapshot() async {
     setState(() => _mediaFileBusy = true);
-    DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_snapshot_started');
-    final Resp<TiStoreSnapshotFile>? result = await _videoOutput?.takeSnapshot();
+    DemoExampleSmokeHooks.current?.markerSink.passed('ti-cloud-storage-smoke-snapshot-started');
+    final Resp<TiCloudStorageSnapshotFile>? result = await _videoOutput?.takeSnapshot();
     if (!_canUpdateUi || result == null) {
       await result?.data?.delete();
       if (_canUpdateUi) setState(() => _mediaFileBusy = false);
@@ -664,10 +666,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     if (!_canUpdateUi) return;
     setState(() => _lastCode = result.code);
     if (result.success && result.data != null) {
-      DemoExampleSmokeHooks.current?.markerSink.passed('tistore_smoke_snapshot_completed');
+      DemoExampleSmokeHooks.current?.markerSink.passed('ti-cloud-storage-smoke-snapshot-completed');
       await _saveLatestMediaToGallery();
     } else {
-      _reportSmokeFailure('tistore_snapshot', result.code);
+      _reportSmokeFailure('ti-cloud-storage-snapshot', result.code);
     }
     if (_canUpdateUi) setState(() => _mediaFileBusy = false);
   }
@@ -678,21 +680,22 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       if (_canUpdateUi) {
         _showMessage('保存失败 · 未获得相册写入权限');
       }
-      _reportSmokeFailure('tistore_gallery_permission', kTiStoreErrorPermissionDenied);
+      _reportSmokeFailure('ti-cloud-storage-gallery-permission', kTiCloudStorageErrorPermissionDenied);
       return;
     }
-    final _LatestStoreMedia kind = _latestMedia!;
-    final String sourcePath = kind == _LatestStoreMedia.recording ? _latestRecording!.path : _latestSnapshot!.path;
-    final String fileName = demoGalleryFileName(kind == _LatestStoreMedia.recording ? 'mp4' : 'jpg');
-    final Resp<TiStoreGalleryAsset> result =
-        kind == _LatestStoreMedia.recording
+    final _LatestCloudStorageMedia kind = _latestMedia!;
+    final String sourcePath =
+        kind == _LatestCloudStorageMedia.recording ? _latestRecording!.path : _latestSnapshot!.path;
+    final String fileName = demoGalleryFileName(kind == _LatestCloudStorageMedia.recording ? 'mp4' : 'jpg');
+    final Resp<TiCloudStorageGalleryAsset> result =
+        kind == _LatestCloudStorageMedia.recording
             ? await _latestRecording!.moveToGallery(fileName: fileName)
             : await _latestSnapshot!.moveToGallery(fileName: fileName);
     if (!_canUpdateUi) return;
     setState(() {
       _lastCode = result.code;
       if (result.success) {
-        if (kind == _LatestStoreMedia.recording) {
+        if (kind == _LatestCloudStorageMedia.recording) {
           _latestRecording = null;
         } else {
           _latestSnapshot = null;
@@ -702,7 +705,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     });
     if (result.success && result.data != null) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_gallery_saved',
+        'ti-cloud-storage-smoke-gallery-saved',
         payload: <String, Object?>{
           'uri': result.data!.uri.toString(),
           'file_name': fileName,
@@ -710,27 +713,27 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         },
       );
     } else {
-      _reportSmokeFailure('tistore_gallery', result.code);
+      _reportSmokeFailure('ti-cloud-storage-gallery', result.code);
     }
-    _showMessage(result.success ? '已保存到系统相册' : '保存失败 · ${TiStore.errorToString(result.code ?? 0)}');
+    _showMessage(result.success ? '已保存到系统相册' : '保存失败 · ${TiCloudStorage.errorToString(result.code ?? 0)}');
   }
 
-  Future<void> _replaceLatestRecording(TiStoreRecordingFile file) async {
-    final TiStoreRecordingFile? previous = _latestRecording;
-    final TiStoreSnapshotFile? other = _latestSnapshot;
+  Future<void> _replaceLatestRecording(TiCloudStorageRecordingFile file) async {
+    final TiCloudStorageRecordingFile? previous = _latestRecording;
+    final TiCloudStorageSnapshotFile? other = _latestSnapshot;
     _latestRecording = file;
     _latestSnapshot = null;
-    _latestMedia = _LatestStoreMedia.recording;
+    _latestMedia = _LatestCloudStorageMedia.recording;
     if (previous != null && previous.path != file.path) await previous.delete();
     await other?.delete();
   }
 
-  Future<void> _replaceLatestSnapshot(TiStoreSnapshotFile file) async {
-    final TiStoreSnapshotFile? previous = _latestSnapshot;
-    final TiStoreRecordingFile? other = _latestRecording;
+  Future<void> _replaceLatestSnapshot(TiCloudStorageSnapshotFile file) async {
+    final TiCloudStorageSnapshotFile? previous = _latestSnapshot;
+    final TiCloudStorageRecordingFile? other = _latestRecording;
     _latestSnapshot = file;
     _latestRecording = null;
-    _latestMedia = _LatestStoreMedia.snapshot;
+    _latestMedia = _LatestCloudStorageMedia.snapshot;
     if (previous != null && previous.path != file.path) await previous.delete();
     await other?.delete();
   }
@@ -738,7 +741,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   Future<int> _retryReplayAction(int Function() action) async {
     final Stopwatch deadline = Stopwatch()..start();
     int code = action();
-    while (code == kTiStoreErrorInUse && deadline.elapsed < const Duration(seconds: 2)) {
+    while (code == kTiCloudStorageErrorInUse && deadline.elapsed < const Duration(seconds: 2)) {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       code = action();
     }
@@ -746,7 +749,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _pauseForLifecycle() async {
-    final int code = await _retryReplayAction(() => _replay?.pause() ?? kTiStoreErrorNotStarted);
+    final int code = await _retryReplayAction(() => _replay?.pause() ?? kTiCloudStorageErrorNotStarted);
     if (!_canUpdateUi) return;
     setState(() {
       if (code == 0) {
@@ -760,7 +763,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   Future<void> _resumeFromLifecycle() async {
-    final int code = await _retryReplayAction(() => _replay?.resume() ?? kTiStoreErrorNotStarted);
+    final int code = await _retryReplayAction(() => _replay?.resume() ?? kTiCloudStorageErrorNotStarted);
     if (!_canUpdateUi) return;
     setState(() {
       _pausedByLifecycle = false;
@@ -773,19 +776,29 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     });
   }
 
-  Future<void> _setReplaySpeed(TiStoreReplaySpeed speed) async {
-    final int code = _replay?.setSpeed(speed) ?? kTiStoreErrorNotStarted;
+  Future<void> _setReplaySpeed(TiCloudStorageReplaySpeed speed) async {
+    final int code = _replay?.setSpeed(speed) ?? kTiCloudStorageErrorNotStarted;
     if (!_canUpdateUi) return;
     setState(() {
       _lastCode = code == 0 ? null : code;
     });
     if (code == 0) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_speed_changed',
+        'ti-cloud-storage-smoke-speed-changed',
         payload: <String, Object?>{'speed': speed.name},
       );
     }
   }
+
+  String _replaySpeedLabel(TiCloudStorageReplaySpeed speed) => switch (speed) {
+    TiCloudStorageReplaySpeed.x0_125 => '1/8×',
+    TiCloudStorageReplaySpeed.x0_25 => '1/4×',
+    TiCloudStorageReplaySpeed.x0_5 => '1/2×',
+    TiCloudStorageReplaySpeed.x1 => '1×',
+    TiCloudStorageReplaySpeed.x2 => '2×',
+    TiCloudStorageReplaySpeed.x4 => '4×',
+    TiCloudStorageReplaySpeed.x8 => '8×',
+  };
 
   void _togglePause() {
     unawaited(_togglePauseAsync());
@@ -794,7 +807,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   Future<void> _togglePauseAsync() async {
     final bool resume = _paused;
     final int code = await _retryReplayAction(
-      () => resume ? _replay?.resume() ?? kTiStoreErrorNotStarted : _replay?.pause() ?? kTiStoreErrorNotStarted,
+      () =>
+          resume
+              ? _replay?.resume() ?? kTiCloudStorageErrorNotStarted
+              : _replay?.pause() ?? kTiCloudStorageErrorNotStarted,
     );
     if (!_canUpdateUi) return;
     setState(() {
@@ -806,7 +822,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     });
     if (code == 0) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_pause_changed',
+        'ti-cloud-storage-smoke-pause-changed',
         payload: <String, Object?>{'paused': _paused},
       );
     }
@@ -814,14 +830,14 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
 
   void _toggleAudioOutputVolume() {
     final bool nextMuted = !_audioMuted;
-    final int code = _audioOutput?.setVolume(nextMuted ? 0 : 100) ?? kTiStoreErrorNotStarted;
+    final int code = _audioOutput?.setVolume(nextMuted ? 0 : 100) ?? kTiCloudStorageErrorNotStarted;
     setState(() {
       if (code == 0) _audioMuted = nextMuted;
       _lastCode = code == 0 ? null : code;
     });
     if (code == 0) {
       DemoExampleSmokeHooks.current?.markerSink.passed(
-        'tistore_smoke_audio_volume_changed',
+        'ti-cloud-storage-smoke-audio-volume-changed',
         payload: <String, Object?>{'muted': nextMuted},
       );
     }
@@ -855,12 +871,12 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         child: Column(
           children: <Widget>[
             ListTile(
-              key: DemoWidgetKeys.storeDatePickerButton,
+              key: DemoWidgetKeys.cloudStorageDatePickerButton,
               leading: const Icon(Icons.calendar_today_outlined),
               title: const Text('选择录像日期'),
               subtitle: Text('自然日按 $_timeZoneId 计算 · ${_formatDate(_selectedDate)}'),
               trailing: IconButton(
-                key: DemoWidgetKeys.storeQueryButton,
+                key: DemoWidgetKeys.cloudStorageQueryButton,
                 tooltip: '刷新月份和当天录像',
                 onPressed: _querying || _calendarQuerying ? null : _queryMonthAndSelectedDay,
                 icon: const Icon(Icons.refresh),
@@ -878,7 +894,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
 
   Widget _buildCalendar() {
     final tz.TZDateTime today = tz.TZDateTime.now(_timeZone);
-    return DemoStoreRecordingCalendar(
+    return DemoCloudStorageRecordingCalendar(
       visibleMonth: _visibleMonth,
       selectedDate: _selectedDate,
       today: today,
@@ -904,9 +920,9 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text('查询失败 · ${TiStore.errorToString(_queryCode!)} ($_queryCode)'),
+            Text('查询失败 · ${TiCloudStorage.errorToString(_queryCode!)} ($_queryCode)'),
             const SizedBox(height: 12),
-            FilledButton(key: DemoWidgetKeys.storeQueryRetryButton, onPressed: _query, child: const Text('重试')),
+            FilledButton(key: DemoWidgetKeys.cloudStorageQueryRetryButton, onPressed: _query, child: const Text('重试')),
           ],
         ),
       );
@@ -928,9 +944,9 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       itemCount: _recordings.length,
       separatorBuilder: (_, __) => const Divider(height: 1),
       itemBuilder: (BuildContext context, int index) {
-        final TiStoreRecordingRange range = _recordings[index];
+        final TiCloudStorageRecordingRange range = _recordings[index];
         return ListTile(
-          key: ValueKey<String>('tistore-recording-${range.startTimeMs}-${range.endTimeMs}'),
+          key: ValueKey<String>('ti-cloud-storage-recording-${range.startTimeMs}-${range.endTimeMs}'),
           title: Text('${_formatClock(range.startTimeMs)} — ${_formatClock(range.endTimeMs)}'),
           subtitle: Text(_formatDuration(range.endTimeMs - range.startTimeMs)),
           onTap: () {
@@ -943,13 +959,13 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     );
   }
 
-  Widget _exportAction(TiStoreRecordingRange range) {
+  Widget _exportAction(TiCloudStorageRecordingRange range) {
     final bool exportingThis =
         _exportingRange != null &&
         _exportingRange!.startTimeMs == range.startTimeMs &&
         _exportingRange!.endTimeMs == range.endTimeMs;
     return OutlinedButton(
-      key: ValueKey<String>('tistore-export-${range.startTimeMs}-${range.endTimeMs}'),
+      key: ValueKey<String>('ti-cloud-storage-export-${range.startTimeMs}-${range.endTimeMs}'),
       onPressed: _exportingRange != null ? null : () => unawaited(_export(range)),
       style: OutlinedButton.styleFrom(
         foregroundColor: ExampleTheme.primary,
@@ -973,7 +989,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   void _changeMonth(int amount) {
     setState(() {
       _visibleMonth = DateTime.utc(_visibleMonth.year, _visibleMonth.month + amount);
-      _recordings = <TiStoreRecordingRange>[];
+      _recordings = <TiCloudStorageRecordingRange>[];
       _queryCode = null;
     });
     _refreshSheet();
@@ -983,7 +999,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   void _selectDate(int day) {
     setState(() {
       _selectedDate = tz.TZDateTime(_timeZone, _visibleMonth.year, _visibleMonth.month, day);
-      _recordings = <TiStoreRecordingRange>[];
+      _recordings = <TiCloudStorageRecordingRange>[];
       _queryCode = null;
     });
     _refreshSheet();
@@ -994,38 +1010,38 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     if (_cleaning) return;
     _cleaning = true;
     int cleanupCode = await _stopActiveRecording(keepFile: false);
-    final Resp<TiStoreRecordingFile>? exportResult = await _exportTask?.stop();
-    cleanupCode = _firstError(cleanupCode, exportResult?.code ?? kTiStoreErrorOk);
-    cleanupCode = _firstError(cleanupCode, await exportResult?.data?.delete() ?? kTiStoreErrorOk);
+    final Resp<TiCloudStorageRecordingFile>? exportResult = await _exportTask?.stop();
+    cleanupCode = _firstError(cleanupCode, exportResult?.code ?? kTiCloudStorageErrorOk);
+    cleanupCode = _firstError(cleanupCode, await exportResult?.data?.delete() ?? kTiCloudStorageErrorOk);
     _exportTask = null;
     _exportingRange = null;
     await _queryFuture;
     await _calendarQueryFuture;
     cleanupCode = _firstError(cleanupCode, await _releasePlayback());
-    cleanupCode = _firstError(cleanupCode, await _latestRecording?.delete() ?? kTiStoreErrorOk);
-    cleanupCode = _firstError(cleanupCode, await _latestSnapshot?.delete() ?? kTiStoreErrorOk);
+    cleanupCode = _firstError(cleanupCode, await _latestRecording?.delete() ?? kTiCloudStorageErrorOk);
+    cleanupCode = _firstError(cleanupCode, await _latestSnapshot?.delete() ?? kTiCloudStorageErrorOk);
     _latestRecording = null;
     _latestSnapshot = null;
     _latestMedia = null;
-    cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(_store?.dispose));
-    _store = null;
-    if (_initCode == 0) cleanupCode = _firstError(cleanupCode, TiStore.shutdown());
+    cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(_cloudStorage?.dispose));
+    _cloudStorage = null;
+    if (_initCode == 0) cleanupCode = _firstError(cleanupCode, TiCloudStorage.shutdown());
     final DemoAutomationMarkerSink? markerSink = DemoExampleSmokeHooks.current?.markerSink;
-    if (cleanupCode == kTiStoreErrorOk) {
-      markerSink?.passed('tistore_smoke_cleanup_completed');
+    if (cleanupCode == kTiCloudStorageErrorOk) {
+      markerSink?.passed('ti-cloud-storage-smoke-cleanup-completed');
     } else {
       markerSink?.failure(
-        failureStage: 'tistore_cleanup',
-        message: TiStore.errorToString(cleanupCode),
+        failureStage: 'ti-cloud-storage-cleanup',
+        message: TiCloudStorage.errorToString(cleanupCode),
         errorCode: cleanupCode,
       );
     }
   }
 
   Future<int> _releasePlayback() async {
-    final TiStoreReplay? replay = _replay;
-    final TiStoreAudioOutput? audio = _audioOutput;
-    final TiStoreVideoOutput? video = _videoOutput;
+    final TiCloudStorageReplay? replay = _replay;
+    final TiCloudStorageAudioOutput? audio = _audioOutput;
+    final TiCloudStorageVideoOutput? video = _videoOutput;
     void clearPlayback() {
       _selected = null;
       _audioOutput = null;
@@ -1042,23 +1058,23 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
       clearPlayback();
       await Future<void>.delayed(Duration.zero);
     }
-    int cleanupCode = replay?.stop() ?? kTiStoreErrorOk;
-    cleanupCode = _firstError(cleanupCode, audio?.detach() ?? kTiStoreErrorOk);
-    cleanupCode = _firstError(cleanupCode, video?.detach() ?? kTiStoreErrorOk);
+    int cleanupCode = replay?.stop() ?? kTiCloudStorageErrorOk;
+    cleanupCode = _firstError(cleanupCode, audio?.detach() ?? kTiCloudStorageErrorOk);
+    cleanupCode = _firstError(cleanupCode, video?.detach() ?? kTiCloudStorageErrorOk);
     cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(audio?.dispose));
     final int videoCode = await _disposeAfterDeferredCallbacks(video?.dispose);
     if (videoCode != 0 && _canUpdateUi) setState(() => _lastCode = videoCode);
     cleanupCode = _firstError(cleanupCode, videoCode);
     cleanupCode = _firstError(cleanupCode, await _disposeAfterDeferredCallbacks(replay?.dispose));
-    _audioSession.releaseIfNeeded(reason: 'store_playback_released');
+    _audioSession.releaseIfNeeded(reason: 'cloud_storage_playback_released');
     return cleanupCode;
   }
 
   Future<int> _disposeAfterDeferredCallbacks(int Function()? dispose) async {
-    if (dispose == null) return kTiStoreErrorOk;
+    if (dispose == null) return kTiCloudStorageErrorOk;
     final Stopwatch deadline = Stopwatch()..start();
     int code = dispose();
-    while (code == kTiStoreErrorInUse && deadline.elapsed < const Duration(seconds: 5)) {
+    while (code == kTiCloudStorageErrorInUse && deadline.elapsed < const Duration(seconds: 5)) {
       // Runtime callback tasks arrive through NativeCallable.listener. A timer turn lets the Dart
       // event queue complete each accepted task before the next checked destruction attempt.
       await Future<void>.delayed(const Duration(milliseconds: 10));
@@ -1078,10 +1094,10 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   void _reportSmokeFailure(String stage, int? code) {
-    final int errorCode = code ?? kTiStoreErrorIoFailed;
+    final int errorCode = code ?? kTiCloudStorageErrorIoFailed;
     DemoExampleSmokeHooks.current?.markerSink.failure(
       failureStage: stage,
-      message: TiStore.errorToString(errorCode),
+      message: TiCloudStorage.errorToString(errorCode),
       errorCode: errorCode,
     );
   }
@@ -1099,39 +1115,39 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
   }
 
   bool get _showStageOverlay {
-    final TiStoreVideoOutputState? state = _videoOutput?.state;
+    final TiCloudStorageVideoOutputState? state = _videoOutput?.state;
     return _selected == null ||
-        state == TiStoreVideoOutputState.idle ||
-        state == TiStoreVideoOutputState.buffering ||
-        state == TiStoreVideoOutputState.paused ||
-        state == TiStoreVideoOutputState.completed ||
-        state == TiStoreVideoOutputState.failed;
+        state == TiCloudStorageVideoOutputState.idle ||
+        state == TiCloudStorageVideoOutputState.buffering ||
+        state == TiCloudStorageVideoOutputState.paused ||
+        state == TiCloudStorageVideoOutputState.completed ||
+        state == TiCloudStorageVideoOutputState.failed;
   }
 
   String get _stageStatusLabel {
     if (_selected == null) return _initCode == null ? '加载中' : '请选择录像';
     switch (_videoOutput?.state) {
-      case TiStoreVideoOutputState.buffering:
+      case TiCloudStorageVideoOutputState.buffering:
         return '缓冲中';
-      case TiStoreVideoOutputState.paused:
+      case TiCloudStorageVideoOutputState.paused:
         return '已暂停';
-      case TiStoreVideoOutputState.completed:
+      case TiCloudStorageVideoOutputState.completed:
         return '播放完成';
-      case TiStoreVideoOutputState.failed:
+      case TiCloudStorageVideoOutputState.failed:
         return '播放失败';
-      case TiStoreVideoOutputState.idle:
-      case TiStoreVideoOutputState.rendering:
+      case TiCloudStorageVideoOutputState.idle:
+      case TiCloudStorageVideoOutputState.rendering:
       case null:
         return '加载中';
     }
   }
 
   DownlinkCenterIndicatorMode get _stageIndicatorMode {
-    final TiStoreVideoOutputState? state = _videoOutput?.state;
-    if (state == TiStoreVideoOutputState.failed || (_initCode != null && _initCode != 0)) {
+    final TiCloudStorageVideoOutputState? state = _videoOutput?.state;
+    if (state == TiCloudStorageVideoOutputState.failed || (_initCode != null && _initCode != 0)) {
       return DownlinkCenterIndicatorMode.error;
     }
-    return state == TiStoreVideoOutputState.buffering || (_initCode == null && _selected == null)
+    return state == TiCloudStorageVideoOutputState.buffering || (_initCode == null && _selected == null)
         ? DownlinkCenterIndicatorMode.loading
         : DownlinkCenterIndicatorMode.running;
   }
@@ -1157,7 +1173,7 @@ final class _DemoStoreRecordingsPageState extends State<DemoStoreRecordingsPage>
     return '时长 ${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
   }
 
-  static int _firstError(int current, int next) => current == kTiStoreErrorOk ? next : current;
+  static int _firstError(int current, int next) => current == kTiCloudStorageErrorOk ? next : current;
 }
 
 final class _ErrorBanner extends StatelessWidget {
@@ -1169,13 +1185,13 @@ final class _ErrorBanner extends StatelessWidget {
   @override
   Widget build(BuildContext context) => MaterialBanner(
     backgroundColor: ExampleTheme.surface.withAlpha(235),
-    content: Text('$label：${TiStore.errorToString(code)} ($code)'),
+    content: Text('$label：${TiCloudStorage.errorToString(code)} ($code)'),
     actions: const <Widget>[SizedBox.shrink()],
   );
 }
 
-final class _StoreMediaActionButton extends StatelessWidget {
-  const _StoreMediaActionButton({
+final class _CloudStorageMediaActionButton extends StatelessWidget {
+  const _CloudStorageMediaActionButton({
     required this.buttonKey,
     required this.enabled,
     required this.icon,
