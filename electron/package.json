@@ -1,0 +1,20 @@
+{
+  "name": "tirtc-electron-example",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node script/build.mjs",
+    "start": "electron .",
+    "package:dir": "electron-builder --dir --config electron-builder.config.cjs"
+  },
+  "dependencies": {
+    "tirtc-electron": "2.4.0"
+  },
+  "devDependencies": {
+    "@electron/asar": "3.4.1",
+    "electron": "43.3.0",
+    "electron-builder": "26.15.7",
+    "typescript": "5.9.2"
+  }
+}

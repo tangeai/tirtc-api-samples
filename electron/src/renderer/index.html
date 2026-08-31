@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Ti RTC</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body>
+    <main>
+      <form id="config" class="configure-page">
+        <header class="configure-header">
+          <div>
+            <h1>Ti RTC</h1>
+            <p>Based on Flutter</p>
+          </div>
+          <button id="open-settings" class="settings-button" type="button">偏好设置</button>
+        </header>
+
+        <div class="product-tabs" role="tablist" aria-label="产品">
+          <button id="rtc-tab" data-testid="tirtc_example_product_tab_rtc" class="active" role="tab" aria-selected="true" type="button">RTC</button>
+          <button id="ti-cloud-storage-tab" data-testid="tirtc-example-product-tab-ti-cloud-storage" role="tab" aria-selected="false" type="button">云录像</button>
+        </div>
+
+        <div class="configure-fields">
+          <label class="field">
+            <span>endpoint</span>
+            <input name="endpoint" data-testid="tirtc_example_endpoint_field" type="url" placeholder="接入的云端环境，留空则使用默认环境。">
+          </label>
+          <label class="field">
+            <span>app_id</span>
+            <input name="appId" data-testid="tirtc_example_app_id_field" required placeholder="TiRTC 应用标识，进入播放页前必须提供。">
+          </label>
+          <label class="field">
+            <span>remote_id</span>
+            <input name="remoteId" data-testid="tirtc_example_remote_id_field" required placeholder="待连接的设备 ID">
+          </label>
+          <div class="stream-row">
+            <label class="field">
+              <span>audio_stream_id</span>
+              <input name="audioStreamId" data-testid="tirtc_example_audio_stream_id_field" inputmode="numeric" value="10" placeholder="音频流 ID，默认 10">
+            </label>
+            <label class="field">
+              <span>video_stream_id</span>
+              <input name="videoStreamId" data-testid="tirtc_example_video_stream_id_field" inputmode="numeric" value="11" placeholder="视频流 ID，默认 11">
+            </label>
+          </div>
+          <div class="token-acquisition-row">
+            <div class="field credential-boundary" data-testid="tirtc_example_token_field">
+              <span>一次性连接 Token</span>
+              <p>由 Electron 主进程凭据入口提供，页面不接收 Token。</p>
+            </div>
+            <button class="scan-button" data-testid="tirtc_example_token_scan_button" type="button" disabled>扫码</button>
+          </div>
+          <div class="or-label">或</div>
+          <label class="field">
+            <span>TiRTC DevTools 服务地址</span>
+            <input name="tokenServerAddress" data-testid="tirtc_example_token_server_address_field" type="url" placeholder="例如 http://192.168.1.10:8966">
+          </label>
+        </div>
+
+        <button class="primary-button" data-testid="tirtc_example_start_downlink_button" type="submit">
+          <span class="connect-label">开始连接、拉流播放</span>
+        </button>
+        <p id="config-status" class="feedback" aria-live="polite"></p>
+        <button id="config-logs" data-testid="tirtc_example_configure_log_upload_button" class="link-button" type="button">上传日志</button>
+      </form>
+
+      <form id="ti-cloud-storage-config" class="configure-page" hidden>
+        <header class="configure-header">
+          <div><h1>Ti RTC</h1><p>Based on Flutter</p></div>
+          <button id="open-ti-cloud-storage-settings" class="settings-button" type="button">偏好设置</button>
+        </header>
+        <div class="product-tabs" role="tablist" aria-label="产品">
+          <button id="ti-cloud-storage-rtc-tab" data-testid="tirtc_example_product_tab_rtc" role="tab" aria-selected="false" type="button">RTC</button>
+          <button id="ti-cloud-storage-current-tab" class="active" role="tab" aria-selected="true" type="button">云录像</button>
+        </div>
+        <div class="configure-fields">
+          <label class="field"><span>app_id</span><input name="appId" data-testid="tirtc-example-ti-cloud-storage-app-id-field" required placeholder="Ti Cloud Storage 应用标识，进入播放页前必须提供。"></label>
+          <label class="field"><span>endpoint</span><input name="endpoint" data-testid="tirtc-example-ti-cloud-storage-endpoint-field" type="url" placeholder="接入的云端环境，留空则使用默认环境。"></label>
+          <div class="token-acquisition-row">
+            <div class="field credential-boundary" data-testid="tirtc-example-ti-cloud-storage-token-field"><span>token</span><p>由 Electron 主进程凭据入口提供，页面不接收 Token。</p></div>
+            <button class="scan-button" data-testid="tirtc-example-ti-cloud-storage-scan-button" type="button" disabled>扫码</button>
+          </div>
+          <div class="stream-row">
+            <label class="field"><span>audio_channel_id</span><input name="audioChannelId" data-testid="tirtc-example-ti-cloud-storage-audio-channel-field" value="10" inputmode="numeric" placeholder="音频 Channel，0..255"></label>
+            <label class="field"><span>video_channel_id</span><input name="videoChannelId" data-testid="tirtc-example-ti-cloud-storage-video-channel-field" value="11" inputmode="numeric" placeholder="视频 Channel，0..255"></label>
+          </div>
+        </div>
+        <button class="primary-button" data-testid="tirtc-example-ti-cloud-storage-enter-button" type="submit">播放云录像</button>
+        <p id="ti-cloud-storage-config-status" class="feedback" aria-live="polite"></p>
+        <button id="ti-cloud-storage-config-logs" data-testid="tirtc-example-ti-cloud-storage-configure-log-upload-button" class="link-button" type="button">上传日志</button>
+      </form>
+
+      <section id="settings" class="settings-page" hidden>
+        <header class="settings-app-bar">
+          <button id="close-settings" class="back-button" type="button" aria-label="返回配置页">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 19 8.4 12l7-7 1.4 1.4-5.6 5.6 5.6 5.6z"/></svg>
+          </button>
+          <strong>设置</strong>
+        </header>
+        <div class="settings-list">
+          <h2>客户端</h2>
+          <div class="settings-surface">
+            <button class="settings-row" type="button" data-setting="videoDecoderPreference">
+              <span><strong>视频解码偏好</strong><small id="setting-videoDecoderPreference">自动</small></span><i>›</i>
+            </button>
+            <button class="settings-row" type="button" data-setting="outputBufferPolicy">
+              <span><strong>输出缓冲策略</strong><small id="setting-outputBufferPolicy">自动</small></span><i>›</i>
+            </button>
+          </div>
+
+          <h2>本地音频采集与传输</h2>
+          <div class="settings-surface">
+            <button class="settings-row" type="button" data-setting="localAudioCodec">
+              <span><strong>编码格式</strong><small id="setting-localAudioCodec">G711A</small></span><i>›</i>
+            </button>
+            <button class="settings-row" type="button" data-setting="localAudioSampleRateHz">
+              <span><strong>采样率</strong><small id="setting-localAudioSampleRateHz">16 kHz</small></span><i>›</i>
+            </button>
+            <button class="settings-row" type="button" data-setting="localAudioStreamId">
+              <span><strong>传输 Stream ID</strong><small id="setting-localAudioStreamId">14</small></span><i>›</i>
+            </button>
+            <label class="settings-row switch-row">
+              <span><strong>AEC</strong></span>
+              <input name="localAudioAecEnabled" type="checkbox"><i class="switch"></i>
+            </label>
+            <button class="settings-row" type="button" data-setting="localAudioAgcLevel">
+              <span><strong>AGC</strong><small id="setting-localAudioAgcLevel">关闭</small></span><i>›</i>
+            </button>
+            <button class="settings-row" type="button" data-setting="localAudioAnsLevel">
+              <span><strong>ANS</strong><small id="setting-localAudioAnsLevel">关闭</small></span><i>›</i>
+            </button>
+          </div>
+
+          <h2>通用</h2>
+          <div class="settings-surface">
+            <label class="settings-row switch-row">
+              <span><strong>启用控制台输出</strong></span>
+              <input name="consoleLogEnabled" type="checkbox"><i class="switch"></i>
+            </label>
+          </div>
+        </div>
+      </section>
+
+      <section class="player" data-testid="tirtc_example_player_page" hidden>
+        <header class="player-bar">
+          <button id="leave" class="back-button" type="button" aria-label="返回配置页">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 19 8.4 12l7-7 1.4 1.4-5.6 5.6 5.6 5.6z"/></svg>
+          </button>
+          <strong id="player-remote-id">Ti RTC</strong>
+          <button id="command-toggle" data-testid="tirtc_example_player_command_button" class="bar-button" type="button">发送命令</button>
+          <button id="logs" data-testid="tirtc_example_player_log_upload_button" class="bar-button" type="button">上传日志</button>
+        </header>
+
+        <div class="player-body">
+          <div class="video-stage">
+            <div id="remote-video" class="video" aria-label="远端视频"></div>
+          </div>
+          <div class="overlay-gradient"></div>
+          <section class="metrics-panel" data-testid="tirtc_example_downlink_metrics_stats_panel" aria-label="即时统计" hidden>
+            <header><strong>即时统计</strong><button id="metrics-help" class="metrics-help" type="button" aria-label="指标说明">?</button><button id="metrics-collapse" data-testid="tirtc_example_downlink_metrics_stats_collapse_action" type="button">⌃&nbsp; 收起</button></header>
+            <p><b>媒体参数：</b><span id="metric-media" data-testid="tirtc_example_downlink_metrics_media_params_text">-- · -- · -- · 未确定</span></p>
+            <p><b>视频接收：</b><span id="metric-video-receive" data-testid="tirtc_example_downlink_metrics_video_receive_text">码率 -- · 接收 --</span></p>
+            <p><b>音频接收：</b><span id="metric-audio-receive" data-testid="tirtc_example_downlink_metrics_audio_receive_text">码率 -- · PPS --</span></p>
+            <p><b>估算延迟：</b><span id="metric-latency" data-testid="tirtc_example_downlink_metrics_latency_stats_text">视频 -- · 音频 --</span></p>
+            <p><b>启动耗时：</b><span id="metric-startup" data-testid="tirtc_example_downlink_metrics_startup_text">连接 -- · 首帧总耗时 --</span></p>
+            <p><b>卡顿统计：</b><span id="metric-stutter" data-testid="tirtc_example_downlink_metrics_stutter_text">视频 -- / 最长 -- · 音频 -- / 最长 --</span></p>
+          </section>
+          <pre id="metrics" hidden>Metrics unavailable</pre>
+          <div id="stage-status" class="stage-status">连接中</div>
+          <div id="message-bubble" data-testid="tirtc_example_stream_message_bubble" class="message-bubble" hidden></div>
+
+          <div class="player-controls">
+            <p id="status" class="player-feedback" aria-live="polite" hidden></p>
+            <div class="media-actions">
+              <button id="record" data-testid="tirtc_example_player_recording_button" class="icon-button" type="button" aria-label="开始本地保存" title="开始本地保存">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>
+              </button>
+              <button id="snapshot" data-testid="tirtc_example_player_snapshot_button" class="icon-button" type="button" aria-label="截图" title="截图">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 4 7.2 6H4a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.2L15 4H9zm3 13a4.5 4.5 0 1 1 0-9 4.5 4.5 0 0 1 0 9zm0-2a2.5 2.5 0 1 0 0-5 2.5 2.5 0 0 0 0 5z"/></svg>
+              </button>
+              <button id="save-media" data-testid="tirtc_example_player_gallery_button" class="icon-button" type="button" aria-label="保存到文件" title="保存到文件" disabled>
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 4v12H8V4h12zm0-2H8a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zM4 6H2v14a2 2 0 0 0 2 2h14v-2H4V6zm5 7 2.5-3 2 2.5L16 9l3 4H9z"/></svg>
+              </button>
+              <button id="mute" data-testid="tirtc_example_player_audio_volume_button" class="tonal-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m16.5 12 3.5 3.5-1.4 1.4-3.5-3.5-3.5 3.5-1.4-1.4 3.5-3.5-3.5-3.5 1.4-1.4 3.5 3.5 3.5-3.5L20 8.5 16.5 12zM4 9h4l5-4v5.2L11.2 12 13 13.8V19l-5-4H4V9z"/></svg>
+                <span>静音</span>
+              </button>
+              <button id="local-audio" data-testid="tirtc_example_player_local_audio_button" class="tonal-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 14a3 3 0 0 0 3-3V5a3 3 0 1 0-6 0v6a3 3 0 0 0 3 3zm5-3a5 5 0 0 1-10 0H5a7 7 0 0 0 6 6.9V21H8v2h8v-2h-3v-3.1A7 7 0 0 0 19 11h-2z"/></svg>
+                <span>启动麦克风</span>
+              </button>
+              <button id="stop-playback" class="playback-button" type="button">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3 7h6v6H9V9z"/></svg>
+                <span>停止播放</span>
+              </button>
+            </div>
+            <div class="recent-files">
+              <button id="save-recording" type="button" hidden disabled>保存录像</button>
+              <button id="save-snapshot" type="button" hidden disabled>保存截图</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="ti-cloud-storage-player" data-testid="tirtc_example_cloud_storage_recordings_page" class="player" hidden>
+        <header class="player-bar">
+          <button id="ti-cloud-storage-leave" class="back-button" type="button" aria-label="返回云录像首页">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.4 19 8.4 12l7-7 1.4 1.4-5.6 5.6 5.6 5.6z"/></svg>
+          </button>
+          <strong class="ti-cloud-storage-player-title">云录像</strong>
+          <button id="ti-cloud-storage-open-recordings" data-testid="tirtc-example-ti-cloud-storage-calendar-button" class="bar-button" type="button">选择录像</button>
+          <button id="ti-cloud-storage-logs" class="bar-button" type="button">上传日志</button>
+        </header>
+        <div class="player-body">
+          <div class="video-stage"><div id="ti-cloud-storage-video" class="video" aria-label="录像视频"></div></div>
+          <div class="overlay-gradient"></div>
+          <div id="ti-cloud-storage-stage-status" class="stage-status">请选择录像</div>
+          <div class="player-controls">
+            <p id="ti-cloud-storage-status" class="player-feedback" aria-live="polite"></p>
+            <div id="ti-cloud-storage-seek-panel" class="ti-cloud-storage-seek-panel" hidden>
+              <span id="ti-cloud-storage-seek-current">--:--</span>
+              <input id="ti-cloud-storage-seek" data-testid="tirtc-example-ti-cloud-storage-seek-slider" type="range" min="0" max="1000" value="0" aria-label="回放位置">
+              <span id="ti-cloud-storage-seek-end">--:--</span>
+            </div>
+            <div class="media-actions">
+              <button id="ti-cloud-storage-record" data-testid="tirtc-example-ti-cloud-storage-recording-button" class="icon-button" type="button" aria-label="开始本地保存" title="开始本地保存">●</button>
+              <button id="ti-cloud-storage-snapshot" data-testid="tirtc-example-ti-cloud-storage-snapshot-button" class="icon-button" type="button" aria-label="截图" title="截图">▣</button>
+              <button id="ti-cloud-storage-save" data-testid="tirtc-example-ti-cloud-storage-gallery-button" class="icon-button" type="button" aria-label="保存到文件" title="保存到文件" disabled>▤</button>
+              <button id="ti-cloud-storage-mute" data-testid="tirtc-example-ti-cloud-storage-audio-volume-button" class="icon-button" type="button" aria-label="静音" title="静音">◖</button>
+              <label class="ti-cloud-storage-speed-control" aria-label="播放倍速">
+                <select id="ti-cloud-storage-speed" data-testid="tirtc-example-ti-cloud-storage-speed-selector">
+                  <option value="0.125">1/8×</option>
+                  <option value="0.25">1/4×</option>
+                  <option value="0.5">1/2×</option>
+                  <option value="1">1×</option>
+                  <option value="2">2×</option>
+                  <option value="4">4×</option>
+                  <option value="8">8×</option>
+                </select>
+              </label>
+              <button id="ti-cloud-storage-pause" data-testid="tirtc-example-ti-cloud-storage-pause-button" class="tonal-button" type="button"><span>暂停播放</span></button>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="preference-sheet" class="bottom-sheet">
+      <form method="dialog">
+        <div class="sheet-handle"></div>
+        <h2 id="preference-title"></h2>
+        <div id="preference-options"></div>
+      </form>
+    </dialog>
+    <dialog id="command-panel" data-testid="tirtc_example_command_panel_sheet" class="bottom-sheet command-sheet">
+      <form method="dialog">
+        <header><strong>发送命令</strong><button data-testid="tirtc_example_command_panel_close_button" value="cancel" aria-label="关闭">×</button></header>
+        <div class="command-content">
+          <input id="command-id" data-testid="tirtc_example_command_panel_command_id_field" inputmode="numeric" value="1" placeholder="Command ID">
+          <input id="message" data-testid="tirtc_example_command_panel_payload_field" placeholder="输入消息">
+          <button id="echo-preset" data-testid="tirtc_example_command_panel_echo_preset" class="small-button" type="button">Echo</button>
+          <button id="send" data-testid="tirtc_example_command_panel_send_button" class="small-button" type="button">发送</button>
+          <div id="command-events" class="command-events" aria-live="polite"></div>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="ti-cloud-storage-recordings-sheet" data-testid="tirtc-example-ti-cloud-storage-date-picker-button" class="bottom-sheet ti-cloud-storage-recordings-sheet">
+      <form method="dialog">
+        <div class="sheet-handle"></div>
+        <div class="ti-cloud-storage-calendar-header">
+          <button id="ti-cloud-storage-previous-month" data-testid="tirtc-example-ti-cloud-storage-calendar-month-previous" class="bar-button" type="button">上个月</button>
+          <strong id="ti-cloud-storage-month-title"></strong>
+          <button id="ti-cloud-storage-next-month" data-testid="tirtc-example-ti-cloud-storage-calendar-month-next" class="bar-button" type="button">下个月</button>
+        </div>
+        <button id="ti-cloud-storage-refresh" data-testid="tirtc-example-ti-cloud-storage-query-button" class="link-button" type="button">刷新月份和当天录像</button>
+        <p class="ti-cloud-storage-calendar-timezone">自然日按 Asia/Shanghai 查询</p>
+        <div class="ti-cloud-storage-weekdays" aria-hidden="true"><span>日</span><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span></div>
+        <div id="ti-cloud-storage-calendar" class="ti-cloud-storage-calendar" role="grid" aria-label="录像日期"></div>
+        <p id="ti-cloud-storage-query-status" class="feedback" aria-live="polite"></p>
+        <button id="ti-cloud-storage-calendar-retry" data-testid="tirtc-example-ti-cloud-storage-calendar-retry-button" class="small-button" type="button" hidden>重试月份</button>
+        <button id="ti-cloud-storage-query-retry" data-testid="tirtc-example-ti-cloud-storage-query-retry-button" class="small-button" type="button" hidden>重试</button>
+        <div id="ti-cloud-storage-ranges" class="ti-cloud-storage-range-list"></div>
+        <button class="sheet-close-button" value="cancel">关闭</button>
+      </form>
+    </dialog>
+    <dialog id="metrics-explanation" class="notice-dialog">
+      <form method="dialog">
+        <h2>指标说明</h2>
+        <p>【连接耗时】：从点击开始连接，到 runtime 确认连接成功的时间。只表示连接建立用了多久，不表示画面已经出来。<br><br>【首帧等待】：连接成功后，到第一个视频帧真正显示成功的等待时间。如果只能拿到从点击连接开始计算的首帧时间，面板会明确显示为首帧总耗时。<br><br>【什么时候开始统计卡顿】：第一个视频帧真正显示成功后，才开始统计本次播放的卡顿。连接中、等首帧、页面看不见、画面承载区域不可用、停止播放后的空窗，都不算卡顿。<br><br>【如何定义一次卡顿】：播放已经开始后，SDK 会观察视频帧成功显示的间隔。先用最近几次正常显示的帧间隔估出“正常一帧应该隔多久”。如果下一帧的显示间隔超过这个正常间隔的 3 倍，超过 3 倍的多出来时间才记为卡顿。连续的一段停顿算 1 次；恢复显示后，如果后面又停住，再算下一次。<br><br>【本次播放卡顿次数】：从开始播放到现在，累计发生过多少段卡顿。连续停住又恢复，算 1 次；恢复后再次停住，才算新的一次。<br><br>【本次播放最长卡顿】：本次播放里，单次卡顿中被计入的最长时长。它用于判断最严重的一次停顿有多长。<br><br>【接收】：码率、视频接收 FPS 和音频 PPS 来自 runtime 最近一个已闭合 5 秒窗口。这里只表达下行输入侧事实，不混入解码、渲染或音频输出回调。<br><br>【音频卡顿】：音频不用“帧率”判断体验。这里展示最近窗口内，系统输出回调取不到可播放数据而产生的停滞次数和最长停滞。<br><br>【估算延迟】：来自 runtime 当前输出延迟估算，综合最近到达帧的单向传输延迟和本地待输出缓冲时长。面板按秒刷新；还没有有效数据时显示“--”。</p>
+        <button value="ok" data-testid="tirtc_example_notice_dialog_confirm" class="primary-button">知道了</button>
+      </form>
+    </dialog>
+    <script src="app.js"></script>
+  </body>
+</html>
