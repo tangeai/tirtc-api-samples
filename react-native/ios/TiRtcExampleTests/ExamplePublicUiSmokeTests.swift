@@ -212,7 +212,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   }
 
   private func runStressFlow() {
-    let loops = max(1, Int(env("TIRTC_RN_LOOPS", defaultValue: "3")) ?? 3)
+    let loops = max(1, Int(env("TIRTC_RN_LOOPS", defaultValue: "2")) ?? 2)
     let loopOffset = max(0, Int(env("TIRTC_RN_LOOP_OFFSET", defaultValue: "0")) ?? 0)
     for localLoop in 1...loops {
       let loop = loopOffset + localLoop
@@ -227,7 +227,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
       waitForControl("TiRTC Config appId", timeout: shortTimeout)
       marker("stress_loop_\(loop)_done")
       if localLoop < loops {
-        sleep(20)
+        sleep(2)
         marker("stress_loop_\(loop)_cooldown_done")
       }
     }

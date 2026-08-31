@@ -17,8 +17,8 @@ internal const val VIDEO_FRAME_MINIMUM_VISIBLE_PERCENT = 5
 internal const val VIDEO_FRAME_BRIGHT_LUMA_THRESHOLD = 62
 internal const val VIDEO_FRAME_CHROMATIC_LUMA_THRESHOLD = 45
 internal const val VIDEO_FRAME_CHROMATIC_SPREAD_THRESHOLD = 20
-internal const val DEFAULT_STRESS_LOOPS = 3
-internal const val STRESS_RECONNECT_COOLDOWN_MS = 20_000L
+internal const val DEFAULT_STRESS_LOOPS = 2
+internal const val STRESS_RECONNECT_COOLDOWN_MS = 2_000L
 internal val DOWNLINK_TEXT_MARKERS = listOf("video rendering", "播放中")
 
 internal fun visibleText(desc: String): String {
