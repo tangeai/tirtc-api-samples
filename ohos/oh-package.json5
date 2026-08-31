@@ -5,6 +5,6 @@
   "description": "TiRTC OHOS example client",
   "license": "UNLICENSED",
   "dependencies": {
-    "tirtc": "2.4.0-alpha.4"
+    "tirtc": "2.4.0"
   }
 }

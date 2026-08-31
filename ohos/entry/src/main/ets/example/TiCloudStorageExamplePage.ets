@@ -18,6 +18,13 @@ import { saveMediaFileToGallery } from './ExampleMediaGallery';
 import { TiCloudStorageExampleFlow, TiCloudStorageExampleFlowListener } from './TiCloudStorageExampleFlow';
 
 const NOTICE_AUTO_HIDE_MS: number = 3000;
+const VIDEO_OUTPUT_MOUNT_OBSERVE_MS: number = 700;
+
+function observeCloudStorageVideoOutputMount(): Promise<void> {
+  return new Promise<void>((resolve: () => void): void => {
+    setTimeout(resolve, VIDEO_OUTPUT_MOUNT_OBSERVE_MS);
+  });
+}
 
 function padCloudStorageClock(value: number): string {
   return value < 10 ? `0${value}` : `${value}`;
@@ -593,9 +600,6 @@ export struct TiCloudStorageExamplePage {
                         }
                         .alignItems(HorizontalAlign.Start)
                         .layoutWeight(1)
-                        .onClick((): void => {
-                          this.playRange(index);
-                        })
                         Button(this.exportProgress >= 0 ? `${Math.round(this.exportProgress * 100)}%` : '下载')
                           .id(`tirtc_example_ti_cloud_storage_export_${range.startTimeMs}`)
                           .height(40)
@@ -613,7 +617,7 @@ export struct TiCloudStorageExamplePage {
                       .width('100%')
                       .padding({ left: 8, right: 8, top: 12, bottom: 12 })
                       .onClick((): void => {
-                        this.playRange(index);
+                        void this.playRange(index);
                       })
                     }
                     .width('100%')
@@ -781,10 +785,13 @@ export struct TiCloudStorageExamplePage {
     return `${Number(date.slice(-2))}\n${state}`;
   }
 
-  private playRange(index: number): void {
+  private async playRange(index: number): Promise<void> {
     const flow = this.flow;
     const range = this.ranges[index];
     if (flow === undefined || range === undefined) return;
+    this.sheetVisible = false;
+    await observeCloudStorageVideoOutputMount();
+    if (this.flow !== flow || this.ranges[index] !== range) return;
     const code = flow.play(range, this.videoChannelId, this.audioChannelId);
     if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.selectedIndex = index;
@@ -793,7 +800,6 @@ export struct TiCloudStorageExamplePage {
       this.paused = false;
       this.muted = false;
       this.speedIndex = 3;
-      this.sheetVisible = false;
       this.setNotice('正在播放');
     } else {
       this.setNotice(`播放失败 · ${TiCloudStorage.errorToString(code)} (${code})`);

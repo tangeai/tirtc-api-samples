@@ -1,6 +1,6 @@
 # TiRTC OHOS API 示例
 
-这个工程展示 TiRTC OHOS 客户端的拉流播放和麦克风对讲流程，固定引用已经公开发布的 `tirtc@2.4.0-alpha.4`。
+这个工程展示 TiRTC OHOS 客户端的拉流播放和麦克风对讲流程，固定引用已经公开发布的 `tirtc@2.4.0`。
 
 ## 环境准备
 
@@ -23,7 +23,7 @@
 ```json5
 {
   "dependencies": {
-    "tirtc": "2.4.0-alpha.4"
+    "tirtc": "2.4.0"
   }
 }
 ```
