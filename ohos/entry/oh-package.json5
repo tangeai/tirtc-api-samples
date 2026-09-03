@@ -3,6 +3,6 @@
   "name": "entry",
   "version": "0.1.0",
   "dependencies": {
-    "tirtc": "2.4.0"
+    "tirtc": "2.4.1"
   }
 }
