@@ -530,7 +530,6 @@ dialog { font: inherit; }
 .bottom-sheet .sheet-handle {
   width: 32px;
   height: 4px;
-  flex-shrink: 0;
   margin: 10px auto 16px;
   background: #b3b3b3;
   border-radius: 2px;

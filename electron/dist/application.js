@@ -20,35 +20,20 @@ function mainProcessCredential(name, format) {
     if (cached)
         return cached;
     const descriptorName = `${name}_FD`;
-    const fileName = `${name}_FILE`;
     const descriptorText = process.env[descriptorName];
     const descriptor = descriptorText === undefined ? null : Number(descriptorText);
-    const credentialPath = process.env[fileName];
     let supplied = process.env[name] ?? '';
     try {
-        if (descriptor !== null && credentialPath) {
-            throw new TypeError(`${descriptorName} and ${fileName} are mutually exclusive`);
-        }
         if (descriptor !== null) {
             if (!Number.isSafeInteger(descriptor) || descriptor < 3) {
                 throw new TypeError(`${descriptorName} must identify an inherited credential file descriptor`);
             }
             supplied = node_fs_1.default.readFileSync(descriptor, 'utf8');
         }
-        else if (credentialPath) {
-            supplied = node_fs_1.default.readFileSync(credentialPath, 'utf8');
-        }
     }
     finally {
         delete process.env[name];
         delete process.env[descriptorName];
-        delete process.env[fileName];
-        if (credentialPath) {
-            try {
-                node_fs_1.default.rmSync(credentialPath, { force: true });
-            }
-            catch { }
-        }
         if (descriptor !== null && Number.isSafeInteger(descriptor) && descriptor >= 3) {
             try {
                 node_fs_1.default.closeSync(descriptor);

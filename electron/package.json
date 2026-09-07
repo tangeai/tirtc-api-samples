@@ -9,9 +9,10 @@
     "package:dir": "electron-builder --dir --config electron-builder.config.cjs"
   },
   "dependencies": {
-    "tirtc-electron": "2.5.0-alpha.1"
+    "tirtc-electron": "2.4.2"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "electron": "43.3.0",
     "electron-builder": "26.15.7",
     "typescript": "5.9.2"

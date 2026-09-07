@@ -194,7 +194,7 @@ export class TiCloudStorageExampleSession {
   }
 
   setVideoBounds(bounds: Rectangle): void {
-    if (this.#quiescing) return;
+    this.ensureAccepting();
     if (this.#videoOutput === null) return;
     if (this.#view === null) {
       this.#view = new TiVideoView(this.#window, bounds);

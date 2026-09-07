@@ -195,7 +195,7 @@ export class ExampleSession {
   }
 
   setVideoBounds(bounds: Rectangle): void {
-    if (this.#quiescing) return;
+    this.ensureAccepting();
     if (!this.#acceptVideoBounds || this.#videoOutput === null) return;
     if (this.#remoteView === null) {
       this.#remoteView = new TiVideoView(this.#window, bounds);
