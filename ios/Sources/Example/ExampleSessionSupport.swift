@@ -108,9 +108,6 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
         replay.onTimeChanged = { [weak self] timeMs in
             self?.currentTimeMs = timeMs
         }
-        replay.onCompleted = { [weak self] in
-            self?.videoState = .completed
-        }
         replay.onError = { [weak self] code in
             self?.videoState = .failed
             self?.status = "播放失败：\(code)"
