@@ -165,7 +165,8 @@ class TiCloudStorageExampleSession {
         });
     }
     setVideoBounds(bounds) {
-        this.ensureAccepting();
+        if (this.#quiescing)
+            return;
         if (this.#videoOutput === null)
             return;
         if (this.#view === null) {

@@ -1,0 +1,36 @@
+directories:
+  output: release
+  buildResources: build
+appId: com.tangeai.tirtc.example
+productName: TiRTC Example
+asar: true
+npmRebuild: false
+files:
+  - filter:
+      - dist/**/*
+      - '!dist/internal/**/*'
+      - package.json
+      - node_modules/tirtc-electron/package.json
+      - node_modules/tirtc-electron/identity.json
+      - node_modules/tirtc-electron/README.md
+      - node_modules/tirtc-electron/api/**/*
+      - node_modules/tirtc-electron/dist/**/*
+      - node_modules/tirtc-electron/licenses/**/*
+      - '!node_modules/tirtc-electron/native/darwin-x64{,/**/*}'
+      - '!node_modules/tirtc-electron/native/win32-x64{,/**/*}'
+      - node_modules/tirtc-electron/native/darwin-arm64/**/*
+asarUnpack:
+  - node_modules/tirtc-electron/native/darwin-arm64/**/*
+mac:
+  target:
+    - target: dir
+      arch:
+        - arm64
+  extendInfo:
+    NSMicrophoneUsageDescription: TiRTC uses the microphone for RTC audio.
+win:
+  target:
+    - target: dir
+      arch:
+        - arm64
+electronVersion: 43.3.0

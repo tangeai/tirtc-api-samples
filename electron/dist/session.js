@@ -180,7 +180,8 @@ class ExampleSession {
         }
     }
     setVideoBounds(bounds) {
-        this.ensureAccepting();
+        if (this.#quiescing)
+            return;
         if (!this.#acceptVideoBounds || this.#videoOutput === null)
             return;
         if (this.#remoteView === null) {
