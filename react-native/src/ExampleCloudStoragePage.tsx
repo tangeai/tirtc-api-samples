@@ -18,6 +18,7 @@ import {
   TiCloudStorageVideoOutput,
   TiCloudStorageVideoOutputState,
   TiCloudStorageVideoOutputView,
+  TI_CLOUD_STORAGE_ERROR_NO_FRAME,
   type TiCloudStorageExportTask,
   type TiCloudStorageRecordingFile,
   type TiCloudStorageRecordingDay,
@@ -44,6 +45,8 @@ const speeds = [TiCloudStorageReplaySpeed.x0_125, TiCloudStorageReplaySpeed.x0_2
 const speedLabels: Record<TiCloudStorageReplaySpeed, string> = {
   x0_125: '1/8×', x0_25: '1/4×', x0_5: '1/2×', x1: '1×', x2: '2×', x4: '4×', x8: '8×',
 };
+const snapshotRetryTimeoutMs = 10_000;
+const snapshotRetryIntervalMs = 200;
 type TiCloudStorageMediaFile = TiCloudStorageRecordingFile | TiCloudStorageSnapshotFile;
 
 function newestFirstRecordingRanges(
@@ -676,10 +679,18 @@ class TiCloudStorageExampleSession {
 
   async snapshot(): Promise<TiCloudStorageFileResult> {
     const operation = (async (): Promise<TiCloudStorageFileResult> => {
-      const result = await this.video.takeSnapshot();
-      if (!result.success || result.data === null) return {message: `截图失败 ${result.code}`, file: null};
-      await this.replaceLatest(result.data);
-      return {message: '截图完成', file: result.data};
+      const deadline = Date.now() + snapshotRetryTimeoutMs;
+      while (true) {
+        const result = await this.video.takeSnapshot();
+        if (result.success && result.data !== null) {
+          await this.replaceLatest(result.data);
+          return {message: '截图完成', file: result.data};
+        }
+        if (result.code !== TI_CLOUD_STORAGE_ERROR_NO_FRAME || Date.now() >= deadline) {
+          return {message: `截图失败 ${result.code}`, file: null};
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, snapshotRetryIntervalMs));
+      }
     })();
     this.snapshotPromise = operation;
     try {
