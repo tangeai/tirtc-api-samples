@@ -33,7 +33,7 @@ Future<void> showDemoCommandPanelSheet({
             padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
             child: Container(
               key: DemoWidgetKeys.commandPanelSheet,
-              height: MediaQuery.sizeOf(context).height * 0.75,
+              height: MediaQuery.sizeOf(context).height / 2,
               decoration: const BoxDecoration(
                 color: ExampleTheme.background,
                 borderRadius: BorderRadius.only(topLeft: Radius.circular(16), topRight: Radius.circular(16)),

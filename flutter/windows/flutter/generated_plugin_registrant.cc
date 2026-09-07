@@ -6,9 +6,9 @@
 
 #include "generated_plugin_registrant.h"
 
-#include <tirtc_flutter/ti_rtc_flutter_plugin_c_api.h>
+#include <tirtc_flutter/ti_rtc_flutter_plugin.h>
 
 void RegisterPlugins(flutter::PluginRegistry* registry) {
-  TiRtcFlutterPluginCApiRegisterWithRegistrar(
-      registry->GetRegistrarForPlugin("TiRtcFlutterPluginCApi"));
+  TiRtcFlutterPluginRegisterWithRegistrar(
+      registry->GetRegistrarForPlugin("TiRtcFlutterPlugin"));
 }
