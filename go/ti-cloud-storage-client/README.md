@@ -1,19 +1,13 @@
 # Ti Cloud Storage Go Example
 
-这个 headless client 查询一台设备的录像自然日和可回放范围，并使用 decoded/encoded 音视频 Output 播放一段录像。它还演示暂停、恢复、Seek、固定七档播放速度、当前时间、Snapshot、回放录像和独立范围导出。
-
-必填 Secret：
+这个 headless client 使用 Runtime 托管凭据查询一台设备的录像自然日和可回放范围，运行 decoded/encoded Output、Replay 控制、Snapshot、Replay Recording 和独立范围 Export。Replay 与 Export 会打印已确认的录像缺口；Export 还打印覆盖进度和最终报告。
 
 ```bash
 export TI_CLOUD_STORAGE_APP_ID='...'
-export TI_CLOUD_STORAGE_ACCESS_TOKEN='...'
-```
+export TI_CLOUD_STORAGE_ACCESS_KEY_ID='...'
+export TI_CLOUD_STORAGE_ACCESS_KEY_SECRET='...'
+export TI_CLOUD_STORAGE_DEVICE_ID='...'
 
-Token 过期时，查询先返回 `ErrTokenExpired`。Example 从 `TI_CLOUD_STORAGE_REFRESHED_ACCESS_TOKEN` 读取服务端签发的新 Token，调用 `UpdateToken` 后显式重试一次。SDK 不提供过期通知，也不自动刷新或重试。
-
-运行时必须传入 UTC Unix 毫秒时间窗、SDK cache 和应用输出目录：
-
-```bash
 go tool tirtc-build build --output dist/bin/ti-cloud-storage-client ./example/storage
 ./dist/bin/ti-cloud-storage-client \
   --cache-dir '/absolute/path/to/cache' \
@@ -24,12 +18,8 @@ go tool tirtc-build build --output dist/bin/ti-cloud-storage-client ./example/st
   --video-channel-id 1
 ```
 
-两个目录必须是可写绝对路径，Channel ID 必须位于 `0..255` 且彼此不同。非默认环境可追加 `--endpoint`。
+两个目录必须是可写绝对路径，Channel ID 位于 `0..255` 且彼此不同。非默认环境可追加 `--endpoint`。Runtime 在每个操作内签发或刷新设备 Token，Example 不接收预签 Token，也不实现重试状态机。
 
-成功运行会等待 Replay 自然完成，并在 `--output-dir` 写入：
+成功运行会保存 `ti-cloud-storage-snapshot.jpg`、`ti-cloud-storage-replay-recording.mp4` 和 `ti-cloud-storage-range-export.mp4`。部分 Export 也可能产生有效文件；应同时检查 `ExportResult.Report.Complete`、`Gaps` 与 `UnprocessedRanges`。临时源文件保存后通过 `Delete()` 清理。
 
-- `ti-cloud-storage-snapshot.jpg`
-- `ti-cloud-storage-replay-recording.mp4`
-- `ti-cloud-storage-range-export.mp4`
-
-文件保存采用与 RTC Example 相同的有界、exclusive create 规则，成功后删除 Runtime cache 中的临时源文件。
+保存导出结果后，Example 从报告中的来源片段扣除已确认缺口，选择最多五秒的已覆盖范围再启动一次 Export，等处理进度达到终局后关闭 Client，再首次调用该任务的 `Wait()`、保存 `ti-cloud-storage-export-after-close.mp4` 并确认该次报告完整、删除临时文件；重复 `Wait()` 的结果也可幂等删除。这展示成功结果的文件生命周期独立于 Client，部分导出仍按其实际报告保存。

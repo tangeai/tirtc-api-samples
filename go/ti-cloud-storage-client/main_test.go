@@ -119,3 +119,39 @@ func TestWaitRecordingFramesAfterRequiresPostStartKeyFrameAndFollowingVideo(t *t
 		t.Fatalf("waitRecordingFramesAfter with key frame and following video: %v", err)
 	}
 }
+
+func TestFirstFrameWaitPreservesReplayFailure(t *testing.T) {
+	failures := make(chan error, 1)
+	notifyError(failures, storage.ErrUnavailable)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	err := waitFrames(ctx, newFrameSignals(), failures)
+	if !errors.Is(err, storage.ErrUnavailable) || errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("first frame wait lost source failure: %v", err)
+	}
+}
+
+func TestCoveredExportRangeExcludesReportedGapsAndPreRoll(t *testing.T) {
+	at := func(seconds int64) time.Time { return time.Unix(seconds, 0) }
+	report := storage.ExportReport{
+		RequestedRange: storage.RecordingRange{StartTime: at(10), EndTime: at(20)},
+		Segments:       []storage.ExportSegment{{SourceRange: storage.RecordingRange{StartTime: at(9), EndTime: at(20)}}},
+		Gaps: []storage.RecordingGap{
+			{Range: storage.RecordingRange{StartTime: at(10), EndTime: at(11)}},
+			{Range: storage.RecordingRange{StartTime: at(19), EndTime: at(20)}},
+		},
+	}
+	got, ok := coveredExportRange(report)
+	if !ok || got.StartTime != at(11) || got.EndTime != at(16) {
+		t.Fatalf("unexpected covered range: %#v, %v", got, ok)
+	}
+	report.Gaps = []storage.RecordingGap{{Range: report.RequestedRange}}
+	if _, ok := coveredExportRange(report); ok {
+		t.Fatal("selected a range entirely covered by a gap")
+	}
+	report.Gaps = nil
+	report.Segments = nil
+	if _, ok := coveredExportRange(report); ok {
+		t.Fatal("selected a range without published media")
+	}
+}

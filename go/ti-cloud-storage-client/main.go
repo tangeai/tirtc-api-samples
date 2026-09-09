@@ -81,20 +81,22 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	appID, token := os.Getenv("TI_CLOUD_STORAGE_APP_ID"), os.Getenv("TI_CLOUD_STORAGE_ACCESS_TOKEN")
-	if appID == "" || token == "" {
-		return errors.New("TI_CLOUD_STORAGE_APP_ID and TI_CLOUD_STORAGE_ACCESS_TOKEN are required")
+	appID := os.Getenv("TI_CLOUD_STORAGE_APP_ID")
+	accessKeyID := os.Getenv("TI_CLOUD_STORAGE_ACCESS_KEY_ID")
+	accessKeySecret := os.Getenv("TI_CLOUD_STORAGE_ACCESS_KEY_SECRET")
+	deviceID := os.Getenv("TI_CLOUD_STORAGE_DEVICE_ID")
+	if appID == "" || accessKeyID == "" || accessKeySecret == "" || deviceID == "" {
+		return errors.New("TI_CLOUD_STORAGE_APP_ID, TI_CLOUD_STORAGE_ACCESS_KEY_ID, TI_CLOUD_STORAGE_ACCESS_KEY_SECRET, and TI_CLOUD_STORAGE_DEVICE_ID are required")
 	}
 	if err := os.MkdirAll(config.outputDir, 0o700); err != nil {
 		return fmt.Errorf("prepare output directory: %w", err)
 	}
-	if err := storage.Init(storage.InitOptions{AppID: appID, CacheDir: config.cacheDir, Endpoint: config.endpoint}); err != nil {
-		return fmt.Errorf("initialize Ti Cloud Storage: %w", err)
-	}
-	cloudStorage, err := storage.New(token)
+	client, err := storage.NewClient(storage.ClientOptions{
+		AppID: appID, AccessKeyID: accessKeyID, AccessKeySecret: accessKeySecret,
+		CacheDir: config.cacheDir, Endpoint: config.endpoint,
+	})
 	if err != nil {
-		_ = storage.Shutdown()
-		return fmt.Errorf("create cloudStorage: %w", err)
+		return fmt.Errorf("initialize Ti Cloud Storage: %w", err)
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -112,7 +114,6 @@ func run() error {
 		if cleaned {
 			return nil
 		}
-		cleaned = true
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
@@ -126,8 +127,10 @@ func run() error {
 		if replay != nil {
 			cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, replay.Close))
 		}
-		cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, cloudStorage.Close), storage.Shutdown())
-		return errors.Join(cleanupErrors...)
+		cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, client.Close))
+		err := errors.Join(cleanupErrors...)
+		cleaned = err == nil
+		return err
 	}
 	defer func() { _ = cleanup() }()
 
@@ -137,10 +140,10 @@ func run() error {
 	}
 	startDate := config.startTime.In(location).Format(time.DateOnly)
 	endDate := config.endTime.In(location).Format(time.DateOnly)
-	if _, err := listDaysWithTokenRetry(ctx, cloudStorage, startDate, endDate); err != nil {
+	if _, err := client.ListRecordingDays(ctx, deviceID, startDate, endDate); err != nil {
 		return fmt.Errorf("list recording days: %w", err)
 	}
-	ranges, err := listRangesWithTokenRetry(ctx, cloudStorage, config.startTime, config.endTime)
+	ranges, err := client.ListRecordings(ctx, deviceID, config.startTime, config.endTime)
 	if err != nil {
 		return fmt.Errorf("list recording ranges: %w", err)
 	}
@@ -153,9 +156,15 @@ func run() error {
 	terminal := make(chan error, 1)
 	failures := make(chan error, 16)
 	frames := newFrameSignals()
-	replay, err = cloudStorage.NewReplay(storage.ReplayOptions{
+	replay, err = client.NewReplay(deviceID, storage.ReplayOptions{
 		OnCompleted: func() { notifyTerminal(terminal, nil) },
-		OnError:     func(err error) { notifyTerminal(terminal, err) },
+		OnError: func(err error) {
+			notifyError(failures, err)
+			notifyTerminal(terminal, err)
+		},
+		OnRecordingGap: func(gap storage.RecordingGap) {
+			fmt.Printf("replay gap %s..%s tracks=%v reasons=%v\n", gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("create replay: %w", err)
@@ -195,15 +204,21 @@ func run() error {
 	}
 	postRecordingBaseline := frames.snapshot()
 	if err := waitRecordingFramesAfter(ctx, frames, postRecordingBaseline, failures); err != nil {
-		_, _ = recording.Stop()
-		return fmt.Errorf("wait for post-recording frames: %w", err)
+		file, stopErr := recording.Stop()
+		if file.Path != "" {
+			stopErr = errors.Join(stopErr, file.Delete())
+		}
+		return fmt.Errorf("wait for post-recording frames: %w", errors.Join(err, stopErr))
 	}
 	replayRecording, err := recording.Stop()
 	if err != nil {
+		if replayRecording.Path != "" {
+			err = errors.Join(err, replayRecording.Delete())
+		}
 		return fmt.Errorf("stop replay recording: %w", err)
 	}
 	if err := saveTemporaryMedia(replayRecording.Path, filepath.Join(config.outputDir, "ti-cloud-storage-replay-recording.mp4"), []byte("ftyp"), 4); err != nil {
-		return err
+		return errors.Join(err, replayRecording.Delete())
 	}
 	if err := replayRecording.Delete(); err != nil {
 		return fmt.Errorf("delete temporary replay recording: %w", err)
@@ -250,7 +265,7 @@ func run() error {
 		return fmt.Errorf("take snapshot: %w", err)
 	}
 	if err := saveTemporaryMedia(snapshot.Path, filepath.Join(config.outputDir, "ti-cloud-storage-snapshot.jpg"), []byte{0xff, 0xd8}, 0); err != nil {
-		return err
+		return errors.Join(err, snapshot.Delete())
 	}
 	if err := snapshot.Delete(); err != nil {
 		return fmt.Errorf("delete temporary snapshot: %w", err)
@@ -269,27 +284,155 @@ func run() error {
 		return err
 	}
 
-	exportTask, err := cloudStorage.ExportRecording(storage.ExportOptions{
+	exportTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
 		StartTime: selected.StartTime, EndTime: selected.EndTime,
 		VideoChannelID: config.videoChannelID, AudioChannelID: &audioID,
+		OnProgress: func(progress storage.ExportProgress) {
+			fmt.Printf("export progress %.3f covered=%s\n", progress.Fraction, progress.CoveredDuration)
+		},
+		OnRecordingGap: func(gap storage.RecordingGap) {
+			fmt.Printf("export gap %s..%s tracks=%v reasons=%v\n", gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("start range export: %w", err)
 	}
-	exported, err := waitExport(ctx, exportTask)
+	exported, err := exportTask.Wait()
+	fmt.Printf("export report complete=%t termination=%d covered=%s gaps=%d unprocessed=%d cause=%v\n",
+		exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
+		len(exported.Report.Gaps), len(exported.Report.UnprocessedRanges), exported.Report.Cause)
 	if err != nil {
+		if exported.File != nil {
+			err = errors.Join(err, exported.File.Delete())
+		}
 		return fmt.Errorf("export recording range: %w", err)
 	}
-	if exportTask.Progress() != 1 {
-		return fmt.Errorf("export completed with progress %.3f", exportTask.Progress())
-	}
-	if err := saveTemporaryMedia(exported.Path, filepath.Join(config.outputDir, "ti-cloud-storage-range-export.mp4"), []byte("ftyp"), 4); err != nil {
+	if progress := exportTask.Progress().Fraction; progress < 0 || progress > 1 ||
+		(exported.Report.Complete && progress != 1) {
+		err := fmt.Errorf("export returned inconsistent progress %.3f (complete=%t)", progress, exported.Report.Complete)
+		if exported.File != nil {
+			err = errors.Join(err, exported.File.Delete())
+		}
 		return err
 	}
-	if err := exported.Delete(); err != nil {
+	if exported.File == nil {
+		return errors.New("successful export returned no file")
+	}
+	if err := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, "ti-cloud-storage-range-export.mp4"), []byte("ftyp"), 4); err != nil {
+		return errors.Join(err, exported.File.Delete())
+	}
+	if err := exported.File.Delete(); err != nil {
 		return fmt.Errorf("delete temporary range export: %w", err)
 	}
-	return cleanup()
+	retainedRange, available := coveredExportRange(exported.Report)
+	if !available {
+		return cleanup()
+	}
+
+	// Select at most five seconds confirmed by the public report, even for partial output.
+	// Collect this completed task only after Client.Close; check its own report again.
+	completed := make(chan struct{}, 1)
+	retainedTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+		StartTime: retainedRange.StartTime, EndTime: retainedRange.EndTime,
+		VideoChannelID: config.videoChannelID, AudioChannelID: &audioID,
+		OnProgress: func(progress storage.ExportProgress) {
+			if progress.Fraction == 1 {
+				select {
+				case completed <- struct{}{}:
+				default:
+				}
+			}
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("start retained export: %w", err)
+	}
+	select {
+	case <-completed:
+	case <-ctx.Done():
+		cancelErr := retainedTask.Cancel()
+		partial, waitErr := retainedTask.Wait()
+		if partial.File != nil {
+			waitErr = errors.Join(waitErr, partial.File.Delete())
+		}
+		return fmt.Errorf("wait for retained export completion: %w", errors.Join(ctx.Err(), cancelErr, waitErr))
+	}
+	if err := cleanup(); err != nil {
+		cancelErr := retainedTask.Cancel()
+		partial, waitErr := retainedTask.Wait()
+		if partial.File != nil {
+			waitErr = errors.Join(waitErr, partial.File.Delete())
+		}
+		return errors.Join(err, cancelErr, waitErr)
+	}
+	retained, err := retainedTask.Wait()
+	if err != nil || retained.File == nil || !retained.Report.Complete {
+		if retained.File != nil {
+			err = errors.Join(err, retained.File.Delete())
+		}
+		return fmt.Errorf("collect completed export after client close: %w",
+			errors.Join(err, errors.New("complete MP4 required")))
+	}
+	if err := saveTemporaryMedia(retained.File.Path,
+		filepath.Join(config.outputDir, "ti-cloud-storage-export-after-close.mp4"), []byte("ftyp"), 4); err != nil {
+		return errors.Join(err, retained.File.Delete())
+	}
+	copied, err := retainedTask.Wait()
+	if err != nil || copied.File == nil || copied.File.Path != retained.File.Path {
+		err = errors.Join(err, retained.File.Delete())
+		if copied.File != nil && copied.File.Path != retained.File.Path {
+			err = errors.Join(err, copied.File.Delete())
+		}
+		return errors.Join(errors.New("repeated Wait changed the completed export file"), err)
+	}
+	if err := retained.File.Delete(); err != nil {
+		return fmt.Errorf("delete export after client close: %w", err)
+	}
+	if err := copied.File.Delete(); err != nil {
+		return fmt.Errorf("delete copied export result: %w", err)
+	}
+	fmt.Println("completed export collected, saved and deleted after client close")
+	return nil
+}
+
+// Choose from published segments, excluding every reported selected-track gap.
+func coveredExportRange(report storage.ExportReport) (storage.RecordingRange, bool) {
+	var best storage.RecordingRange
+	consider := func(start, end time.Time) {
+		if end.After(start.Add(5 * time.Second)) {
+			end = start.Add(5 * time.Second)
+		}
+		if end.Sub(start) > best.EndTime.Sub(best.StartTime) {
+			best = storage.RecordingRange{StartTime: start, EndTime: end}
+		}
+	}
+	gapIndex := 0
+	for _, segment := range report.Segments {
+		start, end := segment.SourceRange.StartTime, segment.SourceRange.EndTime
+		if start.Before(report.RequestedRange.StartTime) {
+			start = report.RequestedRange.StartTime
+		}
+		if end.After(report.RequestedRange.EndTime) {
+			end = report.RequestedRange.EndTime
+		}
+		for gapIndex < len(report.Gaps) && !report.Gaps[gapIndex].Range.EndTime.After(start) {
+			gapIndex++
+		}
+		for i := gapIndex; i < len(report.Gaps) && report.Gaps[i].Range.StartTime.Before(end); i++ {
+			gap := report.Gaps[i].Range
+			if gap.StartTime.After(start) {
+				consider(start, gap.StartTime)
+			}
+			if gap.EndTime.After(start) {
+				start = gap.EndTime
+			}
+		}
+		consider(start, end)
+		if best.EndTime.Sub(best.StartTime) == 5*time.Second {
+			return best, true
+		}
+	}
+	return best, best.EndTime.After(best.StartTime)
 }
 
 func parseConfig() (cloudStorageConfig, error) {
@@ -313,39 +456,6 @@ func parseConfig() (cloudStorageConfig, error) {
 		startTime: time.UnixMilli(startMS).UTC(), endTime: time.UnixMilli(endMS).UTC(),
 		audioChannelID: uint8(audioChannelID), videoChannelID: uint8(videoChannelID),
 	}, nil
-}
-
-func listDaysWithTokenRetry(ctx context.Context, cloudStorage *storage.CloudStorage, startDate, endDate string) ([]storage.RecordingDay, error) {
-	days, err := cloudStorage.ListRecordingDays(ctx, startDate, endDate)
-	if !errors.Is(err, storage.ErrTokenExpired) {
-		return days, err
-	}
-	if err := refreshToken(cloudStorage); err != nil {
-		return nil, err
-	}
-	return cloudStorage.ListRecordingDays(ctx, startDate, endDate)
-}
-
-func listRangesWithTokenRetry(ctx context.Context, cloudStorage *storage.CloudStorage, startTime, endTime time.Time) ([]storage.RecordingRange, error) {
-	ranges, err := cloudStorage.ListRecordings(ctx, startTime, endTime)
-	if !errors.Is(err, storage.ErrTokenExpired) {
-		return ranges, err
-	}
-	if err := refreshToken(cloudStorage); err != nil {
-		return nil, err
-	}
-	return cloudStorage.ListRecordings(ctx, startTime, endTime)
-}
-
-func refreshToken(cloudStorage *storage.CloudStorage) error {
-	refreshed := os.Getenv("TI_CLOUD_STORAGE_REFRESHED_ACCESS_TOKEN")
-	if refreshed == "" {
-		return errors.New("operation returned ErrTokenExpired; set TI_CLOUD_STORAGE_REFRESHED_ACCESS_TOKEN and retry")
-	}
-	if err := cloudStorage.UpdateToken(refreshed); err != nil {
-		return fmt.Errorf("update expired token: %w", err)
-	}
-	return nil
 }
 
 func newestFirstRecordingRanges(input []storage.RecordingRange) []storage.RecordingRange {
@@ -465,25 +575,6 @@ func waitReplayTerminal(ctx context.Context, terminal <-chan error, failures <-c
 		return fmt.Errorf("replay output failed: %w", err)
 	case <-ctx.Done():
 		return fmt.Errorf("wait for replay completion: %w", ctx.Err())
-	}
-}
-
-func waitExport(ctx context.Context, task *storage.ExportTask) (storage.RecordingFile, error) {
-	type result struct {
-		file storage.RecordingFile
-		err  error
-	}
-	done := make(chan result, 1)
-	go func() {
-		file, err := task.Wait()
-		done <- result{file, err}
-	}()
-	select {
-	case result := <-done:
-		return result.file, result.err
-	case <-ctx.Done():
-		file, err := task.Stop()
-		return file, errors.Join(ctx.Err(), err)
 	}
 }
 

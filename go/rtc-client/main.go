@@ -95,16 +95,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	appID, token := os.Getenv("TIRTC_APP_ID"), os.Getenv("TIRTC_TOKEN")
-	if appID == "" || token == "" {
-		return errors.New("TIRTC_APP_ID and TIRTC_TOKEN are required")
+	appID := os.Getenv("TIRTC_APP_ID")
+	accessKeyID := os.Getenv("TIRTC_ACCESS_KEY_ID")
+	accessKeySecret := os.Getenv("TIRTC_SECRET_KEY_ID")
+	if appID == "" || accessKeyID == "" || accessKeySecret == "" {
+		return errors.New("TIRTC_APP_ID, TIRTC_ACCESS_KEY_ID, and TIRTC_SECRET_KEY_ID are required")
 	}
 	if err := os.MkdirAll(config.outputDir, 0o700); err != nil {
 		return fmt.Errorf("prepare output directory: %w", err)
 	}
-	if err := tirtc.Init(tirtc.InitOptions{
-		AppID: appID, CacheDir: config.cacheDir, Endpoint: config.endpoint,
-	}); err != nil {
+	client, err := tirtc.NewClient(tirtc.ClientOptions{
+		AppID: appID, AccessKeyID: accessKeyID, AccessKeySecret: accessKeySecret,
+		CacheDir: config.cacheDir, Endpoint: config.endpoint,
+	})
+	if err != nil {
 		return fmt.Errorf("initialize TiRTC: %w", err)
 	}
 
@@ -113,18 +117,14 @@ func run() error {
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	connected := make(chan struct{}, 1)
 	commandReceived := make(chan struct{}, 1)
 	messageReceived := make(chan struct{}, 1)
 	failures := make(chan error, 16)
 	frames := newFrameSignals()
-	connection, err := tirtc.NewConn(tirtc.ConnOptions{
-		OnStateChanged: func(state tirtc.ConnState, err error) {
+	connection, err := client.NewConnection(tirtc.ConnOptions{
+		OnStateChanged: func(_ tirtc.ConnState, err error) {
 			if err != nil {
 				notifyError(failures, err)
-			}
-			if state == tirtc.ConnConnected {
-				notify(connected)
 			}
 		},
 		OnCommand: func(uint32, []byte) { notify(commandReceived) },
@@ -133,14 +133,14 @@ func run() error {
 		},
 	})
 	if err != nil {
-		_ = tirtc.Shutdown()
+		_ = client.Close()
 		return fmt.Errorf("create connection: %w", err)
 	}
 
 	audio, video, encodedAudio, encodedVideo, err := createOutputs(frames, failures)
 	if err != nil {
 		_ = connection.Close()
-		_ = tirtc.Shutdown()
+		_ = client.Close()
 		return err
 	}
 	cleaned := false
@@ -157,7 +157,7 @@ func run() error {
 			closeEventually(cleanupCtx, video.Close),
 			closeEventually(cleanupCtx, audio.Close),
 			connection.Close(),
-			tirtc.Shutdown(),
+			client.Close(),
 		)
 	}
 	defer func() { _ = cleanup() }()
@@ -172,11 +172,8 @@ func run() error {
 			return fmt.Errorf("attach %s: %w", name, err)
 		}
 	}
-	if err := connection.Connect(config.remoteID, token); err != nil {
+	if err := connection.Connect(ctx, config.remoteID); err != nil {
 		return fmt.Errorf("connect: %w", err)
-	}
-	if err := waitSignal(ctx, "connection", connected, failures); err != nil {
-		return err
 	}
 	if err := connection.SubscribeAudio(config.audioStreamID); err != nil {
 		return fmt.Errorf("subscribe audio: %w", err)
@@ -215,15 +212,24 @@ func run() error {
 	}
 	postRecordingBaseline := frames.snapshot()
 	if err := connection.RequestVideoKeyframe(config.videoStreamID); err != nil {
-		_, _ = recording.Stop()
-		return fmt.Errorf("request recording key frame: %w", err)
+		file, stopErr := recording.Stop()
+		if file.Path != "" {
+			stopErr = errors.Join(stopErr, file.Delete())
+		}
+		return fmt.Errorf("request recording key frame: %w", errors.Join(err, stopErr))
 	}
 	if err := waitRecordingFramesAfter(ctx, frames, postRecordingBaseline, failures); err != nil {
-		_, _ = recording.Stop()
-		return fmt.Errorf("wait for post-recording frames: %w", err)
+		file, stopErr := recording.Stop()
+		if file.Path != "" {
+			stopErr = errors.Join(stopErr, file.Delete())
+		}
+		return fmt.Errorf("wait for post-recording frames: %w", errors.Join(err, stopErr))
 	}
 	recordingFile, err := recording.Stop()
 	if err != nil {
+		if recordingFile.Path != "" {
+			err = errors.Join(err, recordingFile.Delete())
+		}
 		return fmt.Errorf("stop recording: %w", err)
 	}
 	if err := saveTemporaryMedia(
@@ -231,7 +237,7 @@ func run() error {
 		filepath.Join(config.outputDir, "rtc-recording.mp4"),
 		[]byte("ftyp"), 4,
 	); err != nil {
-		return err
+		return errors.Join(err, recordingFile.Delete())
 	}
 	if err := recordingFile.Delete(); err != nil {
 		return fmt.Errorf("delete temporary recording: %w", err)
@@ -246,7 +252,7 @@ func run() error {
 		filepath.Join(config.outputDir, "rtc-snapshot.jpg"),
 		[]byte{0xff, 0xd8}, 0,
 	); err != nil {
-		return err
+		return errors.Join(err, snapshot.Delete())
 	}
 	if err := snapshot.Delete(); err != nil {
 		return fmt.Errorf("delete temporary snapshot: %w", err)
