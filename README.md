@@ -17,3 +17,5 @@
 示例只保留理解 API 调用和基本串联方式所需的代码，不承载复杂业务逻辑。
 
 [TiRTC 开发文档](https://docs.tange.ai/products/tirtc/)
+
+- [Java Server SDK Examples](java/)
