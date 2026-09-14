@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"sort"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -23,9 +25,57 @@ const (
 )
 
 type cloudStorageConfig struct {
-	endpoint, cacheDir, outputDir  string
-	startTime, endTime             time.Time
-	audioChannelID, videoChannelID uint8
+	endpoint, cacheDir, outputDir string
+	startTime, endTime            time.Time
+	audioChannelID                *uint8
+	videoChannelIDs               []uint8
+}
+
+type optionalUintFlag struct {
+	value uint
+	set   bool
+}
+
+func (value *optionalUintFlag) String() string {
+	if !value.set {
+		return ""
+	}
+	return strconv.FormatUint(uint64(value.value), 10)
+}
+
+func (value *optionalUintFlag) Set(text string) error {
+	parsed, err := strconv.ParseUint(text, 10, 8)
+	if err != nil {
+		return err
+	}
+	value.value, value.set = uint(parsed), true
+	return nil
+}
+
+type uintListFlag []uint
+
+func (value *uintListFlag) String() string {
+	parts := make([]string, len(*value))
+	for index, item := range *value {
+		parts[index] = strconv.FormatUint(uint64(item), 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (value *uintListFlag) Set(text string) error {
+	parsed, err := strconv.ParseUint(text, 10, 8)
+	if err != nil {
+		return err
+	}
+	*value = append(*value, uint(parsed))
+	return nil
+}
+
+type videoOutputPair struct {
+	channelID uint8
+	decoded   *storage.VideoOutput
+	encoded   *storage.EncodedVideoOutput
+	frames    *frameSignals
 }
 
 type frameSignals struct {
@@ -106,9 +156,8 @@ func run() error {
 
 	var replay *storage.Replay
 	var audio *storage.AudioOutput
-	var video *storage.VideoOutput
 	var encodedAudio *storage.EncodedAudioOutput
-	var encodedVideo *storage.EncodedVideoOutput
+	var videos []videoOutputPair
 	cleaned := false
 	cleanup := func() error {
 		if cleaned {
@@ -117,9 +166,12 @@ func run() error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
-		for _, closeResource := range []func() error{
-			closeFunction(encodedVideo), closeFunction(encodedAudio), closeFunction(video), closeFunction(audio),
-		} {
+		for index := len(videos) - 1; index >= 0; index-- {
+			for _, closeResource := range []func() error{videos[index].encoded.Close, videos[index].decoded.Close} {
+				cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, closeResource))
+			}
+		}
+		for _, closeResource := range []func() error{closeFunction(encodedAudio), closeFunction(audio)} {
 			if closeResource != nil {
 				cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, closeResource))
 			}
@@ -152,10 +204,14 @@ func run() error {
 		return errors.New("no recording is available in the requested window")
 	}
 	selected := ordered[0]
+	if config.audioChannelID == nil && len(config.videoChannelIDs) == 0 {
+		fmt.Println("recording query completed; no media selected")
+		return cleanup()
+	}
 
 	terminal := make(chan error, 1)
 	failures := make(chan error, 16)
-	frames := newFrameSignals()
+	audioFrames := newFrameSignals()
 	replay, err = client.NewReplay(deviceID, storage.ReplayOptions{
 		OnCompleted: func() { notifyTerminal(terminal, nil) },
 		OnError: func(err error) {
@@ -169,24 +225,35 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("create replay: %w", err)
 	}
-	audio, video, encodedAudio, encodedVideo, err = createOutputs(frames, failures)
-	if err != nil {
-		return err
+	if config.audioChannelID != nil {
+		audio, encodedAudio, err = createAudioOutputs(audioFrames, failures)
+		if err != nil {
+			return err
+		}
+		if err := audio.Attach(replay, *config.audioChannelID); err != nil {
+			return fmt.Errorf("attach decoded audio: %w", err)
+		}
+		if err := encodedAudio.Attach(replay, *config.audioChannelID); err != nil {
+			return fmt.Errorf("attach encoded audio: %w", err)
+		}
 	}
-	for name, attach := range map[string]func() error{
-		"decoded audio": func() error { return audio.Attach(replay, config.audioChannelID) },
-		"decoded video": func() error { return video.Attach(replay, config.videoChannelID) },
-		"encoded audio": func() error { return encodedAudio.Attach(replay, config.audioChannelID) },
-		"encoded video": func() error { return encodedVideo.Attach(replay, config.videoChannelID) },
-	} {
-		if err := attach(); err != nil {
-			return fmt.Errorf("attach %s: %w", name, err)
+	for _, channelID := range config.videoChannelIDs {
+		pair, createErr := createVideoOutputs(channelID, failures)
+		if createErr != nil {
+			return createErr
+		}
+		videos = append(videos, pair)
+		if err := pair.decoded.Attach(replay, channelID); err != nil {
+			return fmt.Errorf("attach decoded video %d: %w", channelID, err)
+		}
+		if err := pair.encoded.Attach(replay, channelID); err != nil {
+			return fmt.Errorf("attach encoded video %d: %w", channelID, err)
 		}
 	}
 	if err := replay.Play(selected.StartTime, selected.EndTime); err != nil {
 		return fmt.Errorf("play replay: %w", err)
 	}
-	if err := waitFrames(ctx, frames, failures); err != nil {
+	if err := waitSelectedFrames(ctx, audioFrames, config.audioChannelID != nil, videos, failures); err != nil {
 		return err
 	}
 	if err := replay.Pause(); err != nil {
@@ -195,44 +262,64 @@ func run() error {
 	if err := replay.Resume(); err != nil {
 		return fmt.Errorf("resume replay: %w", err)
 	}
-	audioID := config.audioChannelID
-	recording, err := replay.StartRecording(storage.StartRecordingOptions{
-		VideoChannelID: config.videoChannelID, AudioChannelID: &audioID,
-	})
-	if err != nil {
-		return fmt.Errorf("start replay recording: %w", err)
-	}
-	postRecordingBaseline := frames.snapshot()
-	if err := waitRecordingFramesAfter(ctx, frames, postRecordingBaseline, failures); err != nil {
-		file, stopErr := recording.Stop()
-		if file.Path != "" {
-			stopErr = errors.Join(stopErr, file.Delete())
+	for _, pair := range videos {
+		recording, startErr := replay.StartRecording(storage.StartRecordingOptions{
+			VideoChannelID: pair.channelID, AudioChannelID: config.audioChannelID,
+		})
+		if startErr != nil {
+			return fmt.Errorf("start replay recording channel %d: %w", pair.channelID, startErr)
 		}
-		return fmt.Errorf("wait for post-recording frames: %w", errors.Join(err, stopErr))
-	}
-	replayRecording, err := recording.Stop()
-	if err != nil {
-		if replayRecording.Path != "" {
-			err = errors.Join(err, replayRecording.Delete())
+		baseline := pair.frames.snapshot()
+		if waitErr := waitVideoRecordingFramesAfter(ctx, pair.frames, baseline, failures); waitErr != nil {
+			file, stopErr := recording.Stop()
+			if file.Path != "" {
+				stopErr = errors.Join(stopErr, file.Delete())
+			}
+			return fmt.Errorf("wait for channel %d recording frames: %w", pair.channelID, errors.Join(waitErr, stopErr))
 		}
-		return fmt.Errorf("stop replay recording: %w", err)
-	}
-	if err := saveTemporaryMedia(replayRecording.Path, filepath.Join(config.outputDir, "ti-cloud-storage-replay-recording.mp4"), []byte("ftyp"), 4); err != nil {
-		return errors.Join(err, replayRecording.Delete())
-	}
-	if err := replayRecording.Delete(); err != nil {
-		return fmt.Errorf("delete temporary replay recording: %w", err)
+		replayRecording, stopErr := recording.Stop()
+		if stopErr != nil {
+			if replayRecording.Path != "" {
+				stopErr = errors.Join(stopErr, replayRecording.Delete())
+			}
+			return fmt.Errorf("stop replay recording channel %d: %w", pair.channelID, stopErr)
+		}
+		if saveErr := saveTemporaryMedia(replayRecording.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-replay-recording-channel-%d.mp4", pair.channelID)), []byte("ftyp"), 4); saveErr != nil {
+			return errors.Join(saveErr, replayRecording.Delete())
+		}
+		if deleteErr := replayRecording.Delete(); deleteErr != nil {
+			return fmt.Errorf("delete temporary replay recording: %w", deleteErr)
+		}
+		snapshot, snapshotErr := takeSnapshotWhenReady(ctx, pair.decoded.TakeSnapshot, pair.frames.video, failures)
+		if snapshotErr != nil {
+			return fmt.Errorf("take channel %d snapshot: %w", pair.channelID, snapshotErr)
+		}
+		if saveErr := saveTemporaryMedia(snapshot.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-snapshot-channel-%d.jpg", pair.channelID)), []byte{0xff, 0xd8}, 0); saveErr != nil {
+			return errors.Join(saveErr, snapshot.Delete())
+		}
+		if deleteErr := snapshot.Delete(); deleteErr != nil {
+			return fmt.Errorf("delete temporary snapshot: %w", deleteErr)
+		}
+		fmt.Printf("consumed video channel %d\n", pair.channelID)
 	}
 	// The headless callback output proves decoded audio delivery. Detach it before
 	// playback-rate verification so the decoded video self-clock owns cadence.
-	if err := audio.Detach(); err != nil {
-		return fmt.Errorf("detach decoded audio before playback-rate verification: %w", err)
+	if audio != nil && len(videos) > 0 {
+		if err := audio.Detach(); err != nil {
+			return fmt.Errorf("detach decoded audio before playback-rate verification: %w", err)
+		}
 	}
 	seekTarget := selected.StartTime.Add(selected.EndTime.Sub(selected.StartTime) / 5)
 	if err := replay.Seek(seekTarget); err != nil {
 		return fmt.Errorf("seek replay: %w", err)
 	}
-	slowPlaybackBaseline := frames.video.count.Load()
+	progressFrames := audioFrames.audio
+	progressName := "audio"
+	if len(videos) > 0 {
+		progressFrames = videos[0].frames.video
+		progressName = fmt.Sprintf("video channel %d", videos[0].channelID)
+	}
+	slowPlaybackBaseline := progressFrames.count.Load()
 	if err := replay.SetSpeed(storage.ReplaySpeed0_5x); err != nil {
 		return fmt.Errorf("set replay speed: %w", err)
 	}
@@ -240,11 +327,11 @@ func run() error {
 		return errors.New("replay speed cache did not update")
 	}
 	if err := waitFrameAfter(
-		ctx, "wait for slow playback video", frames.video, slowPlaybackBaseline, failures,
+		ctx, "wait for slow playback "+progressName, progressFrames, slowPlaybackBaseline, failures,
 	); err != nil {
 		return err
 	}
-	normalPlaybackBaseline := frames.video.count.Load()
+	normalPlaybackBaseline := progressFrames.count.Load()
 	if err := replay.SetSpeed(storage.ReplaySpeed1x); err != nil {
 		return fmt.Errorf("restore replay speed: %w", err)
 	}
@@ -252,23 +339,12 @@ func run() error {
 		return errors.New("replay speed cache did not restore")
 	}
 	if err := waitFrameAfter(
-		ctx, "wait for restored playback video", frames.video, normalPlaybackBaseline, failures,
+		ctx, "wait for restored playback "+progressName, progressFrames, normalPlaybackBaseline, failures,
 	); err != nil {
 		return err
 	}
 	if _, _, err := replay.CurrentTime(); err != nil {
 		return fmt.Errorf("read replay time: %w", err)
-	}
-
-	snapshot, err := takeSnapshotWhenReady(ctx, video.TakeSnapshot, frames.video, failures)
-	if err != nil {
-		return fmt.Errorf("take snapshot: %w", err)
-	}
-	if err := saveTemporaryMedia(snapshot.Path, filepath.Join(config.outputDir, "ti-cloud-storage-snapshot.jpg"), []byte{0xff, 0xd8}, 0); err != nil {
-		return errors.Join(err, snapshot.Delete())
-	}
-	if err := snapshot.Delete(); err != nil {
-		return fmt.Errorf("delete temporary snapshot: %w", err)
 	}
 
 	if err := waitReplayTerminal(ctx, terminal, failures); err != nil {
@@ -284,47 +360,55 @@ func run() error {
 		return err
 	}
 
-	exportTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
-		StartTime: selected.StartTime, EndTime: selected.EndTime,
-		VideoChannelID: config.videoChannelID, AudioChannelID: &audioID,
-		OnProgress: func(progress storage.ExportProgress) {
-			fmt.Printf("export progress %.3f covered=%s\n", progress.Fraction, progress.CoveredDuration)
-		},
-		OnRecordingGap: func(gap storage.RecordingGap) {
-			fmt.Printf("export gap %s..%s tracks=%v reasons=%v\n", gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
-		},
-	})
-	if err != nil {
-		return fmt.Errorf("start range export: %w", err)
+	if len(videos) == 0 {
+		return cleanup()
 	}
-	exported, err := exportTask.Wait()
-	fmt.Printf("export report complete=%t termination=%d covered=%s gaps=%d unprocessed=%d cause=%v\n",
-		exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
-		len(exported.Report.Gaps), len(exported.Report.UnprocessedRanges), exported.Report.Cause)
-	if err != nil {
-		if exported.File != nil {
-			err = errors.Join(err, exported.File.Delete())
+	var retainedReport storage.ExportReport
+	for index, pair := range videos {
+		exportTask, exportErr := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+			StartTime: selected.StartTime, EndTime: selected.EndTime,
+			VideoChannelID: pair.channelID, AudioChannelID: config.audioChannelID,
+			OnProgress: func(progress storage.ExportProgress) {
+				fmt.Printf("export channel=%d progress %.3f covered=%s\n", pair.channelID, progress.Fraction, progress.CoveredDuration)
+			},
+			OnRecordingGap: func(gap storage.RecordingGap) {
+				fmt.Printf("export channel=%d gap %s..%s tracks=%v reasons=%v\n", pair.channelID, gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
+			},
+		})
+		if exportErr != nil {
+			return fmt.Errorf("start channel %d range export: %w", pair.channelID, exportErr)
 		}
-		return fmt.Errorf("export recording range: %w", err)
-	}
-	if progress := exportTask.Progress().Fraction; progress < 0 || progress > 1 ||
-		(exported.Report.Complete && progress != 1) {
-		err := fmt.Errorf("export returned inconsistent progress %.3f (complete=%t)", progress, exported.Report.Complete)
-		if exported.File != nil {
-			err = errors.Join(err, exported.File.Delete())
+		exported, waitErr := exportTask.Wait()
+		fmt.Printf("export channel=%d report complete=%t termination=%d covered=%s gaps=%d unprocessed=%d cause=%v\n",
+			pair.channelID, exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
+			len(exported.Report.Gaps), len(exported.Report.UnprocessedRanges), exported.Report.Cause)
+		if waitErr != nil {
+			if exported.File != nil {
+				waitErr = errors.Join(waitErr, exported.File.Delete())
+			}
+			return fmt.Errorf("export channel %d recording range: %w", pair.channelID, waitErr)
 		}
-		return err
+		if progress := exportTask.Progress().Fraction; progress < 0 || progress > 1 || (exported.Report.Complete && progress != 1) {
+			progressErr := fmt.Errorf("export channel %d returned inconsistent progress %.3f (complete=%t)", pair.channelID, progress, exported.Report.Complete)
+			if exported.File != nil {
+				progressErr = errors.Join(progressErr, exported.File.Delete())
+			}
+			return progressErr
+		}
+		if exported.File == nil {
+			return fmt.Errorf("successful channel %d export returned no file", pair.channelID)
+		}
+		if saveErr := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-range-export-channel-%d.mp4", pair.channelID)), []byte("ftyp"), 4); saveErr != nil {
+			return errors.Join(saveErr, exported.File.Delete())
+		}
+		if deleteErr := exported.File.Delete(); deleteErr != nil {
+			return fmt.Errorf("delete temporary range export: %w", deleteErr)
+		}
+		if index == 0 {
+			retainedReport = exported.Report
+		}
 	}
-	if exported.File == nil {
-		return errors.New("successful export returned no file")
-	}
-	if err := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, "ti-cloud-storage-range-export.mp4"), []byte("ftyp"), 4); err != nil {
-		return errors.Join(err, exported.File.Delete())
-	}
-	if err := exported.File.Delete(); err != nil {
-		return fmt.Errorf("delete temporary range export: %w", err)
-	}
-	retainedRange, available := coveredExportRange(exported.Report)
+	retainedRange, available := coveredExportRange(retainedReport)
 	if !available {
 		return cleanup()
 	}
@@ -334,7 +418,7 @@ func run() error {
 	completed := make(chan struct{}, 1)
 	retainedTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
 		StartTime: retainedRange.StartTime, EndTime: retainedRange.EndTime,
-		VideoChannelID: config.videoChannelID, AudioChannelID: &audioID,
+		VideoChannelID: videos[0].channelID, AudioChannelID: config.audioChannelID,
 		OnProgress: func(progress storage.ExportProgress) {
 			if progress.Fraction == 1 {
 				select {
@@ -374,7 +458,7 @@ func run() error {
 			errors.Join(err, errors.New("complete MP4 required")))
 	}
 	if err := saveTemporaryMedia(retained.File.Path,
-		filepath.Join(config.outputDir, "ti-cloud-storage-export-after-close.mp4"), []byte("ftyp"), 4); err != nil {
+		filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-export-after-close-channel-%d.mp4", videos[0].channelID)), []byte("ftyp"), 4); err != nil {
 		return errors.Join(err, retained.File.Delete())
 	}
 	copied, err := retainedTask.Wait()
@@ -438,23 +522,55 @@ func coveredExportRange(report storage.ExportReport) (storage.RecordingRange, bo
 func parseConfig() (cloudStorageConfig, error) {
 	var endpoint, cacheDir, outputDir string
 	var startMS, endMS int64
-	var audioChannelID, videoChannelID uint
+	var audioChannelID optionalUintFlag
+	var videoChannelIDs uintListFlag
+	var noReceiveAudio, noReceiveVideo bool
 	flag.StringVar(&endpoint, "endpoint", "", "Ti Cloud Storage endpoint")
 	flag.StringVar(&cacheDir, "cache-dir", "", "absolute writable SDK work directory")
 	flag.StringVar(&outputDir, "output-dir", "", "absolute application-owned output directory")
 	flag.Int64Var(&startMS, "start-ms", -1, "recording query start time in Unix milliseconds")
 	flag.Int64Var(&endMS, "end-ms", -1, "recording query end time in Unix milliseconds")
-	flag.UintVar(&audioChannelID, "audio-channel-id", 0, "recorded audio channel ID")
-	flag.UintVar(&videoChannelID, "video-channel-id", 1, "recorded video channel ID")
+	flag.Var(&audioChannelID, "audio-channel-id", "recorded audio channel ID")
+	flag.Var(&videoChannelIDs, "video-channel-id", "recorded video channel ID; repeat up to three times")
+	flag.BoolVar(&noReceiveAudio, "no-receive-audio", false, "do not consume audio")
+	flag.BoolVar(&noReceiveVideo, "no-receive-video", false, "do not consume video")
 	flag.Parse()
+	if noReceiveAudio && audioChannelID.set {
+		return cloudStorageConfig{}, errors.New("--no-receive-audio conflicts with --audio-channel-id")
+	}
+	if noReceiveVideo && len(videoChannelIDs) > 0 {
+		return cloudStorageConfig{}, errors.New("--no-receive-video conflicts with --video-channel-id")
+	}
+	if !audioChannelID.set {
+		audioChannelID.value = 0
+	}
+	if len(videoChannelIDs) == 0 && !noReceiveVideo {
+		videoChannelIDs = append(videoChannelIDs, 1)
+	}
+	seen := make(map[uint]bool, len(videoChannelIDs))
+	for _, channelID := range videoChannelIDs {
+		if channelID > 255 || seen[channelID] {
+			return cloudStorageConfig{}, errors.New("video channel IDs must be distinct values from 0 through 255")
+		}
+		seen[channelID] = true
+	}
 	if !filepath.IsAbs(cacheDir) || !filepath.IsAbs(outputDir) || startMS < 0 || startMS >= endMS ||
-		audioChannelID > 255 || videoChannelID > 255 || audioChannelID == videoChannelID {
-		return cloudStorageConfig{}, errors.New("absolute --cache-dir/--output-dir, a valid --start-ms/--end-ms window, and distinct 0..255 channel IDs are required")
+		(!noReceiveAudio && audioChannelID.value > 255) || len(videoChannelIDs) > 3 {
+		return cloudStorageConfig{}, errors.New("absolute --cache-dir/--output-dir, a valid --start-ms/--end-ms window, optional audio, and up to three distinct 0..255 video channel IDs are required")
+	}
+	var resolvedAudioID *uint8
+	if !noReceiveAudio {
+		value := uint8(audioChannelID.value)
+		resolvedAudioID = &value
+	}
+	resolvedVideoIDs := make([]uint8, len(videoChannelIDs))
+	for index, value := range videoChannelIDs {
+		resolvedVideoIDs[index] = uint8(value)
 	}
 	return cloudStorageConfig{
 		endpoint: endpoint, cacheDir: filepath.Clean(cacheDir), outputDir: filepath.Clean(outputDir),
 		startTime: time.UnixMilli(startMS).UTC(), endTime: time.UnixMilli(endMS).UTC(),
-		audioChannelID: uint8(audioChannelID), videoChannelID: uint8(videoChannelID),
+		audioChannelID: resolvedAudioID, videoChannelIDs: resolvedVideoIDs,
 	}, nil
 }
 
@@ -469,22 +585,26 @@ func newestFirstRecordingRanges(input []storage.RecordingRange) []storage.Record
 	return result
 }
 
-func createOutputs(frames *frameSignals, failures chan<- error) (*storage.AudioOutput, *storage.VideoOutput, *storage.EncodedAudioOutput, *storage.EncodedVideoOutput, error) {
+func createAudioOutputs(frames *frameSignals, failures chan<- error) (*storage.AudioOutput, *storage.EncodedAudioOutput, error) {
 	onError := func(err error) { notifyError(failures, err) }
 	audio, err := storage.NewAudioOutput(storage.AudioOutputOptions{OnFrame: func(storage.AudioFrame) { frames.audio.notify() }, OnError: onError})
 	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	video, err := storage.NewVideoOutput(storage.VideoOutputOptions{OnFrame: func(storage.VideoFrame) { frames.video.notify() }, OnError: onError})
-	if err != nil {
-		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	encodedAudio, err := storage.NewEncodedAudioOutput(storage.EncodedAudioOutputOptions{OnFrame: func(storage.EncodedAudioFrame) { frames.encodedAudio.notify() }, OnError: onError})
 	if err != nil {
-		_ = video.Close()
 		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, err
+	}
+	return audio, encodedAudio, nil
+}
+
+func createVideoOutputs(channelID uint8, failures chan<- error) (videoOutputPair, error) {
+	frames := newFrameSignals()
+	onError := func(err error) { notifyError(failures, fmt.Errorf("video channel %d: %w", channelID, err)) }
+	video, err := storage.NewVideoOutput(storage.VideoOutputOptions{OnFrame: func(storage.VideoFrame) { frames.video.notify() }, OnError: onError})
+	if err != nil {
+		return videoOutputPair{}, err
 	}
 	encodedVideo, err := storage.NewEncodedVideoOutput(storage.EncodedVideoOutputOptions{OnFrame: func(frame storage.EncodedVideoFrame) {
 		frames.encodedVideo.notify()
@@ -493,12 +613,40 @@ func createOutputs(frames *frameSignals, failures chan<- error) (*storage.AudioO
 		}
 	}, OnError: onError})
 	if err != nil {
-		_ = encodedAudio.Close()
 		_ = video.Close()
-		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return videoOutputPair{}, err
 	}
-	return audio, video, encodedAudio, encodedVideo, nil
+	return videoOutputPair{channelID: channelID, decoded: video, encoded: encodedVideo, frames: frames}, nil
+}
+
+func waitSelectedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
+	if receiveAudio {
+		if err := waitFrameAfter(ctx, "decoded audio frame", audioFrames.audio, 0, failures); err != nil {
+			return err
+		}
+		if err := waitFrameAfter(ctx, "encoded audio frame", audioFrames.encodedAudio, 0, failures); err != nil {
+			return err
+		}
+	}
+	for _, pair := range videos {
+		if err := waitFrameAfter(ctx, fmt.Sprintf("decoded video frame channel %d", pair.channelID), pair.frames.video, 0, failures); err != nil {
+			return err
+		}
+		if err := waitFrameAfter(ctx, fmt.Sprintf("encoded video frame channel %d", pair.channelID), pair.frames.encodedVideo, 0, failures); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitVideoRecordingFramesAfter(ctx context.Context, frames *frameSignals, baseline frameSnapshot, failures <-chan error) error {
+	if err := waitFrameAfter(ctx, "decoded video frame", frames.video, baseline.video, failures); err != nil {
+		return err
+	}
+	if err := waitFrameAfter(ctx, "encoded video key frame", frames.encodedVideoKeyFrame, baseline.encodedVideoKeyFrame, failures); err != nil {
+		return err
+	}
+	return waitFrameAfter(ctx, "encoded video frame after key frame", frames.encodedVideo, frames.encodedVideo.count.Load(), failures)
 }
 
 func waitFrames(ctx context.Context, frames *frameSignals, failures <-chan error) error {

@@ -9,6 +9,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"sync/atomic"
 	"syscall"
 	"time"
@@ -22,12 +24,60 @@ const (
 )
 
 type clientConfig struct {
-	endpoint      string
-	remoteID      string
-	cacheDir      string
-	outputDir     string
-	audioStreamID uint8
-	videoStreamID uint8
+	endpoint       string
+	remoteID       string
+	cacheDir       string
+	outputDir      string
+	audioStreamID  *uint8
+	videoStreamIDs []uint8
+}
+
+type optionalUintFlag struct {
+	value uint
+	set   bool
+}
+
+func (value *optionalUintFlag) String() string {
+	if !value.set {
+		return ""
+	}
+	return strconv.FormatUint(uint64(value.value), 10)
+}
+
+func (value *optionalUintFlag) Set(text string) error {
+	parsed, err := strconv.ParseUint(text, 10, 8)
+	if err != nil {
+		return err
+	}
+	value.value = uint(parsed)
+	value.set = true
+	return nil
+}
+
+type uintListFlag []uint
+
+func (value *uintListFlag) String() string {
+	parts := make([]string, len(*value))
+	for index, item := range *value {
+		parts[index] = strconv.FormatUint(uint64(item), 10)
+	}
+	return strings.Join(parts, ",")
+}
+
+func (value *uintListFlag) Set(text string) error {
+	parsed, err := strconv.ParseUint(text, 10, 8)
+	if err != nil {
+		return err
+	}
+	*value = append(*value, uint(parsed))
+	return nil
+}
+
+type videoOutputPair struct {
+	streamID uint8
+	decoded  *tirtc.VideoOutput
+	encoded  *tirtc.EncodedVideoOutput
+	frames   *frameSignals
 }
 
 type frameSignals struct {
@@ -120,7 +170,7 @@ func run() error {
 	commandReceived := make(chan struct{}, 1)
 	messageReceived := make(chan struct{}, 1)
 	failures := make(chan error, 16)
-	frames := newFrameSignals()
+	audioFrames := newFrameSignals()
 	connection, err := client.NewConnection(tirtc.ConnOptions{
 		OnStateChanged: func(_ tirtc.ConnState, err error) {
 			if err != nil {
@@ -137,11 +187,35 @@ func run() error {
 		return fmt.Errorf("create connection: %w", err)
 	}
 
-	audio, video, encodedAudio, encodedVideo, err := createOutputs(frames, failures)
-	if err != nil {
-		_ = connection.Close()
-		_ = client.Close()
-		return err
+	var audio *tirtc.AudioOutput
+	var encodedAudio *tirtc.EncodedAudioOutput
+	if config.audioStreamID != nil {
+		audio, encodedAudio, err = createAudioOutputs(audioFrames, failures)
+		if err != nil {
+			_ = connection.Close()
+			_ = client.Close()
+			return err
+		}
+	}
+	videos := make([]videoOutputPair, 0, len(config.videoStreamIDs))
+	for _, streamID := range config.videoStreamIDs {
+		pair, createErr := createVideoOutputs(streamID, failures)
+		if createErr != nil {
+			for index := len(videos) - 1; index >= 0; index-- {
+				_ = videos[index].encoded.Close()
+				_ = videos[index].decoded.Close()
+			}
+			if encodedAudio != nil {
+				_ = encodedAudio.Close()
+			}
+			if audio != nil {
+				_ = audio.Close()
+			}
+			_ = connection.Close()
+			_ = client.Close()
+			return createErr
+		}
+		videos = append(videos, pair)
 	}
 	cleaned := false
 	cleanup := func() error {
@@ -151,37 +225,57 @@ func run() error {
 		cleaned = true
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
-		return errors.Join(
-			closeEventually(cleanupCtx, encodedVideo.Close),
-			closeEventually(cleanupCtx, encodedAudio.Close),
-			closeEventually(cleanupCtx, video.Close),
-			closeEventually(cleanupCtx, audio.Close),
-			connection.Close(),
-			client.Close(),
-		)
+		var cleanupErrors []error
+		for index := len(videos) - 1; index >= 0; index-- {
+			cleanupErrors = append(cleanupErrors,
+				closeEventually(cleanupCtx, videos[index].encoded.Close),
+				closeEventually(cleanupCtx, videos[index].decoded.Close),
+			)
+		}
+		if encodedAudio != nil {
+			cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, encodedAudio.Close))
+		}
+		if audio != nil {
+			cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, audio.Close))
+		}
+		cleanupErrors = append(cleanupErrors, connection.Close(), client.Close())
+		return errors.Join(cleanupErrors...)
 	}
 	defer func() { _ = cleanup() }()
 
-	for name, attach := range map[string]func() error{
-		"decoded audio": func() error { return audio.Attach(connection, config.audioStreamID) },
-		"decoded video": func() error { return video.Attach(connection, config.videoStreamID) },
-		"encoded audio": func() error { return encodedAudio.Attach(connection, config.audioStreamID) },
-		"encoded video": func() error { return encodedVideo.Attach(connection, config.videoStreamID) },
-	} {
-		if err := attach(); err != nil {
-			return fmt.Errorf("attach %s: %w", name, err)
+	if config.audioStreamID != nil {
+		if err := audio.Attach(connection, *config.audioStreamID); err != nil {
+			return fmt.Errorf("attach decoded audio: %w", err)
+		}
+		if err := encodedAudio.Attach(connection, *config.audioStreamID); err != nil {
+			return fmt.Errorf("attach encoded audio: %w", err)
+		}
+	}
+	for _, pair := range videos {
+		if err := pair.decoded.Attach(connection, pair.streamID); err != nil {
+			return fmt.Errorf("attach decoded video %d: %w", pair.streamID, err)
+		}
+		if err := pair.encoded.Attach(connection, pair.streamID); err != nil {
+			return fmt.Errorf("attach encoded video %d: %w", pair.streamID, err)
 		}
 	}
 	if err := connection.Connect(ctx, config.remoteID); err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
-	if err := connection.SubscribeAudio(config.audioStreamID); err != nil {
-		return fmt.Errorf("subscribe audio: %w", err)
+	if config.audioStreamID != nil {
+		if err := connection.SubscribeAudio(*config.audioStreamID); err != nil {
+			return fmt.Errorf("subscribe audio: %w", err)
+		}
 	}
-	if err := connection.SubscribeVideo(config.videoStreamID); err != nil {
-		return fmt.Errorf("subscribe video: %w", err)
+	for _, pair := range videos {
+		if err := connection.SubscribeVideo(pair.streamID); err != nil {
+			return fmt.Errorf("subscribe video %d: %w", pair.streamID, err)
+		}
+		if err := connection.RequestVideoKeyframe(pair.streamID); err != nil {
+			return fmt.Errorf("request key frame %d: %w", pair.streamID, err)
+		}
 	}
-	if err := waitFrames(ctx, frames, failures); err != nil {
+	if err := waitSelectedFrames(ctx, audioFrames, config.audioStreamID != nil, videos, failures); err != nil {
 		return err
 	}
 
@@ -189,11 +283,14 @@ func run() error {
 		return fmt.Errorf("send command: %w", err)
 	}
 	timestamp := time.Duration(uint32(time.Now().UnixMilli())) * time.Millisecond
-	if err := connection.SendStreamMessage(config.videoStreamID, timestamp, []byte("go-client-message")); err != nil {
-		return fmt.Errorf("send stream message: %w", err)
+	messageStreamID := uint8(0)
+	if len(videos) > 0 {
+		messageStreamID = videos[0].streamID
+	} else if config.audioStreamID != nil {
+		messageStreamID = *config.audioStreamID
 	}
-	if err := connection.RequestVideoKeyframe(config.videoStreamID); err != nil {
-		return fmt.Errorf("request key frame: %w", err)
+	if err := connection.SendStreamMessage(messageStreamID, timestamp, []byte("go-client-message")); err != nil {
+		return fmt.Errorf("send stream message: %w", err)
 	}
 	if err := waitSignal(ctx, "remote command", commandReceived, failures); err != nil {
 		return err
@@ -202,121 +299,148 @@ func run() error {
 		return err
 	}
 
-	audioID := config.audioStreamID
-	recording, err := connection.StartRecording(tirtc.StartRecordingOptions{
-		VideoStreamID: config.videoStreamID,
-		AudioStreamID: &audioID,
-	})
-	if err != nil {
-		return fmt.Errorf("start recording: %w", err)
-	}
-	postRecordingBaseline := frames.snapshot()
-	if err := connection.RequestVideoKeyframe(config.videoStreamID); err != nil {
-		file, stopErr := recording.Stop()
-		if file.Path != "" {
-			stopErr = errors.Join(stopErr, file.Delete())
+	for _, pair := range videos {
+		recording, startErr := connection.StartRecording(tirtc.StartRecordingOptions{
+			VideoStreamID: pair.streamID,
+			AudioStreamID: config.audioStreamID,
+		})
+		if startErr != nil {
+			return fmt.Errorf("start recording stream %d: %w", pair.streamID, startErr)
 		}
-		return fmt.Errorf("request recording key frame: %w", errors.Join(err, stopErr))
-	}
-	if err := waitRecordingFramesAfter(ctx, frames, postRecordingBaseline, failures); err != nil {
-		file, stopErr := recording.Stop()
-		if file.Path != "" {
-			stopErr = errors.Join(stopErr, file.Delete())
+		baseline := pair.frames.snapshot()
+		if requestErr := connection.RequestVideoKeyframe(pair.streamID); requestErr != nil {
+			file, stopErr := recording.Stop()
+			if file.Path != "" {
+				stopErr = errors.Join(stopErr, file.Delete())
+			}
+			return fmt.Errorf("request recording key frame %d: %w", pair.streamID, errors.Join(requestErr, stopErr))
 		}
-		return fmt.Errorf("wait for post-recording frames: %w", errors.Join(err, stopErr))
-	}
-	recordingFile, err := recording.Stop()
-	if err != nil {
-		if recordingFile.Path != "" {
-			err = errors.Join(err, recordingFile.Delete())
+		if waitErr := waitVideoRecordingFramesAfter(ctx, pair.frames, baseline, failures); waitErr != nil {
+			file, stopErr := recording.Stop()
+			if file.Path != "" {
+				stopErr = errors.Join(stopErr, file.Delete())
+			}
+			return fmt.Errorf("wait for stream %d recording frames: %w", pair.streamID, errors.Join(waitErr, stopErr))
 		}
-		return fmt.Errorf("stop recording: %w", err)
+		recordingFile, stopErr := recording.Stop()
+		if stopErr != nil {
+			if recordingFile.Path != "" {
+				stopErr = errors.Join(stopErr, recordingFile.Delete())
+			}
+			return fmt.Errorf("stop recording stream %d: %w", pair.streamID, stopErr)
+		}
+		if saveErr := saveTemporaryMedia(recordingFile.Path, filepath.Join(config.outputDir, fmt.Sprintf("rtc-recording-stream-%d.mp4", pair.streamID)), []byte("ftyp"), 4); saveErr != nil {
+			return errors.Join(saveErr, recordingFile.Delete())
+		}
+		if deleteErr := recordingFile.Delete(); deleteErr != nil {
+			return fmt.Errorf("delete temporary recording: %w", deleteErr)
+		}
+		snapshot, snapshotErr := pair.decoded.TakeSnapshot()
+		if snapshotErr != nil {
+			return fmt.Errorf("take stream %d snapshot: %w", pair.streamID, snapshotErr)
+		}
+		if saveErr := saveTemporaryMedia(snapshot.Path, filepath.Join(config.outputDir, fmt.Sprintf("rtc-snapshot-stream-%d.jpg", pair.streamID)), []byte{0xff, 0xd8}, 0); saveErr != nil {
+			return errors.Join(saveErr, snapshot.Delete())
+		}
+		if deleteErr := snapshot.Delete(); deleteErr != nil {
+			return fmt.Errorf("delete temporary snapshot: %w", deleteErr)
+		}
+		fmt.Printf("consumed video stream %d\n", pair.streamID)
 	}
-	if err := saveTemporaryMedia(
-		recordingFile.Path,
-		filepath.Join(config.outputDir, "rtc-recording.mp4"),
-		[]byte("ftyp"), 4,
-	); err != nil {
-		return errors.Join(err, recordingFile.Delete())
+	for index := len(videos) - 1; index >= 0; index-- {
+		if err := connection.UnsubscribeVideo(videos[index].streamID); err != nil {
+			return fmt.Errorf("unsubscribe video %d: %w", videos[index].streamID, err)
+		}
 	}
-	if err := recordingFile.Delete(); err != nil {
-		return fmt.Errorf("delete temporary recording: %w", err)
-	}
-
-	snapshot, err := video.TakeSnapshot()
-	if err != nil {
-		return fmt.Errorf("take snapshot: %w", err)
-	}
-	if err := saveTemporaryMedia(
-		snapshot.Path,
-		filepath.Join(config.outputDir, "rtc-snapshot.jpg"),
-		[]byte{0xff, 0xd8}, 0,
-	); err != nil {
-		return errors.Join(err, snapshot.Delete())
-	}
-	if err := snapshot.Delete(); err != nil {
-		return fmt.Errorf("delete temporary snapshot: %w", err)
-	}
-	if err := connection.UnsubscribeVideo(config.videoStreamID); err != nil {
-		return fmt.Errorf("unsubscribe video: %w", err)
-	}
-	if err := connection.UnsubscribeAudio(config.audioStreamID); err != nil {
-		return fmt.Errorf("unsubscribe audio: %w", err)
+	if config.audioStreamID != nil {
+		if err := connection.UnsubscribeAudio(*config.audioStreamID); err != nil {
+			return fmt.Errorf("unsubscribe audio: %w", err)
+		}
 	}
 	return cleanup()
 }
 
 func parseConfig() (clientConfig, error) {
 	var endpoint, remoteID, cacheDir, outputDir string
-	var audioStreamID, videoStreamID uint
+	var audioStreamID optionalUintFlag
+	var videoStreamIDs uintListFlag
+	var noReceiveAudio, noReceiveVideo bool
 	flag.StringVar(&endpoint, "endpoint", "", "TiRTC endpoint")
 	flag.StringVar(&remoteID, "remote-id", "", "remote device ID")
 	flag.StringVar(&cacheDir, "cache-dir", "", "absolute writable SDK work directory")
 	flag.StringVar(&outputDir, "output-dir", "", "absolute application-owned output directory")
-	flag.UintVar(&audioStreamID, "audio-stream-id", 10, "remote audio stream ID")
-	flag.UintVar(&videoStreamID, "video-stream-id", 11, "remote video stream ID")
+	flag.Var(&audioStreamID, "audio-stream-id", "remote audio stream ID")
+	flag.Var(&videoStreamIDs, "video-stream-id", "remote video stream ID; repeat up to three times")
+	flag.BoolVar(&noReceiveAudio, "no-receive-audio", false, "do not receive audio")
+	flag.BoolVar(&noReceiveVideo, "no-receive-video", false, "do not receive video")
 	flag.Parse()
+	if noReceiveAudio && audioStreamID.set {
+		return clientConfig{}, errors.New("--no-receive-audio conflicts with --audio-stream-id")
+	}
+	if noReceiveVideo && len(videoStreamIDs) > 0 {
+		return clientConfig{}, errors.New("--no-receive-video conflicts with --video-stream-id")
+	}
+	if !audioStreamID.set {
+		audioStreamID.value = 10
+	}
+	if len(videoStreamIDs) == 0 && !noReceiveVideo {
+		videoStreamIDs = append(videoStreamIDs, 11)
+	}
+	seen := make(map[uint]bool, len(videoStreamIDs))
+	for _, streamID := range videoStreamIDs {
+		if streamID > 15 || seen[streamID] {
+			return clientConfig{}, errors.New("video stream IDs must be distinct values from 0 through 15")
+		}
+		seen[streamID] = true
+	}
 	if remoteID == "" || !filepath.IsAbs(cacheDir) || !filepath.IsAbs(outputDir) ||
-		audioStreamID > 15 || videoStreamID > 15 || audioStreamID == videoStreamID {
-		return clientConfig{}, errors.New("--remote-id, absolute --cache-dir/--output-dir, and distinct 0..15 stream IDs are required")
+		(!noReceiveAudio && audioStreamID.value > 15) || len(videoStreamIDs) > 3 ||
+		(!noReceiveAudio && seen[audioStreamID.value]) {
+		return clientConfig{}, errors.New("--remote-id, absolute --cache-dir/--output-dir, optional audio, and up to three distinct 0..15 video stream IDs are required")
+	}
+	var resolvedAudioID *uint8
+	if !noReceiveAudio {
+		value := uint8(audioStreamID.value)
+		resolvedAudioID = &value
+	}
+	resolvedVideoIDs := make([]uint8, len(videoStreamIDs))
+	for index, value := range videoStreamIDs {
+		resolvedVideoIDs[index] = uint8(value)
 	}
 	return clientConfig{
 		endpoint: endpoint, remoteID: remoteID,
 		cacheDir: filepath.Clean(cacheDir), outputDir: filepath.Clean(outputDir),
-		audioStreamID: uint8(audioStreamID), videoStreamID: uint8(videoStreamID),
+		audioStreamID: resolvedAudioID, videoStreamIDs: resolvedVideoIDs,
 	}, nil
 }
 
-func createOutputs(frames *frameSignals, failures chan<- error) (
-	*tirtc.AudioOutput,
-	*tirtc.VideoOutput,
-	*tirtc.EncodedAudioOutput,
-	*tirtc.EncodedVideoOutput,
-	error,
-) {
+func createAudioOutputs(frames *frameSignals, failures chan<- error) (*tirtc.AudioOutput, *tirtc.EncodedAudioOutput, error) {
 	audio, err := tirtc.NewAudioOutput(tirtc.AudioOutputOptions{
 		OnFrame: func(tirtc.AudioFrame) { frames.audio.notify() },
 		OnError: outputErrorNotifier("decoded audio output", failures),
 	})
 	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-	video, err := tirtc.NewVideoOutput(tirtc.VideoOutputOptions{
-		OnFrame: func(tirtc.VideoFrame) { frames.video.notify() },
-		OnError: outputErrorNotifier("decoded video output", failures),
-	})
-	if err != nil {
-		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, err
 	}
 	encodedAudio, err := tirtc.NewEncodedAudioOutput(tirtc.EncodedAudioOutputOptions{
 		OnFrame: func(tirtc.EncodedAudioFrame) { frames.encodedAudio.notify() },
 		OnError: outputErrorNotifier("encoded audio output", failures),
 	})
 	if err != nil {
-		_ = video.Close()
 		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return nil, nil, err
+	}
+	return audio, encodedAudio, nil
+}
+
+func createVideoOutputs(streamID uint8, failures chan<- error) (videoOutputPair, error) {
+	frames := newFrameSignals()
+	video, err := tirtc.NewVideoOutput(tirtc.VideoOutputOptions{
+		OnFrame: func(tirtc.VideoFrame) { frames.video.notify() },
+		OnError: outputErrorNotifier(fmt.Sprintf("decoded video output %d", streamID), failures),
+	})
+	if err != nil {
+		return videoOutputPair{}, err
 	}
 	encodedVideo, err := tirtc.NewEncodedVideoOutput(tirtc.EncodedVideoOutputOptions{
 		OnFrame: func(frame tirtc.EncodedVideoFrame) {
@@ -324,15 +448,43 @@ func createOutputs(frames *frameSignals, failures chan<- error) (
 			if frame.KeyFrame {
 				frames.encodedVideoKeyFrame.notify()
 			}
-		}, OnError: outputErrorNotifier("encoded video output", failures),
+		}, OnError: outputErrorNotifier(fmt.Sprintf("encoded video output %d", streamID), failures),
 	})
 	if err != nil {
-		_ = encodedAudio.Close()
 		_ = video.Close()
-		_ = audio.Close()
-		return nil, nil, nil, nil, err
+		return videoOutputPair{}, err
 	}
-	return audio, video, encodedAudio, encodedVideo, nil
+	return videoOutputPair{streamID: streamID, decoded: video, encoded: encodedVideo, frames: frames}, nil
+}
+
+func waitSelectedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
+	if receiveAudio {
+		if err := waitFrameAfter(ctx, "decoded audio frame", audioFrames.audio, 0, failures); err != nil {
+			return err
+		}
+		if err := waitFrameAfter(ctx, "encoded audio frame", audioFrames.encodedAudio, 0, failures); err != nil {
+			return err
+		}
+	}
+	for _, pair := range videos {
+		if err := waitFrameAfter(ctx, fmt.Sprintf("decoded video frame stream %d", pair.streamID), pair.frames.video, 0, failures); err != nil {
+			return err
+		}
+		if err := waitFrameAfter(ctx, fmt.Sprintf("encoded video frame stream %d", pair.streamID), pair.frames.encodedVideo, 0, failures); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func waitVideoRecordingFramesAfter(ctx context.Context, frames *frameSignals, baseline frameSnapshot, failures <-chan error) error {
+	if err := waitFrameAfter(ctx, "decoded video frame", frames.video, baseline.video, failures); err != nil {
+		return err
+	}
+	if err := waitFrameAfter(ctx, "encoded video key frame", frames.encodedVideoKeyFrame, baseline.encodedVideoKeyFrame, failures); err != nil {
+		return err
+	}
+	return waitFrameAfter(ctx, "encoded video frame after key frame", frames.encodedVideo, frames.encodedVideo.count.Load(), failures)
 }
 
 func outputErrorNotifier(name string, failures chan<- error) func(error) {
