@@ -55,7 +55,6 @@ struct ExampleClientConfigure: View {
 
                 ExampleProductTabs(selectedProduct: $selectedProduct)
                     .padding(.bottom, 20)
-                    .accessibilityIdentifier("product.tabs")
                 ExampleConfigureCard {
                     VStack(spacing: 16) {
                         if selectedProduct == "rtc" {
@@ -388,6 +387,7 @@ private struct ExampleProductTabs: View {
                 .clipShape(RoundedRectangle(cornerRadius: 17))
         }
         .buttonStyle(.plain)
+        .accessibilityIdentifier("product.tab.\(value)")
     }
 }
 

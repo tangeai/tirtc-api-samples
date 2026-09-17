@@ -3,9 +3,18 @@ import Foundation
 import TiRTC
 import XCTest
 
+#if os(iOS)
+    import UIKit
+#endif
+
 #if os(macOS)
     import AppKit
 #endif
+
+private struct CloudStorageFrameEvidence {
+    let nonBlackRatio: Double
+    let changedRatio: Double
+}
 
 private final class TiCloudStorageSdkOutputObserver: NSObject, TiCloudStorageAudioOutputDelegate,
     TiCloudStorageVideoOutputDelegate, @unchecked Sendable
@@ -317,8 +326,7 @@ final class ExampleUITests: XCTestCase {
         Self.appendStatus(statusLog, "ti-cloud-storage-configure-page-ready")
         handleSystemPermissionDialogs(app, attempts: 5)
 
-        tap(app, "product.tabs")
-        tapButtonAny(app, ["云录像", "Ti Cloud Storage"])
+        tap(app, "product.tab.ti-cloud-storage")
         XCTAssertTrue(waitForElement(app, "tiCloudStorage.enter_player", timeout: 8.0))
 
         try replaceText(app, "tiCloudStorage.app_id", required(payload, "app_id"))
@@ -360,8 +368,8 @@ final class ExampleUITests: XCTestCase {
         // otherwise wait for video-surface quiescence until the short smoke recording
         // has already reached its terminal state.
         tap(app, "tiCloudStorage.speed")
-        tapButtonAny(app, ["x2"])
-        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：x2", timeout: 5.0))
+        tapButtonAny(app, ["x2", "2×"])
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：2×", timeout: 5.0))
         tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
             waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "rendering", timeout: 8.0),
@@ -374,8 +382,8 @@ final class ExampleUITests: XCTestCase {
             waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "paused", timeout: 8.0),
             "Ti Cloud Storage replay did not pause before restoring normal speed")
         tap(app, "tiCloudStorage.speed")
-        tapButtonAny(app, ["x1"])
-        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：x1", timeout: 5.0))
+        tapButtonAny(app, ["x1", "1×"])
+        XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "播放倍速：1×", timeout: 5.0))
         tap(app, "tiCloudStorage.pause")
         XCTAssertTrue(
             waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "rendering", timeout: 8.0),
@@ -389,7 +397,7 @@ final class ExampleUITests: XCTestCase {
         XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已恢复声音", timeout: 5.0))
         Self.appendStatus(statusLog, "ti-cloud-storage-mute-verified")
 
-        let seek = app.descendants(matching: .any)["tiCloudStorage.seek"].firstMatch
+        let seek = app.descendants(matching: .any)[automationIdentifier("tiCloudStorage.seek")].firstMatch
         XCTAssertTrue(seek.waitForExistence(timeout: 5.0))
         seek.adjust(toNormalizedSliderPosition: 0.45)
         guard waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已跳转", timeout: 8.0) else {
@@ -397,7 +405,74 @@ final class ExampleUITests: XCTestCase {
             return
         }
         Self.appendStatus(statusLog, "ti-cloud-storage-seek-verified")
-        waitForRenderWindow(seconds: 4.0)
+        XCTAssertTrue(
+            waitForStatus(
+                app,
+                "tiCloudStorage.video_stage",
+                statusLog,
+                containing: "rendering",
+                timeout: timeoutSeconds),
+            "Ti Cloud Storage first seek did not render its target")
+        waitForRenderWindow(seconds: 2.0)
+        let firstSeekScreenshot = app.screenshot()
+        attachScreenshot(firstSeekScreenshot, name: "ti-cloud-storage-first-seek-rendered")
+
+        tap(app, "tiCloudStorage.pause")
+        XCTAssertTrue(
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "paused", timeout: 8.0),
+            "Ti Cloud Storage replay did not pause before paused seek")
+        seek.adjust(toNormalizedSliderPosition: 0.55)
+        guard waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "已跳转", timeout: 8.0) else {
+            XCTFail("Ti Cloud Storage paused seek failed: \(statusValue(app, "tiCloudStorage.status"))")
+            return
+        }
+        XCTAssertTrue(
+            waitForStatus(app, "tiCloudStorage.video_stage", statusLog, containing: "paused", timeout: 8.0),
+            "Ti Cloud Storage paused seek did not preserve PAUSED")
+        Self.appendStatus(statusLog, "ti-cloud-storage-paused-seek-preserved-pause")
+
+        tap(app, "tiCloudStorage.pause")
+        let pausedSeekResumeStates = waitForCloudStorageResumeSequence(
+            app,
+            identifier: "tiCloudStorage.video_stage",
+            timeout: timeoutSeconds)
+        Self.appendStatus(
+            statusLog,
+            "ti-cloud-storage-paused-seek-resume-states=\(pausedSeekResumeStates.joined(separator: ">"))")
+        XCTAssertEqual(
+            pausedSeekResumeStates,
+            ["buffering", "rendering"],
+            "Ti Cloud Storage paused seek resume must report BUFFERING before RENDERING")
+        guard
+            let resumedProgress = waitForCloudStorageProgress(
+                app,
+                identifier: "tiCloudStorage.video_stage",
+                above: 0.55,
+                timeout: timeoutSeconds)
+        else {
+            XCTFail("Ti Cloud Storage progress did not continue from the paused seek target")
+            return
+        }
+        waitForRenderWindow(seconds: 2.0)
+        let pausedSeekScreenshot = app.screenshot()
+        attachScreenshot(pausedSeekScreenshot, name: "ti-cloud-storage-paused-seek-resumed")
+        let targetFrame = try compareCloudStorageVideoFrames(
+            firstSeekScreenshot,
+            pausedSeekScreenshot,
+            stage: app.descendants(matching: .any)[automationIdentifier("tiCloudStorage.video_stage")].firstMatch,
+            app: app)
+        XCTAssertGreaterThan(
+            targetFrame.nonBlackRatio,
+            0.05,
+            "Ti Cloud Storage paused seek target remained visually black")
+        XCTAssertGreaterThan(
+            targetFrame.changedRatio,
+            0.02,
+            "Ti Cloud Storage paused seek did not render a distinguishable target frame")
+        Self.appendStatus(
+            statusLog,
+            "ti-cloud-storage-paused-seek-resume-verified state_sequence=buffering>rendering "
+                + "target_changed_ratio=\(targetFrame.changedRatio) progress=\(resumedProgress)")
 
         tap(app, "tiCloudStorage.snapshot")
         XCTAssertTrue(waitForStatus(app, "tiCloudStorage.status", statusLog, containing: "截图完成", timeout: 15.0))
@@ -1043,14 +1118,15 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func elementExistsNow(_ app: XCUIApplication, _ identifier: String) -> Bool {
+        let resolvedIdentifier = automationIdentifier(identifier)
         let candidates = [
-            app.buttons[identifier].firstMatch,
-            app.staticTexts[identifier].firstMatch,
-            app.textFields[identifier].firstMatch,
-            app.secureTextFields[identifier].firstMatch,
-            app.images[identifier].firstMatch,
-            app.otherElements[identifier].firstMatch,
-            app.descendants(matching: .any)[identifier].firstMatch,
+            app.buttons[resolvedIdentifier].firstMatch,
+            app.staticTexts[resolvedIdentifier].firstMatch,
+            app.textFields[resolvedIdentifier].firstMatch,
+            app.secureTextFields[resolvedIdentifier].firstMatch,
+            app.images[resolvedIdentifier].firstMatch,
+            app.otherElements[resolvedIdentifier].firstMatch,
+            app.descendants(matching: .any)[resolvedIdentifier].firstMatch,
         ]
         return candidates.contains(where: { $0.exists })
     }
@@ -1088,7 +1164,7 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func tap(_ app: XCUIApplication, _ identifier: String) {
-        let element = app.descendants(matching: .any)[identifier].firstMatch
+        let element = app.descendants(matching: .any)[automationIdentifier(identifier)].firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 8.0), "missing UI element \(identifier)")
         tapElement(element)
     }
@@ -1100,8 +1176,8 @@ final class ExampleUITests: XCTestCase {
         targetIdentifier: String,
         attempts: Int
     ) -> Bool {
-        let source = app.descendants(matching: .any)[sourceIdentifier].firstMatch
-        let target = app.descendants(matching: .any)[targetIdentifier].firstMatch
+        let source = app.descendants(matching: .any)[automationIdentifier(sourceIdentifier)].firstMatch
+        let target = app.descendants(matching: .any)[automationIdentifier(targetIdentifier)].firstMatch
         guard source.waitForExistence(timeout: 8.0) else { return false }
         for _ in 0..<attempts {
             if target.exists { return true }
@@ -1279,7 +1355,7 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func replaceText(_ app: XCUIApplication, _ identifier: String, _ value: String) throws {
-        let element = app.descendants(matching: .any)[identifier]
+        let element = app.descendants(matching: .any)[automationIdentifier(identifier)]
         XCTAssertTrue(element.waitForExistence(timeout: 8.0), "missing input \(identifier)")
         if (element.value as? String) == value {
             #if os(iOS)
@@ -1358,6 +1434,61 @@ final class ExampleUITests: XCTestCase {
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
         return false
+    }
+
+    @MainActor
+    private func waitForCloudStorageResumeSequence(
+        _ app: XCUIApplication,
+        identifier: String,
+        timeout: TimeInterval
+    ) -> [String] {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            let state = statusValue(app, identifier).lowercased()
+            if state.contains("history=buffering>rendering") {
+                return ["buffering", "rendering"]
+            }
+            if state.contains("history=rendering") {
+                return ["rendering_before_buffering"]
+            }
+            if state.contains("history=buffering") {
+                RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+                continue
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        let state = statusValue(app, identifier).lowercased()
+        return state.contains("history=buffering") ? ["buffering"] : []
+    }
+
+    @MainActor
+    private func waitForCloudStorageProgress(
+        _ app: XCUIApplication,
+        identifier: String,
+        above threshold: Double,
+        timeout: TimeInterval
+    ) -> Double? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if let progress = cloudStorageProgress(app, identifier: identifier), progress > threshold {
+                return progress
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        }
+        return nil
+    }
+
+    @MainActor
+    private func cloudStorageProgress(_ app: XCUIApplication, identifier: String) -> Double? {
+        let text = statusValue(app, identifier)
+        guard
+            let range = text.range(
+                of: #"progress=([0-9]+(?:\.[0-9]+)?)"#,
+                options: .regularExpression)
+        else {
+            return nil
+        }
+        return Double(text[range].dropFirst("progress=".count))
     }
 
     @MainActor
@@ -1533,13 +1664,30 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func statusValue(_ app: XCUIApplication, _ identifier: String) -> String {
-        let element = app.descendants(matching: .any)[identifier]
+        let element = app.descendants(matching: .any)[automationIdentifier(identifier)]
         guard element.exists else {
             return ""
         }
         let value = element.value as? String
         let label = element.label
         return [value, label].compactMap { $0 }.joined(separator: " ")
+    }
+
+    private func automationIdentifier(_ identifier: String) -> String {
+        let legacyPrefix = "tiCloudStorage."
+        guard identifier.hasPrefix(legacyPrefix) else { return identifier }
+        let suffix = String(identifier.dropFirst(legacyPrefix.count))
+        let configureIdentifiers: Set<String> = [
+            "app_id",
+            "endpoint",
+            "token",
+            "audio_channel_id",
+            "video_channel_id",
+            "configure.status",
+            "enter_player",
+        ]
+        let prefix = configureIdentifiers.contains(suffix) ? "ti-cloud-storage." : "cloudStorage."
+        return prefix + suffix
     }
 
     private func required(_ payload: [String: String], _ key: String) throws -> String {
@@ -1551,10 +1699,103 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func attachScreenshot(_ app: XCUIApplication, name: String) {
-        let attachment = XCTAttachment(screenshot: app.screenshot())
+        attachScreenshot(app.screenshot(), name: name)
+    }
+
+    private func attachScreenshot(_ screenshot: XCUIScreenshot, name: String) {
+        let attachment = XCTAttachment(screenshot: screenshot)
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+    }
+
+    @MainActor
+    private func compareCloudStorageVideoFrames(
+        _ before: XCUIScreenshot,
+        _ after: XCUIScreenshot,
+        stage: XCUIElement,
+        app: XCUIApplication
+    ) throws -> CloudStorageFrameEvidence {
+        let stageFrame = stage.frame
+        let sampleFrame = CGRect(
+            x: stageFrame.minX + stageFrame.width * 0.15,
+            y: stageFrame.minY + stageFrame.height * 0.12,
+            width: stageFrame.width * 0.70,
+            height: stageFrame.height * 0.45)
+        let beforePixels = try XCTUnwrap(sampleScreenshot(before, frame: sampleFrame, appFrame: app.frame))
+        let afterPixels = try XCTUnwrap(sampleScreenshot(after, frame: sampleFrame, appFrame: app.frame))
+        XCTAssertEqual(beforePixels.count, afterPixels.count)
+        var nonBlack = 0
+        var changed = 0
+        let pixelCount = afterPixels.count / 4
+        for offset in stride(from: 0, to: afterPixels.count, by: 4) {
+            let red = afterPixels[offset]
+            let green = afterPixels[offset + 1]
+            let blue = afterPixels[offset + 2]
+            if red > 32 || green > 32 || blue > 32 { nonBlack += 1 }
+            let delta =
+                abs(Int(beforePixels[offset]) - Int(red))
+                + abs(Int(beforePixels[offset + 1]) - Int(green))
+                + abs(Int(beforePixels[offset + 2]) - Int(blue))
+            if delta > 24 { changed += 1 }
+        }
+        return CloudStorageFrameEvidence(
+            nonBlackRatio: Double(nonBlack) / Double(pixelCount),
+            changedRatio: Double(changed) / Double(pixelCount))
+    }
+
+    private func sampleScreenshot(
+        _ screenshot: XCUIScreenshot,
+        frame: CGRect,
+        appFrame: CGRect
+    ) -> [UInt8]? {
+        guard appFrame.width > 0, appFrame.height > 0, let image = screenshotCGImage(screenshot) else {
+            return nil
+        }
+        let scaleX = CGFloat(image.width) / appFrame.width
+        let scaleY = CGFloat(image.height) / appFrame.height
+        let imageBounds = CGRect(x: 0, y: 0, width: image.width, height: image.height)
+        let pixelFrame = CGRect(
+            x: (frame.minX - appFrame.minX) * scaleX,
+            y: (frame.minY - appFrame.minY) * scaleY,
+            width: frame.width * scaleX,
+            height: frame.height * scaleY
+        ).integral.intersection(imageBounds)
+        guard pixelFrame.width > 0, pixelFrame.height > 0,
+            let cropped = image.cropping(to: pixelFrame)
+        else {
+            return nil
+        }
+        let width = 64
+        let height = 64
+        var pixels = [UInt8](repeating: 0, count: width * height * 4)
+        let rendered = pixels.withUnsafeMutableBytes { bytes -> Bool in
+            guard
+                let context = CGContext(
+                    data: bytes.baseAddress,
+                    width: width,
+                    height: height,
+                    bitsPerComponent: 8,
+                    bytesPerRow: width * 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)
+            else {
+                return false
+            }
+            context.interpolationQuality = .low
+            context.draw(cropped, in: CGRect(x: 0, y: 0, width: width, height: height))
+            return true
+        }
+        return rendered ? pixels : nil
+    }
+
+    private func screenshotCGImage(_ screenshot: XCUIScreenshot) -> CGImage? {
+        #if os(macOS)
+            var rect = CGRect(origin: .zero, size: screenshot.image.size)
+            return screenshot.image.cgImage(forProposedRect: &rect, context: nil, hints: nil)
+        #else
+            return screenshot.image.cgImage
+        #endif
     }
 
     private static func patterns(from value: String) -> [String] {

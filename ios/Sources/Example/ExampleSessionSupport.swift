@@ -49,6 +49,7 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
     @Published private(set) var selected: TiCloudStorageRecordingRange?
     @Published private(set) var currentTimeMs: Int64?
     @Published private(set) var videoState: TiCloudStorageVideoOutputState = .idle
+    @Published private(set) var videoStateHistory = ["idle"]
     @Published private(set) var status = "请选择录像"
     @Published private(set) var querying = false
     @Published private(set) var daysQuerying = false
@@ -61,6 +62,10 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
     @Published private(set) var speed: TiCloudStorageReplaySpeed = .x1
     @Published private(set) var hasLatestMedia = false
     @Published private(set) var uploadingLogs = false
+
+    private let evidenceEnabled =
+        ProcessInfo.processInfo.environment["TIRTC_STORE_QUERY_START_MS"] != nil
+        && ProcessInfo.processInfo.environment["TIRTC_STORE_QUERY_END_MS"] != nil
 
     var stageStatus: String {
         guard selected != nil else { return "请选择录像" }
@@ -80,6 +85,23 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
         @unknown default:
             return "播放状态更新中"
         }
+    }
+
+    var videoEvidenceValue: String {
+        guard evidenceEnabled else { return videoState.accessibilityLabel }
+        let progress: Double
+        if let selected, let currentTimeMs, selected.endTimeMs > selected.startTimeMs {
+            progress = min(
+                1,
+                max(
+                    0,
+                    Double(currentTimeMs - selected.startTimeMs)
+                        / Double(selected.endTimeMs - selected.startTimeMs)))
+        } else {
+            progress = 0
+        }
+        return
+            "current=\(videoState.accessibilityLabel);history=\(videoStateHistory.joined(separator: ">"));progress=\(progress)"
     }
 
     private var outputsAttached = false
@@ -214,6 +236,9 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
 
     func togglePause() {
         let shouldResume = paused
+        if shouldResume, evidenceEnabled {
+            videoStateHistory.removeAll(keepingCapacity: true)
+        }
         let replay = replay
         performReplayControl(
             operation: { shouldResume ? replay.resume() : replay.pause() },
@@ -405,8 +430,15 @@ final class TiCloudStorageExampleFlow: NSObject, ObservableObject, TiCloudStorag
         let rawValue = state.rawValue
         Task { @MainActor [weak self] in
             let next = TiCloudStorageVideoOutputState(rawValue: rawValue) ?? .failed
-            self?.videoState = next
-            if next == .failed { self?.status = "视频输出失败" }
+            guard let self else { return }
+            videoState = next
+            if evidenceEnabled {
+                videoStateHistory.append(next.accessibilityLabel)
+                if videoStateHistory.count > 16 {
+                    videoStateHistory.removeFirst(videoStateHistory.count - 16)
+                }
+            }
+            if next == .failed { status = "视频输出失败" }
         }
     }
 
@@ -616,7 +648,7 @@ struct TiCloudStorageExampleView: View {
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("cloudStorage.video_stage")
             .accessibilityLabel(flow.videoState.accessibilityLabel)
-            .accessibilityValue(flow.videoState.accessibilityLabel)
+            .accessibilityValue(flow.videoEvidenceValue)
         }
         .frame(minWidth: 320, minHeight: 560)
         .background(ExampleColors.background)

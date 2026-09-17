@@ -36,7 +36,7 @@
     }
 
     final class ScannerViewController: UIViewController,
-        @preconcurrency AVCaptureMetadataOutputObjectsDelegate
+        AVCaptureMetadataOutputObjectsDelegate
     {
         weak var delegate: ScannerViewControllerDelegate?
         private let session = AVCaptureSession()
