@@ -20,20 +20,35 @@ function mainProcessCredential(name, format) {
     if (cached)
         return cached;
     const descriptorName = `${name}_FD`;
+    const fileName = `${name}_FILE`;
     const descriptorText = process.env[descriptorName];
     const descriptor = descriptorText === undefined ? null : Number(descriptorText);
+    const credentialPath = process.env[fileName];
     let supplied = process.env[name] ?? '';
     try {
+        if (descriptor !== null && credentialPath) {
+            throw new TypeError(`${descriptorName} and ${fileName} are mutually exclusive`);
+        }
         if (descriptor !== null) {
             if (!Number.isSafeInteger(descriptor) || descriptor < 3) {
                 throw new TypeError(`${descriptorName} must identify an inherited credential file descriptor`);
             }
             supplied = node_fs_1.default.readFileSync(descriptor, 'utf8');
         }
+        else if (credentialPath) {
+            supplied = node_fs_1.default.readFileSync(credentialPath, 'utf8');
+        }
     }
     finally {
         delete process.env[name];
         delete process.env[descriptorName];
+        delete process.env[fileName];
+        if (credentialPath) {
+            try {
+                node_fs_1.default.rmSync(credentialPath, { force: true });
+            }
+            catch { }
+        }
         if (descriptor !== null && Number.isSafeInteger(descriptor) && descriptor >= 3) {
             try {
                 node_fs_1.default.closeSync(descriptor);
@@ -127,11 +142,12 @@ function requireApplication() {
         throw new Error('Electron Example is unavailable');
     return activeApplication;
 }
-function downloadsDestination(source) {
+function downloadsDestination(source, targetId) {
     const parsed = node_path_1.default.parse(source);
     const directory = electron_1.app.getPath('downloads');
     for (let suffix = 0; suffix < 10_000; suffix += 1) {
-        const name = suffix === 0 ? parsed.base : `${parsed.name}-${suffix}${parsed.ext}`;
+        const base = `${parsed.name}${targetId === undefined || targetId === null ? '' : `-${targetId}`}`;
+        const name = suffix === 0 ? `${base}${parsed.ext}` : `${base}-${suffix}${parsed.ext}`;
         const candidate = node_path_1.default.join(directory, name);
         if (!node_fs_1.default.existsSync(candidate))
             return candidate;
@@ -149,7 +165,8 @@ function installIpc() {
         await current.tiCloudStorageSession.leave();
         await current.session.configure(await resolveExampleToken(config));
     });
-    electron_1.ipcMain.handle('tirtc-example:video-bounds', (_event, bounds) => requireApplication().session.setVideoBounds(bounds));
+    electron_1.ipcMain.handle('tirtc-example:video-bounds', (_event, streamId, bounds) => requireApplication().session.setVideoBounds(streamId, bounds));
+    electron_1.ipcMain.handle('tirtc-example:video-select', (_event, streamId) => requireApplication().session.selectVideoStream(streamId));
     electron_1.ipcMain.handle('tirtc-example:message', (_event, message) => requireApplication().session.sendMessage(message));
     electron_1.ipcMain.handle('tirtc-example:command', (_event, commandId, message) => requireApplication().session.sendCommand(commandId, message));
     electron_1.ipcMain.handle('tirtc-example:recording-start', () => requireApplication().session.startRecording());
@@ -160,7 +177,7 @@ function installIpc() {
         const source = session.recentPath(kind);
         if (!source)
             throw new Error(`no recent ${kind} is available`);
-        await session.saveRecent(kind, downloadsDestination(source));
+        await session.saveRecent(kind, downloadsDestination(source, session.recentTargetId(kind)));
     });
     electron_1.ipcMain.handle('tirtc-example:reveal-recent', (_event, kind) => {
         const file = requireApplication().session.recentPath(kind);
@@ -171,6 +188,7 @@ function installIpc() {
     electron_1.ipcMain.handle('tirtc-example:audio-muted', (_event, muted) => requireApplication().session.setAudioMuted(muted));
     electron_1.ipcMain.handle('tirtc-example:local-audio-running', (_event, running) => requireApplication().session.setLocalAudioRunning(running));
     electron_1.ipcMain.handle('tirtc-example:logs-upload', () => requireApplication().session.uploadLogs());
+    electron_1.ipcMain.handle('tirtc-example:raw-dump-toggle', () => requireApplication().session.toggleRawDump());
     electron_1.ipcMain.handle('tirtc-example:leave', () => requireApplication().session.leave());
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-configure', async (_event, config) => {
         const current = requireApplication();
@@ -180,7 +198,8 @@ function installIpc() {
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-query', (_event, startTimeMs, endTimeMs) => requireApplication().tiCloudStorageSession.query(startTimeMs, endTimeMs));
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-query-days', (_event, startDate, endDate, timeZoneId) => requireApplication().tiCloudStorageSession.queryDays(startDate, endDate, timeZoneId));
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-play', (_event, index) => requireApplication().tiCloudStorageSession.play(index));
-    electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-video-bounds', (_event, bounds) => requireApplication().tiCloudStorageSession.setVideoBounds(bounds));
+    electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-video-bounds', (_event, channelId, bounds) => requireApplication().tiCloudStorageSession.setVideoBounds(channelId, bounds));
+    electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-video-select', (_event, channelId) => requireApplication().tiCloudStorageSession.selectVideo(channelId));
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-pause', () => requireApplication().tiCloudStorageSession.pause());
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-resume', () => requireApplication().tiCloudStorageSession.resume());
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-seek', (_event, value) => requireApplication().tiCloudStorageSession.seek(value));
@@ -195,10 +214,11 @@ function installIpc() {
         const source = session.recentPath(kind);
         if (!source)
             throw new Error(`no recent ${kind} is available`);
-        await session.saveRecent(kind, downloadsDestination(source));
+        await session.saveRecent(kind, downloadsDestination(source, session.recentTargetId(kind)));
     });
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-leave', () => requireApplication().tiCloudStorageSession.leave());
     electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-logs-upload', () => requireApplication().tiCloudStorageSession.uploadLogs());
+    electron_1.ipcMain.handle('tirtc-example:ti-cloud-storage-raw-dump-toggle', () => requireApplication().tiCloudStorageSession.toggleRawDump());
 }
 function beginCleanup(application) {
     if (activeApplication === application)
@@ -214,17 +234,15 @@ async function startExampleApplication() {
     await electron_1.app.whenReady();
     installIpc();
     const workArea = electron_1.screen.getPrimaryDisplay().workAreaSize;
-    const height = Math.round(Math.min(workArea.height * 0.82, 900));
-    const width = Math.round(height / (19.5 / 9));
+    const width = Math.round(Math.min(workArea.width * 0.84, 1024));
+    const height = Math.round(Math.min(workArea.height * 0.82, 760));
     const window = new electron_1.BrowserWindow({
         width,
         height,
-        minWidth: width,
-        minHeight: height,
-        maxWidth: width,
-        maxHeight: height,
-        resizable: false,
-        maximizable: false,
+        minWidth: 360,
+        minHeight: 420,
+        resizable: true,
+        maximizable: true,
         backgroundColor: '#FFF8E8',
         title: 'Ti RTC',
         webPreferences: {

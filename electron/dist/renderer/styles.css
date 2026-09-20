@@ -119,6 +119,14 @@ main {
 }
 .credential-boundary p { margin: 5px 0 0; font-size: 12px; }
 .stream-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.media-selection { display: grid; gap: 12px; }
+.media-selection h2 { margin: 0; color: #659287; font-size: 14px; }
+.video-id-fields { display: grid; gap: 10px; }
+.video-id-field { position: relative; }
+.video-id-field input { padding-right: 70px; }
+.remove-video-id { position: absolute; right: 10px; bottom: 12px; color: #b45309; background: transparent; border: 0; cursor: pointer; }
+.add-video-id { justify-self: start; padding: 8px 12px; color: #659287; background: transparent; border: 0; font-weight: 600; cursor: pointer; }
+.add-video-id:disabled { opacity: .45; cursor: default; }
 .token-acquisition-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 56px;
@@ -306,6 +314,16 @@ main {
 .player-body { position: absolute; inset: 56px 0 0; overflow: hidden; background: #252525; }
 .video-stage { position: absolute; inset: 0; overflow: hidden; background: #252525; }
 .video { position: absolute; inset: 0; background: #252525; }
+.video-grid { display: grid; grid-template-columns: 1fr; grid-template-rows: 1fr; }
+.video-grid.count-2 { grid-template-rows: 1fr 1fr; }
+.video-grid.count-3 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr 1fr; }
+.video-grid.wide.count-2 { grid-template-columns: 1fr 1fr; grid-template-rows: 1fr; }
+.video-tile { position: relative; min-width: 0; min-height: 0; overflow: hidden; border: 2px solid transparent; background: #252525; }
+.video-tile.selected { border-color: #659287; }
+.video-tile.maximized { grid-column: 1 / -1; grid-row: 1 / -1; }
+.video-tile-label { position: absolute; z-index: 3; top: 8px; left: 8px; padding: 4px 8px; color: #fff; background: rgba(0,0,0,.46); border-radius: 10px; font-size: 11px; }
+.video-tile-action { position: absolute; z-index: 3; top: 8px; right: 8px; padding: 4px 8px; color: #fff; background: rgba(0,0,0,.46); border: 0; border-radius: 10px; }
+.video-tile-status { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; color: rgba(255,255,255,.8); background: #252525; font-size: 13px; }
 .overlay-gradient {
   position: absolute;
   z-index: 1;
@@ -406,6 +424,26 @@ main {
   font-size: 13px;
   pointer-events: none;
 }
+.raw-dump-button {
+  position: absolute;
+  z-index: 5;
+  left: max(12px, env(safe-area-inset-left));
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  color: #fff;
+  background: rgba(20, 20, 20, .78);
+  display: grid;
+  place-content: center;
+  gap: 2px;
+  cursor: pointer;
+}
+.raw-dump-button strong { font-size: 12px; }
+.raw-dump-button.capturing { background: #d34135; }
+.raw-dump-button:disabled { opacity: .65; cursor: wait; }
 .message-bubble {
   position: absolute;
   z-index: 4;
@@ -530,6 +568,7 @@ dialog { font: inherit; }
 .bottom-sheet .sheet-handle {
   width: 32px;
   height: 4px;
+  flex-shrink: 0;
   margin: 10px auto 16px;
   background: #b3b3b3;
   border-radius: 2px;
@@ -594,6 +633,7 @@ dialog { font: inherit; }
 .ti-cloud-storage-weekdays span { padding: 5px 0; color: #848282; font-size: 11px; text-align: center; }
 .ti-cloud-storage-calendar { border-bottom: 1px solid #e1dbcf; padding-bottom: 8px; }
 .ti-cloud-storage-calendar button, .ti-cloud-storage-calendar i {
+  min-width: 44px;
   min-height: 46px;
   display: grid;
   place-items: center;
@@ -663,4 +703,209 @@ dialog { font: inherit; }
   .configure-fields { gap: 12px; }
   .field input { min-height: 52px; padding-top: 15px; padding-bottom: 15px; }
   .product-tabs { margin-top: 10px; margin-bottom: 16px; }
+}
+
+/* Playback parity: the selected lane owns the main stage and controls share one console. */
+.video-grid.wide.count-2 { grid-template-columns: 2fr 1fr; grid-template-rows: 1fr; }
+.video-grid.wide.count-3 { grid-template-columns: 2fr 1fr; grid-template-rows: repeat(2, 1fr); }
+.video-grid.count-3 .video-tile.primary { grid-row: 1 / -1; }
+.video-tile[role="button"] { cursor: pointer; }
+.video-tile[role="button"]:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+select:focus-visible,
+input:focus-visible { outline: 3px solid #8fc7bb; outline-offset: 2px; }
+.video-tile-action { min-width: 44px; min-height: 44px; cursor: pointer; }
+
+.playback-console {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  width: fit-content;
+  max-width: 100%;
+  margin-left: auto;
+  padding: 8px;
+  color: #fff;
+  background: rgba(37, 37, 37, .86);
+  border: 1px solid rgba(255, 255, 255, .10);
+  border-radius: 20px;
+  box-shadow: 0 8px 24px rgba(0,0,0,.22);
+}
+.core-actions { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.playback-console .tonal-button,
+.playback-console .playback-button,
+.playback-console .icon-button,
+.action-menu summary { min-height: 44px; }
+.playback-console .tonal-button,
+.playback-console .playback-button { height: 44px; min-height: 44px; }
+.action-menu { position: relative; }
+.action-menu summary {
+  width: 44px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  border-radius: 14px;
+  cursor: pointer;
+  list-style: none;
+  font-size: 18px;
+  font-weight: 800;
+}
+.action-menu summary::-webkit-details-marker { display: none; }
+.action-menu-popover {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 10px);
+  width: 220px;
+  display: grid;
+  gap: 4px;
+  padding: 8px;
+  color: #666;
+  background: #fff8e8;
+  border: 1px solid #e1dbcf;
+  border-radius: 16px;
+  box-shadow: 0 12px 32px rgba(0,0,0,.28);
+}
+.action-menu-popover .icon-button,
+.menu-action {
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 14px;
+  color: #666;
+  background: transparent;
+  border: 0;
+  border-radius: 10px;
+  text-align: left;
+  cursor: pointer;
+}
+.action-menu-popover .icon-button { display: block; font-size: 0; }
+.action-menu-popover .icon-button::after { content: attr(aria-label); font-size: 13px; }
+.action-menu-popover button:hover { background: rgba(101,146,135,.12); }
+
+.cloud-playback-console { width: min(100%, 820px); flex-wrap: nowrap; }
+.cloud-playback-console .ti-cloud-storage-seek-panel {
+  flex: 1 1 260px;
+  max-width: none;
+  margin: 0;
+  padding: 0 8px;
+  background: transparent;
+  border-radius: 0;
+}
+
+.metrics-panel:not(.collapsed) p span { font-size: 12px; }
+.metrics-panel header button { min-width: 44px; min-height: 44px; }
+.metrics-panel.collapsed { min-width: 180px; padding: 4px 8px; }
+.metrics-panel.collapsed header { height: 36px; }
+.metrics-panel.collapsed #metrics-collapse { position: static; width: auto; height: 32px; opacity: 1; }
+
+@media (max-width: 599px) {
+  .player-bar { padding-inline: 8px; }
+  .player-controls { right: 8px; bottom: 8px; left: 8px; }
+  .playback-console { width: 100%; box-sizing: border-box; justify-content: stretch; gap: 6px; border-radius: 16px; }
+  .core-actions { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .core-actions > button,
+  .core-actions > label { min-width: 0; width: 100%; padding-inline: 6px; justify-content: center; }
+  .core-actions button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .video-grid.compact.count-2 { grid-template-columns: 1fr; grid-template-rows: 2fr 1fr; }
+  .video-grid.compact.count-3 { grid-template-columns: repeat(2, 1fr); grid-template-rows: 2fr 1fr; }
+  .video-grid.count-3 .video-tile.primary { grid-column: 1 / -1; grid-row: auto; }
+  .metrics-panel { top: 8px; right: 8px; left: 8px; }
+  .message-bubble { right: 10px; bottom: 92px; }
+  .cloud-playback-console { flex-wrap: wrap; }
+  .cloud-playback-console .ti-cloud-storage-seek-panel {
+    flex: 1 0 100%;
+    width: 100%;
+    box-sizing: border-box;
+    padding: 2px 4px 6px;
+  }
+}
+
+/* Keep the one-lane stage authoritative after every count and viewport rule above. */
+.video-grid.video-grid.maximized {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+}
+.video-grid.video-grid.maximized .video-tile.video-tile.maximized {
+  grid-area: 1 / 1 / -1 / -1;
+}
+
+/* Auxiliary surfaces follow the Flutter desktop hierarchy and desktop hit target. */
+.configure-section {
+  min-width: 0;
+  display: grid;
+  align-content: start;
+  gap: 14px;
+  padding: 18px;
+  background: rgba(255, 255, 255, .72);
+  border: 1px solid rgba(101, 146, 135, .12);
+  border-radius: 22px;
+}
+.configure-section > h2 { margin: 0 0 2px; color: #659287; font-size: 14px; }
+.scan-hint { margin: -4px 4px 0; color: #848282; font-size: 12px; line-height: 1.45; }
+.settings-button,
+.bar-button,
+.remove-video-id,
+.add-video-id,
+.small-button,
+.ti-cloud-storage-range-export { min-width: 44px; min-height: 44px; }
+.remove-video-id { bottom: 6px; }
+.add-video-id { display: inline-flex; align-items: center; }
+.settings-section { min-width: 0; }
+
+.command-sheet form { max-height: 100%; display: flex; flex-direction: column; overflow: hidden; }
+.command-sheet .command-content { min-height: 0; overflow-y: auto; }
+.command-sheet .command-events { max-height: none; min-height: 72px; }
+
+.recordings-layout { min-height: 0; flex: 1; overflow-y: auto; }
+.recordings-calendar-pane,
+.recordings-list-pane { min-width: 0; }
+.recordings-calendar-scroll { max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.recordings-calendar-grid { min-width: 308px; }
+.recordings-list-pane { display: flex; min-height: 160px; flex-direction: column; }
+.recordings-state { color: #666; text-align: left; }
+.ti-cloud-storage-range-list { flex: none; overflow: visible; }
+
+@media (min-width: 600px) {
+  .command-sheet {
+    width: min(calc(100% - 48px), 620px);
+    height: auto;
+    max-height: min(620px, calc(100vh - 48px));
+    margin: auto;
+    border-radius: 20px;
+  }
+  .command-sheet::backdrop,
+  .ti-cloud-storage-recordings-sheet::backdrop { background: rgba(0, 0, 0, .28); }
+  .command-sheet .sheet-handle { display: none; }
+  .ti-cloud-storage-recordings-sheet {
+    width: min(calc(100% - 48px), 800px);
+    height: min(720px, calc(100vh - 48px));
+    margin: auto;
+    border-radius: 22px;
+  }
+  .ti-cloud-storage-recordings-sheet .sheet-handle { display: none; }
+  .recordings-layout {
+    display: grid;
+    grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+    gap: 20px;
+    padding: 0 4px;
+    overflow: hidden;
+  }
+  .recordings-calendar-pane,
+  .recordings-list-pane { overflow-y: auto; }
+  .ti-cloud-storage-range-list { flex: 1; overflow-y: auto; }
+}
+
+@media (min-width: 840px) {
+  .configure-page { width: min(calc(100% - 48px), 920px); }
+  .configure-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .configure-section.media-selection { grid-column: 2; grid-row: 1 / span 2; }
+  .settings-list {
+    width: min(calc(100% - 48px), 920px);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
+    column-gap: 20px;
+  }
+  .settings-section:nth-child(2) { grid-row: span 2; }
+  .settings-list h2:not(:first-child) { margin-top: 12px; }
 }

@@ -16,6 +16,7 @@ import type {
   TiRtcRecordingFile,
   TiRtcRecordingTask,
   TiRtcSnapshotFile,
+  TiRawDump,
 } from 'tirtc-electron';
 
 import type {ExampleConfig, ExampleFailure, ExampleSettings, ExampleState} from './shared/types';
@@ -61,7 +62,7 @@ async function retryWhileInUse(operation: () => void): Promise<void> {
 }
 
 const OPERATION_DRAIN_TIMEOUT_MS = 5_000;
-type OperationOwner = 'core' | 'connection' | 'videoOutput' | 'recording' | 'file';
+type OperationOwner = 'core' | 'connection' | 'videoOutput' | 'recording' | 'rawDump' | 'file';
 
 export class ExampleSession {
   readonly #window: BrowserWindow;
@@ -69,21 +70,29 @@ export class ExampleSession {
   #connection: TiRtcConn | null = null;
   #audioInput: TiRtcAudioInput | null = null;
   #audioOutput: TiRtcAudioOutput | null = null;
-  #videoOutput: TiRtcVideoOutput | null = null;
-  #remoteView: TiVideoView | null = null;
+  #videoOutputs = new Map<number, TiRtcVideoOutput>();
+  #unavailableVideoStreamIds = new Set<number>();
+  #remoteViews = new Map<number, TiVideoView>();
   #acceptVideoBounds = false;
   #metricsTimer: ReturnType<typeof setInterval> | null = null;
   #recordingTask: TiRtcRecordingTask | null = null;
+  #rawDump: TiRawDump | null = null;
+  #rawDumpPendingUpload = false;
   #recentRecording: TiRtcRecordingFile | null = null;
   #recentSnapshot: TiRtcSnapshotFile | null = null;
+  #recentRecordingTargetId: number | null = null;
+  #recentSnapshotTargetId: number | null = null;
   #persistedDestinations = new WeakMap<TiRtcMediaFile, string>();
   #retiredMedia = new Set<TiRtcMediaFile>();
   #acceptedOperations = new OperationBarrier<OperationOwner>();
   #quiescing = true;
   #leavePromise: Promise<void> | null = null;
   #initialized = false;
-  #audioStreamId = AUDIO_STREAM_ID;
-  #videoStreamId = VIDEO_STREAM_ID;
+  #audioStreamId: number | null = AUDIO_STREAM_ID;
+  #localAudioStreamId: number | null = null;
+  #videoStreamIds: ReadonlyArray<number> = [VIDEO_STREAM_ID];
+  #selectedVideoStreamId: number | null = VIDEO_STREAM_ID;
+  #recordingTargetId: number | null = null;
   #state: ExampleState = {
     phase: 'configuration',
     message: '',
@@ -98,8 +107,14 @@ export class ExampleSession {
     recentSnapshot: false,
     lastSavedFile: null,
     uploadingLogs: false,
+    rawDumpPhase: 'idle',
+    rawDumpCaptureId: null,
     lastError: null,
     metrics: null,
+    videoStates: {},
+    videoStreamIds: [VIDEO_STREAM_ID],
+    selectedVideoStreamId: VIDEO_STREAM_ID,
+    hasAudio: true,
   };
 
   constructor(window: BrowserWindow, operationDrainTimeoutMs = OPERATION_DRAIN_TIMEOUT_MS) {
@@ -112,12 +127,13 @@ export class ExampleSession {
     await this.leave();
     this.#quiescing = false;
     try {
-      const audioStreamId = config.audioStreamId ?? AUDIO_STREAM_ID;
-      const videoStreamId = config.videoStreamId ?? VIDEO_STREAM_ID;
-      if (!Number.isSafeInteger(audioStreamId) || !Number.isSafeInteger(videoStreamId) ||
-          audioStreamId < 0 || audioStreamId > 15 || videoStreamId < 0 || videoStreamId > 15 ||
-          audioStreamId === videoStreamId) {
-        throw new TypeError('audio and video Stream IDs must be different integers from 0 through 15');
+      const audioStreamId = config.audioStreamId === undefined ? AUDIO_STREAM_ID : config.audioStreamId;
+      const videoStreamIds = config.videoStreamIds === undefined ? [VIDEO_STREAM_ID] : [...config.videoStreamIds];
+      if ((audioStreamId !== null && (!Number.isSafeInteger(audioStreamId) || audioStreamId < 0 || audioStreamId > 15)) ||
+          videoStreamIds.length > 3 || videoStreamIds.some((id) => !Number.isSafeInteger(id) || id < 0 || id > 15) ||
+          new Set(videoStreamIds).size !== videoStreamIds.length ||
+          (audioStreamId !== null && videoStreamIds.includes(audioStreamId))) {
+        throw new TypeError('select optional audio and up to three distinct video Stream IDs from 0 through 15');
       }
       const settings = config.settings ?? DEFAULT_SETTINGS;
       if (!Number.isSafeInteger(settings.localAudioStreamId) || settings.localAudioStreamId < 0 ||
@@ -125,67 +141,132 @@ export class ExampleSession {
         throw new TypeError('local audio Stream ID must be an integer from 0 through 15');
       }
       this.#audioStreamId = audioStreamId;
-      this.#videoStreamId = videoStreamId;
+      this.#videoStreamIds = videoStreamIds;
+      this.#selectedVideoStreamId = videoStreamIds[0] ?? null;
+      this.#unavailableVideoStreamIds.clear();
       TiRtc.init({
         appId: config.appId,
         endpoint: config.endpoint,
         consoleLogEnabled: settings.consoleLogEnabled,
       });
       this.#initialized = true;
-      this.#connection = new TiRtcConn();
-      this.#audioInput = new TiRtcAudioInput();
-      this.#audioOutput = new TiRtcAudioOutput();
-      this.#videoOutput = new TiRtcVideoOutput();
+      const connection = new TiRtcConn();
+      const audioInput = new TiRtcAudioInput();
+      const audioOutput = audioStreamId === null ? null : new TiRtcAudioOutput();
+      this.#connection = connection;
+      this.#audioInput = audioInput;
+      this.#audioOutput = audioOutput;
 
-      this.#connection.onStateChanged = (state, error) => {
+      connection.onStateChanged = (state, error) => {
+        if (this.#quiescing || this.#connection !== connection) return;
         this.update({
           connectionState: state,
           phase: state === 'connected' ? 'playing' : this.#state.phase,
         });
         if (state === 'connected') {
-          try {
-            this.#connection!.subscribeAudio(this.#audioStreamId);
-            this.#connection!.subscribeVideo(this.#videoStreamId);
-          } catch (reason) {
-            this.captureFailure(reason);
+          if (this.#audioStreamId !== null && this.#audioOutput !== null) {
+            try { connection.subscribeAudio(this.#audioStreamId); } catch (reason) {
+              this.retireAudioOutput(this.#audioOutput, reason, '订阅');
+            }
+          }
+          for (const streamId of this.#videoStreamIds) {
+            if (this.#unavailableVideoStreamIds.has(streamId)) continue;
+            try { connection.subscribeVideo(streamId); } catch (reason) {
+              this.markVideoUnavailable(streamId, reason, '订阅');
+            }
           }
         }
         if (error !== null) this.captureFailure(error);
       };
-      this.#connection.onStreamMessage = (_streamId, _timestampMs, data) => {
+      connection.onStreamMessage = (_streamId, _timestampMs, data) => {
+        if (this.#quiescing || this.#connection !== connection) return;
         this.update({message: new TextDecoder().decode(data), messageDirection: 'received', messageCommandId: null});
       };
-      this.#connection.onCommand = (commandId, data) => {
+      connection.onCommand = (commandId, data) => {
+        if (this.#quiescing || this.#connection !== connection) return;
         this.update({message: new TextDecoder().decode(data), messageDirection: 'received', messageCommandId: commandId});
       };
-      this.#audioOutput.onStateChanged = (state) => this.update({audioState: state});
-      this.#audioInput.onStateChanged = (state) => this.update({localAudioRunning: state === 'running'});
-      this.#audioInput.onError = (error) => this.captureFailure(error);
-      this.#audioOutput.onError = (error) => this.captureFailure(error);
-      this.#videoOutput.onError = (error) => this.captureFailure(error);
-      this.#videoOutput.onStateChanged = () => this.publish();
-      this.#videoOutput.onRenderSizeChanged = () => this.publish();
+      if (audioOutput !== null) {
+        audioOutput.onStateChanged = (state) => {
+          if (this.#quiescing || this.#audioOutput !== audioOutput) return;
+          this.update({audioState: state});
+          if (state === 'failed') this.retireAudioOutput(audioOutput, new Error('audio output failed'), '播放');
+        };
+        audioOutput.onError = (error) => {
+          if (!this.#quiescing && this.#audioOutput === audioOutput) {
+            this.retireAudioOutput(audioOutput, error, '播放');
+          }
+        };
+      }
+      audioInput.onStateChanged = (state) => {
+        if (!this.#quiescing && this.#audioInput === audioInput) {
+          this.update({localAudioRunning: state === 'running'});
+        }
+      };
+      audioInput.onError = (error) => {
+        if (!this.#quiescing && this.#audioInput === audioInput) {
+          this.update({localAudioRunning: false, message: `麦克风失败：${failureOf(error).message}`});
+        }
+      };
 
-      this.#audioInput.setOptions({
-        codec: settings.localAudioCodec,
-        sampleRateHz: settings.localAudioCodec === 'amr' ? 8000 : settings.localAudioSampleRateHz,
-        channels: 1,
-        aecMode: settings.localAudioAecEnabled ? 'enabled' : 'disabled',
-        agcLevel: settings.localAudioAgcLevel,
-        ansLevel: settings.localAudioAnsLevel,
-      });
-      this.#audioOutput.setOptions({bufferStrategy: settings.outputBufferPolicy});
-      this.#videoOutput.setOptions({
-        decoderPreference: settings.videoDecoderPreference,
-        bufferStrategy: settings.outputBufferPolicy,
-      });
-      this.#audioInput.attach(this.#connection, settings.localAudioStreamId);
-      this.#audioOutput.attach(this.#connection, this.#audioStreamId);
-      this.#videoOutput.attach(this.#connection, this.#videoStreamId);
+      try {
+        audioInput.setOptions({
+          media: {pcm: 1, g711a: 2, aac: 3, opus: 4, amr: 5}[settings.localAudioCodec],
+          sampleRateHz: settings.localAudioCodec === 'amr' ? 8000 : settings.localAudioSampleRateHz,
+          channels: 1,
+          aecMode: settings.localAudioAecEnabled ? 'enabled' : 'disabled',
+          agcLevel: settings.localAudioAgcLevel,
+          ansLevel: settings.localAudioAnsLevel,
+        });
+        audioInput.attach(connection, settings.localAudioStreamId);
+        this.#localAudioStreamId = settings.localAudioStreamId;
+      } catch (reason) {
+        try { audioInput.dispose(); } catch {}
+        if (this.#audioInput === audioInput) this.#audioInput = null;
+        this.update({localAudioRunning: false, message: `麦克风准备失败：${failureOf(reason).message}`});
+      }
+      if (audioOutput !== null && this.#audioStreamId !== null) {
+        try {
+          audioOutput.setOptions({bufferStrategy: settings.outputBufferPolicy});
+          audioOutput.attach(connection, this.#audioStreamId);
+        } catch (reason) {
+          this.retireAudioOutput(audioOutput, reason, '准备');
+        }
+      }
+      const videoStates: Record<string, string> = {};
+      for (const streamId of this.#videoStreamIds) {
+        const output = new TiRtcVideoOutput();
+        this.#videoOutputs.set(streamId, output);
+        videoStates[String(streamId)] = 'idle';
+        output.onError = (error) => {
+          if (!this.#quiescing && this.#videoOutputs.get(streamId) === output) {
+            this.markVideoUnavailable(streamId, error, '播放');
+          }
+        };
+        output.onStateChanged = (state) => {
+          if (this.#quiescing || this.#videoOutputs.get(streamId) !== output) return;
+          this.update({videoStates: {...this.#state.videoStates, [streamId]: state}});
+          if (state === 'failed') this.#unavailableVideoStreamIds.add(streamId);
+        };
+        output.onRenderSizeChanged = () => {
+          if (!this.#quiescing && this.#videoOutputs.get(streamId) === output) this.publish();
+        };
+        try {
+          output.setOptions({decoderPreference: settings.videoDecoderPreference, bufferStrategy: settings.outputBufferPolicy});
+          output.attach(connection, streamId);
+        } catch (reason) {
+          videoStates[String(streamId)] = 'failed';
+          this.#unavailableVideoStreamIds.add(streamId);
+          this.update({message: `视频 Stream ${streamId} 准备失败：${failureOf(reason).message}`});
+        }
+      }
       this.#acceptVideoBounds = true;
       this.#metricsTimer = setInterval(() => this.publishMetrics(), 1000);
-      this.update({phase: 'connecting', lastError: null, message: '', messageDirection: null, messageCommandId: null});
-      this.#connection.connect({remoteId: config.remoteId, token: config.token});
+      this.update({phase: 'connecting', lastError: null, message: this.#state.message,
+        messageDirection: null, messageCommandId: null, videoStates,
+        videoStreamIds: this.#videoStreamIds,
+        selectedVideoStreamId: this.#selectedVideoStreamId, hasAudio: this.#audioOutput !== null});
+      connection.connect({remoteId: config.remoteId, token: config.token});
     } catch (reason) {
       let failure = reason;
       try { await this.leave(); } catch (cleanupError) { failure = cleanupError; }
@@ -194,15 +275,25 @@ export class ExampleSession {
     }
   }
 
-  setVideoBounds(bounds: Rectangle): void {
-    this.ensureAccepting();
-    if (!this.#acceptVideoBounds || this.#videoOutput === null) return;
-    if (this.#remoteView === null) {
-      this.#remoteView = new TiVideoView(this.#window, bounds);
-      this.#videoOutput.mount(this.#remoteView);
+  setVideoBounds(streamId: number, bounds: Rectangle): void {
+    if (this.#quiescing) return;
+    const output = this.#videoOutputs.get(streamId);
+    if (!this.#acceptVideoBounds || output === undefined) return;
+    const existing = this.#remoteViews.get(streamId);
+    if (existing === undefined) {
+      const view = new TiVideoView(this.#window, bounds);
+      output.mount(view);
+      this.#remoteViews.set(streamId, view);
     } else {
-      this.#remoteView.setBounds(bounds);
+      existing.setBounds(bounds);
     }
+  }
+
+  selectVideoStream(streamId: number): void {
+    this.ensureAccepting();
+    if (!this.#videoOutputs.has(streamId)) throw new TypeError('video Stream ID is not configured');
+    this.#selectedVideoStreamId = streamId;
+    this.update({selectedVideoStreamId: streamId});
   }
 
   sendMessage(message: string): void {
@@ -228,9 +319,10 @@ export class ExampleSession {
       throw new Error('recording is unavailable');
     }
     this.#recordingTask = this.#connection.startRecording({
-      videoStreamId: this.#videoStreamId,
-      audioStreamId: this.#audioStreamId,
+      videoStreamId: this.requireSelectedVideoStreamId(),
+      audioStreamId: this.#audioStreamId ?? undefined,
     });
+    this.#recordingTargetId = this.#selectedVideoStreamId;
     this.update({recording: true});
   }
 
@@ -247,7 +339,8 @@ export class ExampleSession {
     try {
       const file = await task.stop();
       stopped = true;
-      await this.replaceRecent('recording', file);
+      await this.replaceRecent('recording', file, this.#recordingTargetId);
+      this.#recordingTargetId = null;
       this.update({recording: false});
     } catch (reason) {
       if (!stopped && this.#recordingTask === null) this.#recordingTask = task;
@@ -263,9 +356,11 @@ export class ExampleSession {
   }
 
   private async takeSnapshotOwned(): Promise<void> {
-    if (this.#videoOutput === null) throw new Error('video output is unavailable');
+    const output = this.selectedVideoOutput();
+    if (output === null) throw new Error('video output is unavailable');
     try {
-      await this.replaceRecent('snapshot', await this.#videoOutput.takeSnapshot());
+      const targetId = this.#selectedVideoStreamId;
+      await this.replaceRecent('snapshot', await output.takeSnapshot(), targetId);
     } catch (reason) {
       this.captureFailure(reason);
       throw reason;
@@ -304,6 +399,10 @@ export class ExampleSession {
     return file === null ? null : this.#persistedDestinations.get(file) ?? file.path;
   }
 
+  recentTargetId(kind: 'recording' | 'snapshot'): number | null {
+    return kind === 'recording' ? this.#recentRecordingTargetId : this.#recentSnapshotTargetId;
+  }
+
   setAudioMuted(muted: boolean): void {
     this.ensureAccepting();
     if (this.#audioOutput === null) throw new Error('audio output is unavailable');
@@ -325,13 +424,64 @@ export class ExampleSession {
   }
 
   private async uploadLogsOwned(): Promise<void> {
+    if (this.#rawDump !== null) await this.stopRawDumpOwned(false);
+    await this.uploadCompletedDiagnostics();
+  }
+
+  toggleRawDump(): Promise<void> {
+    this.ensureAccepting();
+    return this.track(this.toggleRawDumpOwned(), 'rawDump', 'connection', 'core');
+  }
+
+  private async toggleRawDumpOwned(): Promise<void> {
+    if (this.#rawDump !== null) {
+      await this.stopRawDumpOwned(true);
+      return;
+    }
+    if (this.#rawDumpPendingUpload) {
+      await this.uploadCompletedDiagnostics();
+      return;
+    }
+    if (this.#connection === null || this.#state.connectionState !== 'connected') {
+      throw new Error('raw dump requires a connected RTC session');
+    }
+    this.#rawDump = await this.#connection.startRawDump({
+      audioStreamIds: this.#audioStreamId === null ? [] : [this.#audioStreamId],
+      videoStreamIds: this.#videoStreamIds,
+      uplinkAudioStreamIds: this.#localAudioStreamId === null ? [] : [this.#localAudioStreamId],
+    });
+    this.update({
+      rawDumpPhase: 'capturing',
+      rawDumpCaptureId: null, lastError: null,
+    });
+  }
+
+  private async stopRawDumpOwned(upload: boolean): Promise<void> {
+    const dump = this.#rawDump;
+    if (dump === null) return;
+    this.update({rawDumpPhase: 'finalizing'});
+    const archive = await dump.stop();
+    this.#rawDump = null;
+    this.#rawDumpPendingUpload = true;
+    this.update({
+      rawDumpPhase: upload ? 'uploading' : 'completed',
+      rawDumpCaptureId: archive.captureId,
+    });
+    if (upload) await this.uploadCompletedDiagnostics();
+  }
+
+  private async uploadCompletedDiagnostics(): Promise<void> {
     this.update({uploadingLogs: true});
+    if (this.#rawDumpPendingUpload) this.update({rawDumpPhase: 'uploading'});
     try {
       const logId = await TiRtcLogging.upload();
+      this.#rawDumpPendingUpload = false;
       this.update({uploadingLogs: false, message: `Log ID: ${logId}`,
-        messageDirection: null, messageCommandId: null, lastError: null});
+        messageDirection: null, messageCommandId: null, lastError: null,
+        rawDumpPhase: this.#state.rawDumpCaptureId === null ? 'idle' : 'completed'});
     } catch (reason) {
-      this.update({uploadingLogs: false});
+      this.update({uploadingLogs: false,
+        rawDumpPhase: this.#rawDumpPendingUpload ? 'failed' : this.#state.rawDumpPhase});
       this.captureFailure(reason);
       throw reason;
     }
@@ -371,6 +521,9 @@ export class ExampleSession {
         this.stopRecordingOwned(), 'recording', 'connection', 'core',
       ));
     }
+    if (this.#rawDump !== null && !this.ownerBusy('rawDump')) {
+      await attempt(() => this.track(this.stopRawDumpOwned(false), 'rawDump', 'connection', 'core'));
+    }
     if (!await this.drainAcceptedOperations()) {
       firstError ??= new Error('RTC teardown operations did not settle');
     }
@@ -397,22 +550,34 @@ export class ExampleSession {
       await attempt(() => retryWhileInUse(() => this.#audioOutput!.detach()));
       if (await attempt(() => retryWhileInUse(() => this.#audioOutput!.dispose()))) this.#audioOutput = null;
     }
-    if (this.#videoOutput !== null && !this.ownerBusy('videoOutput')) {
-      await attempt(() => retryWhileInUse(() => this.#videoOutput!.detach()));
-      await attempt(() => retryWhileInUse(() => this.#videoOutput!.unmount()));
+    if (!this.ownerBusy('videoOutput')) {
+      for (const [streamId, output] of this.#videoOutputs) {
+        await attempt(() => retryWhileInUse(() => output.detach()));
+        await attempt(() => retryWhileInUse(() => output.unmount()));
+        const view = this.#remoteViews.get(streamId);
+        if (view !== undefined && await attempt(() => retryWhileInUse(() => view.dispose()))) {
+          this.#remoteViews.delete(streamId);
+        }
+        if (await attempt(() => retryWhileInUse(() => output.dispose()))) {
+          this.#videoOutputs.delete(streamId);
+          this.#unavailableVideoStreamIds.delete(streamId);
+        }
+      }
+      for (const [streamId, view] of this.#remoteViews) {
+        if (this.#videoOutputs.has(streamId)) continue;
+        if (await attempt(() => retryWhileInUse(() => view.dispose()))) this.#remoteViews.delete(streamId);
+      }
     }
-    if (!this.ownerBusy('videoOutput') && this.#remoteView !== null &&
-        await attempt(() => retryWhileInUse(() => this.#remoteView!.dispose()))) this.#remoteView = null;
-    if (!this.ownerBusy('videoOutput') && this.#videoOutput !== null &&
-        await attempt(() => retryWhileInUse(() => this.#videoOutput!.dispose()))) this.#videoOutput = null;
     if (this.#connection !== null && !this.ownerBusy('connection') && this.#audioInput === null &&
-        this.#audioOutput === null && this.#videoOutput === null && this.#recordingTask === null) {
+        this.#audioOutput === null && this.#videoOutputs.size === 0 && this.#recordingTask === null &&
+        this.#rawDump === null) {
       await attempt(() => retryWhileInUse(() => this.#connection!.disconnect()));
       if (await attempt(() => retryWhileInUse(() => this.#connection!.dispose()))) this.#connection = null;
     }
     if (this.#initialized && this.#connection === null && this.#audioInput === null &&
-        this.#audioOutput === null && this.#videoOutput === null && this.#remoteView === null &&
-        this.#recordingTask === null && this.#recentRecording === null && this.#recentSnapshot === null &&
+        this.#audioOutput === null && this.#videoOutputs.size === 0 && this.#remoteViews.size === 0 &&
+        this.#recordingTask === null && this.#rawDump === null && this.#recentRecording === null &&
+        this.#recentSnapshot === null &&
         this.#retiredMedia.size === 0 && !this.ownerBusy('core')) {
       if (await attempt(() => retryWhileInUse(() => TiRtc.shutdown()))) this.#initialized = false;
     }
@@ -429,16 +594,22 @@ export class ExampleSession {
       recentSnapshot: this.#recentSnapshot !== null,
       lastSavedFile: null,
       uploadingLogs: false,
+      rawDumpPhase: 'idle',
+      rawDumpCaptureId: null,
       lastError: firstError === null ? null : failureOf(firstError), metrics: null,
+      videoStates: {}, videoStreamIds: [], selectedVideoStreamId: null, hasAudio: false,
     };
+    this.#rawDumpPendingUpload = false;
+    this.#localAudioStreamId = null;
     this.publish();
     if (firstError !== null) throw firstError;
   }
 
-  private async replaceRecent(kind: 'recording' | 'snapshot', file: TiRtcMediaFile): Promise<void> {
+  private async replaceRecent(kind: 'recording' | 'snapshot', file: TiRtcMediaFile, targetId: number | null): Promise<void> {
     if (kind === 'recording') {
       const previous = this.#recentRecording;
       this.#recentRecording = file as TiRtcRecordingFile;
+      this.#recentRecordingTargetId = targetId;
       this.update({recentRecording: true, lastSavedFile: null});
       if (previous !== null) {
         try { await this.deleteRecent(previous); } catch (reason) {
@@ -449,6 +620,7 @@ export class ExampleSession {
     } else {
       const previous = this.#recentSnapshot;
       this.#recentSnapshot = file as TiRtcSnapshotFile;
+      this.#recentSnapshotTargetId = targetId;
       this.update({recentSnapshot: true, lastSavedFile: null});
       if (previous !== null) {
         try { await this.deleteRecent(previous); } catch (reason) {
@@ -483,14 +655,49 @@ export class ExampleSession {
   }
 
   private publishMetrics(): void {
-    if (this.#connection === null || this.#audioOutput === null || this.#videoOutput === null) return;
+    if (this.#connection === null) return;
+    const videoOutput = this.selectedVideoOutput();
     try {
       this.update({metrics: {
         connection: this.#connection.getMetricsSnapshot(),
-        audio: this.#audioOutput.getMetricsSnapshot(),
-        video: this.#videoOutput.getMetricsSnapshot(),
+        audio: this.#audioOutput?.getMetricsSnapshot() ?? null,
+        video: videoOutput?.getMetricsSnapshot() ?? null,
       }});
     } catch {}
+  }
+
+  private selectedVideoOutput(): TiRtcVideoOutput | null {
+    return this.#selectedVideoStreamId === null || this.#unavailableVideoStreamIds.has(this.#selectedVideoStreamId)
+      ? null : this.#videoOutputs.get(this.#selectedVideoStreamId) ?? null;
+  }
+
+  private retireAudioOutput(output: TiRtcAudioOutput, reason: unknown, phase: string): void {
+    if (this.#audioOutput !== output) return;
+    if (this.#connection !== null && this.#audioStreamId !== null) {
+      try { this.#connection.unsubscribeAudio(this.#audioStreamId); } catch {}
+    }
+    try { output.detach(); } catch {}
+    try { output.dispose(); } catch {}
+    this.#audioOutput = null;
+    this.update({audioState: 'failed', hasAudio: false,
+      message: `音频${phase}失败：${failureOf(reason).message}`});
+  }
+
+  private markVideoUnavailable(streamId: number, reason: unknown, phase: string): void {
+    this.#unavailableVideoStreamIds.add(streamId);
+    this.update({
+      videoStates: {...this.#state.videoStates, [streamId]: 'failed'},
+      message: `视频 Stream ${streamId} ${phase}失败：${failureOf(reason).message}`,
+    });
+  }
+
+  private requireSelectedVideoStreamId(): number {
+    if (this.#selectedVideoStreamId === null ||
+        this.#unavailableVideoStreamIds.has(this.#selectedVideoStreamId) ||
+        this.#state.videoStates[String(this.#selectedVideoStreamId)] !== 'rendering') {
+      throw new Error('video output is unavailable');
+    }
+    return this.#selectedVideoStreamId;
   }
 
   private captureFailure(reason: unknown): void {

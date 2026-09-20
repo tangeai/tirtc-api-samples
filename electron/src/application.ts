@@ -28,19 +28,30 @@ function mainProcessCredential(name: string, format: 'rtc-v1' | 'opaque'): strin
   const cached = credentialCache.get(name);
   if (cached) return cached;
   const descriptorName = `${name}_FD`;
+  const fileName = `${name}_FILE`;
   const descriptorText = process.env[descriptorName];
   const descriptor = descriptorText === undefined ? null : Number(descriptorText);
+  const credentialPath = process.env[fileName];
   let supplied = process.env[name] ?? '';
   try {
+    if (descriptor !== null && credentialPath) {
+      throw new TypeError(`${descriptorName} and ${fileName} are mutually exclusive`);
+    }
     if (descriptor !== null) {
       if (!Number.isSafeInteger(descriptor) || descriptor < 3) {
         throw new TypeError(`${descriptorName} must identify an inherited credential file descriptor`);
       }
       supplied = fs.readFileSync(descriptor, 'utf8');
+    } else if (credentialPath) {
+      supplied = fs.readFileSync(credentialPath, 'utf8');
     }
   } finally {
     delete process.env[name];
     delete process.env[descriptorName];
+    delete process.env[fileName];
+    if (credentialPath) {
+      try { fs.rmSync(credentialPath, {force: true}); } catch {}
+    }
     if (descriptor !== null && Number.isSafeInteger(descriptor) && descriptor >= 3) {
       try { fs.closeSync(descriptor); } catch {}
     }
@@ -128,11 +139,12 @@ function requireApplication(): ExampleApplication {
   return activeApplication;
 }
 
-function downloadsDestination(source: string): string {
+function downloadsDestination(source: string, targetId?: number | null): string {
   const parsed = path.parse(source);
   const directory = app.getPath('downloads');
   for (let suffix = 0; suffix < 10_000; suffix += 1) {
-    const name = suffix === 0 ? parsed.base : `${parsed.name}-${suffix}${parsed.ext}`;
+    const base = `${parsed.name}${targetId === undefined || targetId === null ? '' : `-${targetId}`}`;
+    const name = suffix === 0 ? `${base}${parsed.ext}` : `${base}-${suffix}${parsed.ext}`;
     const candidate = path.join(directory, name);
     if (!fs.existsSync(candidate)) return candidate;
   }
@@ -149,7 +161,9 @@ function installIpc(): void {
     await current.session.configure(await resolveExampleToken(config));
   });
   ipcMain.handle('tirtc-example:video-bounds',
-    (_event, bounds: Rectangle) => requireApplication().session.setVideoBounds(bounds));
+    (_event, streamId: number, bounds: Rectangle) => requireApplication().session.setVideoBounds(streamId, bounds));
+  ipcMain.handle('tirtc-example:video-select',
+    (_event, streamId: number) => requireApplication().session.selectVideoStream(streamId));
   ipcMain.handle('tirtc-example:message', (_event, message: string) =>
     requireApplication().session.sendMessage(message));
   ipcMain.handle('tirtc-example:command', (_event, commandId: number, message: string) =>
@@ -164,7 +178,7 @@ function installIpc(): void {
     const session = requireApplication().session;
     const source = session.recentPath(kind);
     if (!source) throw new Error(`no recent ${kind} is available`);
-    await session.saveRecent(kind, downloadsDestination(source));
+    await session.saveRecent(kind, downloadsDestination(source, session.recentTargetId(kind)));
   });
   ipcMain.handle('tirtc-example:reveal-recent', (_event, kind: 'recording' | 'snapshot') => {
     const file = requireApplication().session.recentPath(kind);
@@ -177,6 +191,8 @@ function installIpc(): void {
     requireApplication().session.setLocalAudioRunning(running));
   ipcMain.handle('tirtc-example:logs-upload', () =>
     requireApplication().session.uploadLogs());
+  ipcMain.handle('tirtc-example:raw-dump-toggle', () =>
+    requireApplication().session.toggleRawDump());
   ipcMain.handle('tirtc-example:leave', () =>
     requireApplication().session.leave());
   ipcMain.handle('tirtc-example:ti-cloud-storage-configure', async (
@@ -194,8 +210,10 @@ function installIpc(): void {
       requireApplication().tiCloudStorageSession.queryDays(startDate, endDate, timeZoneId));
   ipcMain.handle('tirtc-example:ti-cloud-storage-play', (_event, index: number) =>
     requireApplication().tiCloudStorageSession.play(index));
-  ipcMain.handle('tirtc-example:ti-cloud-storage-video-bounds', (_event, bounds: Rectangle) =>
-    requireApplication().tiCloudStorageSession.setVideoBounds(bounds));
+  ipcMain.handle('tirtc-example:ti-cloud-storage-video-bounds', (_event, channelId: number, bounds: Rectangle) =>
+    requireApplication().tiCloudStorageSession.setVideoBounds(channelId, bounds));
+  ipcMain.handle('tirtc-example:ti-cloud-storage-video-select', (_event, channelId: number) =>
+    requireApplication().tiCloudStorageSession.selectVideo(channelId));
   ipcMain.handle('tirtc-example:ti-cloud-storage-pause', () =>
     requireApplication().tiCloudStorageSession.pause());
   ipcMain.handle('tirtc-example:ti-cloud-storage-resume', () =>
@@ -221,12 +239,14 @@ function installIpc(): void {
     const session = requireApplication().tiCloudStorageSession;
     const source = session.recentPath(kind);
     if (!source) throw new Error(`no recent ${kind} is available`);
-    await session.saveRecent(kind, downloadsDestination(source));
+    await session.saveRecent(kind, downloadsDestination(source, session.recentTargetId(kind)));
   });
   ipcMain.handle('tirtc-example:ti-cloud-storage-leave', () =>
     requireApplication().tiCloudStorageSession.leave());
   ipcMain.handle('tirtc-example:ti-cloud-storage-logs-upload', () =>
     requireApplication().tiCloudStorageSession.uploadLogs());
+  ipcMain.handle('tirtc-example:ti-cloud-storage-raw-dump-toggle', () =>
+    requireApplication().tiCloudStorageSession.toggleRawDump());
 }
 
 function beginCleanup(application: ExampleApplication): Promise<void> {
@@ -242,17 +262,15 @@ export async function startExampleApplication(): Promise<ExampleApplication> {
   await app.whenReady();
   installIpc();
   const workArea = screen.getPrimaryDisplay().workAreaSize;
-  const height = Math.round(Math.min(workArea.height * 0.82, 900));
-  const width = Math.round(height / (19.5 / 9));
+  const width = Math.round(Math.min(workArea.width * 0.84, 1024));
+  const height = Math.round(Math.min(workArea.height * 0.82, 760));
   const window = new BrowserWindow({
     width,
     height,
-    minWidth: width,
-    minHeight: height,
-    maxWidth: width,
-    maxHeight: height,
-    resizable: false,
-    maximizable: false,
+    minWidth: 360,
+    minHeight: 420,
+    resizable: true,
+    maximizable: true,
     backgroundColor: '#FFF8E8',
     title: 'Ti RTC',
     webPreferences: {

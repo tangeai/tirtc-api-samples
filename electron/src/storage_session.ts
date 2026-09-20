@@ -18,6 +18,7 @@ import type {
   TiCloudStorageReplaySpeed,
   TiCloudStorageSnapshotFile,
   TiRtcMediaFile,
+  TiRawDump,
 } from 'tirtc-electron';
 
 import type {
@@ -57,7 +58,7 @@ function newestFirstRecordingRanges<T extends Readonly<{startTimeMs: number; end
 
 const OPERATION_DRAIN_TIMEOUT_MS = 5_000;
 type OperationOwner =
-  'core' | 'cloudStorage' | 'replay' | 'videoOutput' | 'recording' | 'export' | 'file';
+  'core' | 'cloudStorage' | 'replay' | 'videoOutput' | 'recording' | 'rawDump' | 'export' | 'file';
 
 export class TiCloudStorageExampleSession {
   readonly #window: BrowserWindow;
@@ -65,9 +66,13 @@ export class TiCloudStorageExampleSession {
   #cloudStorage: TiCloudStorage | null = null;
   #replay: TiCloudStorageReplay | null = null;
   #audioOutput: TiCloudStorageAudioOutput | null = null;
-  #videoOutput: TiCloudStorageVideoOutput | null = null;
-  #view: TiVideoView | null = null;
+  #videoOutputs = new Map<number, TiCloudStorageVideoOutput>();
+  #audioAttached = false;
+  #attachedVideoChannelIds = new Set<number>();
+  #views = new Map<number, TiVideoView>();
   #recordingTask: TiCloudStorageRecordingTask | null = null;
+  #rawDump: TiRawDump | null = null;
+  #rawDumpPendingUpload = false;
   #exportTask: TiCloudStorageExportTask | null = null;
   #exportCompletion: Promise<void> | null = null;
   #recentRecording: TiCloudStorageRecordingFile | null = null;
@@ -78,8 +83,13 @@ export class TiCloudStorageExampleSession {
   #quiescing = true;
   #leavePromise: Promise<void> | null = null;
   #initialized = false;
-  #videoChannelId = 11;
-  #audioChannelId = 10;
+  #videoChannelIds: ReadonlyArray<number> = [11];
+  #audioChannelId: number | null = 10;
+  #selectedVideoChannelId: number | null = 11;
+  #recordingTargetId: number | null = null;
+  #exportTargetId: number | null = null;
+  #recentRecordingTargetId: number | null = null;
+  #recentSnapshotTargetId: number | null = null;
   #queryGeneration = 0;
   #state: TiCloudStorageExampleState = {
     phase: 'configuration',
@@ -96,8 +106,11 @@ export class TiCloudStorageExampleSession {
     lastSavedFile: null,
     message: '',
     uploadingLogs: false,
+    rawDumpPhase: 'idle',
+    rawDumpCaptureId: null,
     mediaBusy: false,
     lastError: null,
+    videoStates: {}, videoChannelIds: [11], selectedVideoChannelId: 11, hasAudio: true,
   };
 
   constructor(window: BrowserWindow, operationDrainTimeoutMs = OPERATION_DRAIN_TIMEOUT_MS) {
@@ -112,22 +125,66 @@ export class TiCloudStorageExampleSession {
     try {
       TiCloudStorage.init({appId: config.appId, endpoint: config.endpoint});
       this.#initialized = true;
-      this.#videoChannelId = config.videoChannelId;
+      const videoChannelIds = config.videoChannelIds === undefined ? [11] : [...config.videoChannelIds];
+      if ((config.audioChannelId !== null && (!Number.isSafeInteger(config.audioChannelId) || config.audioChannelId < 0 || config.audioChannelId > 255)) ||
+          videoChannelIds.length > 3 || videoChannelIds.some((id) => !Number.isSafeInteger(id) || id < 0 || id > 255) ||
+          new Set(videoChannelIds).size !== videoChannelIds.length) {
+        throw new TypeError('select optional audio and up to three distinct video Channel IDs from 0 through 255');
+      }
+      this.#videoChannelIds = videoChannelIds;
       this.#audioChannelId = config.audioChannelId;
+      this.#selectedVideoChannelId = this.#videoChannelIds[0] ?? null;
       this.#cloudStorage = new TiCloudStorage(config.token);
       this.#replay = this.#cloudStorage.createReplay();
-      this.#audioOutput = new TiCloudStorageAudioOutput();
-      this.#videoOutput = new TiCloudStorageVideoOutput();
+      this.#audioOutput = this.#audioChannelId === null ? null : new TiCloudStorageAudioOutput();
       this.#replay.onTimeChanged = (timeMs) => this.update({currentTimeMs: timeMs});
-      this.#replay.onCompleted = () => this.update({replayState: 'completed'});
+      this.#replay.onCompleted = () => this.update({message: '录像源读取完成'});
       this.#replay.onError = (error) => this.captureFailure(error);
-      this.#audioOutput.onStateChanged = (state) => {
-        if (state === 'paused' || state === 'completed' || state === 'failed') this.update({replayState: state});
+      this.#replay.onRecordingGap = (gap) => {
+        this.update({message: `Replay gap ${gap.range.startTimeMs}-${gap.range.endTimeMs}`});
       };
-      this.#audioOutput.onError = (error) => this.captureFailure(error);
-      this.#videoOutput.onStateChanged = (state) => this.update({replayState: state});
-      this.#videoOutput.onError = (error) => this.captureFailure(error);
-      this.update({phase: 'selection', lastError: null, message: ''});
+      if (this.#audioOutput !== null) {
+        this.#audioOutput.onStateChanged = (state) => {
+          if (this.replayOutputsCompleted()) this.update({replayState: 'completed'});
+          else if (this.#videoChannelIds.length === 0 && (state === 'playing' || state === 'paused')) {
+            this.update({replayState: state});
+          }
+        };
+        this.#audioOutput.onError = (error) => {
+          const failure = failureOf(error);
+          this.update({
+            message: `音频播放失败：${failure.message}`,
+            hasAudio: false,
+          });
+        };
+      }
+      const videoStates: Record<string, string> = {};
+      for (const channelId of this.#videoChannelIds) {
+        const output = new TiCloudStorageVideoOutput();
+        this.#videoOutputs.set(channelId, output);
+        videoStates[String(channelId)] = 'idle';
+        output.onStateChanged = (state) => {
+          const next: Record<string, string> = {...this.#state.videoStates, [channelId]: state};
+          if (this.replayOutputsCompleted(next)) {
+            this.update({videoStates: next, replayState: 'completed'});
+          } else if (state === 'rendering' || state === 'paused') {
+            this.update({videoStates: next, replayState: state});
+          } else {
+            this.update({videoStates: next});
+          }
+        };
+        output.onError = (error) => {
+          const failure = failureOf(error);
+          const next: Record<string, string> = {...this.#state.videoStates, [channelId]: 'failed'};
+          this.update({
+            videoStates: next,
+            message: `视频 Channel ${channelId} 播放失败：${failure.message}`,
+          });
+        };
+      }
+      this.update({phase: 'selection', lastError: null, message: '', videoStates,
+        videoChannelIds: this.#videoChannelIds,
+        selectedVideoChannelId: this.#selectedVideoChannelId, hasAudio: this.#audioChannelId !== null});
     } catch (reason) {
       let failure = reason;
       try { await this.leave(); } catch (cleanupError) { failure = cleanupError; }
@@ -176,13 +233,39 @@ export class TiCloudStorageExampleSession {
 
   play(index: number): void {
     this.ensureAccepting();
-    if (this.#replay === null || this.#audioOutput === null || this.#videoOutput === null) {
+    if (this.#replay === null || (this.#audioOutput === null && this.#videoOutputs.size === 0)) {
       throw new Error('replay is unavailable');
     }
     const range = this.#state.ranges[index];
     if (range === undefined) throw new TypeError('recording index is invalid');
-    this.#audioOutput.attach(this.#replay, this.#audioChannelId);
-    this.#videoOutput.attach(this.#replay, this.#videoChannelId);
+    let firstAttachError: unknown = null;
+    if (this.#audioOutput !== null && this.#audioChannelId !== null && !this.#audioAttached) {
+      try {
+        this.#audioOutput.attach(this.#replay, this.#audioChannelId);
+        this.#audioAttached = true;
+        this.update({hasAudio: true});
+      } catch (reason) {
+        firstAttachError = reason;
+        this.update({hasAudio: false, message: `音频输出绑定失败：${failureOf(reason).message}`});
+      }
+    }
+    const videoStates: Record<string, string> = {...this.#state.videoStates};
+    for (const [channelId, output] of this.#videoOutputs) {
+      if (!this.#attachedVideoChannelIds.has(channelId)) {
+        try {
+          output.attach(this.#replay, channelId);
+          this.#attachedVideoChannelIds.add(channelId);
+        } catch (reason) {
+          firstAttachError ??= reason;
+          videoStates[String(channelId)] = 'failed';
+          this.update({message: `视频 Channel ${channelId} 绑定失败：${failureOf(reason).message}`});
+        }
+      }
+      if (this.#attachedVideoChannelIds.has(channelId)) videoStates[String(channelId)] = 'idle';
+    }
+    if (!this.#audioAttached && this.#attachedVideoChannelIds.size === 0) {
+      throw firstAttachError ?? new Error('no replay output could be attached');
+    }
     this.#replay.play({startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs});
     this.update({
       phase: 'playing',
@@ -190,18 +273,29 @@ export class TiCloudStorageExampleSession {
       currentTimeMs: range.startTimeMs,
       replayState: 'buffering',
       lastError: null,
+      videoStates,
     });
   }
 
-  setVideoBounds(bounds: Rectangle): void {
-    this.ensureAccepting();
-    if (this.#videoOutput === null) return;
-    if (this.#view === null) {
-      this.#view = new TiVideoView(this.#window, bounds);
-      this.#videoOutput.mount(this.#view);
+  setVideoBounds(channelId: number, bounds: Rectangle): void {
+    if (this.#quiescing) return;
+    const output = this.#videoOutputs.get(channelId);
+    if (output === undefined) return;
+    const existing = this.#views.get(channelId);
+    if (existing === undefined) {
+      const view = new TiVideoView(this.#window, bounds);
+      output.mount(view);
+      this.#views.set(channelId, view);
     } else {
-      this.#view.setBounds(bounds);
+      existing.setBounds(bounds);
     }
+  }
+
+  selectVideo(channelId: number): void {
+    this.ensureAccepting();
+    if (!this.#videoOutputs.has(channelId)) throw new TypeError('video Channel ID is not configured');
+    this.#selectedVideoChannelId = channelId;
+    this.update({selectedVideoChannelId: channelId});
   }
 
   pause(): void { this.ensureAccepting(); this.requireReplay().pause(); this.update({replayState: 'paused'}); }
@@ -223,9 +317,10 @@ export class TiCloudStorageExampleSession {
     this.ensureAccepting();
     if (this.#recordingTask !== null) throw new Error('recording is already active');
     this.#recordingTask = this.requireReplay().startRecording({
-      videoChannelId: this.#videoChannelId,
-      audioChannelId: this.#audioChannelId,
+      videoChannelId: this.requireSelectedVideoChannelId(),
+      audioChannelId: this.#audioChannelId ?? undefined,
     });
+    this.#recordingTargetId = this.#selectedVideoChannelId;
     this.update({recording: true, mediaBusy: false});
   }
 
@@ -243,7 +338,8 @@ export class TiCloudStorageExampleSession {
     try {
       const file = await task.stop();
       stopped = true;
-      await this.replaceRecent('recording', file);
+      await this.replaceRecent('recording', file, this.#recordingTargetId);
+      this.#recordingTargetId = null;
       this.update({recording: false, mediaBusy: false});
     } catch (reason) {
       if (!stopped && this.#recordingTask === null) this.#recordingTask = task;
@@ -258,10 +354,12 @@ export class TiCloudStorageExampleSession {
   }
 
   private async takeSnapshotOwned(): Promise<void> {
-    if (this.#videoOutput === null) throw new Error('video output is unavailable');
+    const output = this.selectedVideoOutput();
+    if (output === null) throw new Error('video output is unavailable');
     this.update({mediaBusy: true});
     try {
-      await this.replaceRecent('snapshot', await this.#videoOutput.takeSnapshot());
+      const targetId = this.#selectedVideoChannelId;
+      await this.replaceRecent('snapshot', await output.takeSnapshot(), targetId);
       this.update({mediaBusy: false});
     } catch (reason) {
       this.captureFailure(reason, {mediaBusy: false});
@@ -277,15 +375,31 @@ export class TiCloudStorageExampleSession {
     const task = this.#cloudStorage.exportRecording({
       startTimeMs: range.startTimeMs,
       endTimeMs: range.endTimeMs,
-      videoChannelId: this.#videoChannelId,
-      audioChannelId: this.#audioChannelId,
-    }, (progress) => this.update({exportProgress: progress}));
+      videoChannelId: this.requireSelectedVideoChannelId(),
+      audioChannelId: this.#audioChannelId ?? undefined,
+    }, {
+      onProgressDetail: (progress) => this.update({exportProgress: progress.fraction}),
+      onRecordingGap: (gap) => {
+        this.update({message: `Export gap ${gap.range.startTimeMs}-${gap.range.endTimeMs}`});
+      },
+    });
     this.#exportTask = task;
+    this.#exportTargetId = this.#selectedVideoChannelId;
     this.update({exportProgress: 0, mediaBusy: true});
-    const completion = this.track(task.result.then(async (file) => {
+    void task.result.catch(() => undefined);
+    const completion = this.track(task.completion.then(async (outcome) => {
       if (this.#exportTask !== task) return;
-      await this.replaceRecent('recording', file);
-      this.update({exportProgress: null, mediaBusy: false});
+      if (outcome.code !== 0 || outcome.file === null || outcome.report === null) {
+        await task.result;
+        return;
+      }
+      await this.replaceRecent('recording', outcome.file, this.#exportTargetId);
+      this.update({
+        exportProgress: null,
+        mediaBusy: false,
+        message: `Covered ${outcome.report.coveredDurationMs}ms; gaps ${outcome.report.gaps.length}; ` +
+          `unprocessed ${outcome.report.unprocessedRanges.length}; ${outcome.report.termination}`,
+      });
     }).catch((reason) => {
       if (this.#exportTask !== task) return;
       if (reason instanceof TiRtcError && reason.code === 'cancelled') {
@@ -332,18 +446,70 @@ export class TiCloudStorageExampleSession {
     return file === null ? null : this.#persistedDestinations.get(file) ?? file.path;
   }
 
+  recentTargetId(kind: 'recording' | 'snapshot'): number | null {
+    return kind === 'recording' ? this.#recentRecordingTargetId : this.#recentSnapshotTargetId;
+  }
+
   uploadLogs(): Promise<void> {
     this.ensureAccepting();
     return this.track(this.uploadLogsOwned(), 'core');
   }
 
   private async uploadLogsOwned(): Promise<void> {
+    if (this.#rawDump !== null) await this.stopRawDumpOwned(false);
+    await this.uploadCompletedDiagnostics();
+  }
+
+  toggleRawDump(): Promise<void> {
+    this.ensureAccepting();
+    return this.track(this.toggleRawDumpOwned(), 'rawDump', 'replay', 'core');
+  }
+
+  private async toggleRawDumpOwned(): Promise<void> {
+    if (this.#rawDump !== null) {
+      await this.stopRawDumpOwned(true);
+      return;
+    }
+    if (this.#rawDumpPendingUpload) {
+      await this.uploadCompletedDiagnostics();
+      return;
+    }
+    if (this.#state.selectedIndex === null) throw new Error('raw dump requires an active replay');
+    this.#rawDump = await this.requireReplay().startRawDump({
+      audioChannelIds: this.#audioChannelId === null ? [] : [this.#audioChannelId],
+      videoChannelIds: this.#videoChannelIds,
+    });
+    this.update({
+      rawDumpPhase: 'capturing',
+      rawDumpCaptureId: null, lastError: null,
+    });
+  }
+
+  private async stopRawDumpOwned(upload: boolean): Promise<void> {
+    const dump = this.#rawDump;
+    if (dump === null) return;
+    this.update({rawDumpPhase: 'finalizing'});
+    const archive = await dump.stop();
+    this.#rawDump = null;
+    this.#rawDumpPendingUpload = true;
+    this.update({
+      rawDumpPhase: upload ? 'uploading' : 'completed',
+      rawDumpCaptureId: archive.captureId,
+    });
+    if (upload) await this.uploadCompletedDiagnostics();
+  }
+
+  private async uploadCompletedDiagnostics(): Promise<void> {
     this.update({uploadingLogs: true});
+    if (this.#rawDumpPendingUpload) this.update({rawDumpPhase: 'uploading'});
     try {
       const logId = await TiRtcLogging.upload();
-      this.update({uploadingLogs: false, message: `Log ID: ${logId}`, lastError: null});
+      this.#rawDumpPendingUpload = false;
+      this.update({uploadingLogs: false, message: `Log ID: ${logId}`, lastError: null,
+        rawDumpPhase: this.#state.rawDumpCaptureId === null ? 'idle' : 'completed'});
     } catch (reason) {
-      this.captureFailure(reason, {uploadingLogs: false});
+      this.captureFailure(reason, {uploadingLogs: false,
+        rawDumpPhase: this.#rawDumpPendingUpload ? 'failed' : this.#state.rawDumpPhase});
       throw reason;
     }
   }
@@ -384,6 +550,9 @@ export class TiCloudStorageExampleSession {
     if (this.#recordingTask !== null && !this.ownerBusy('recording')) {
       await attempt(() => this.track(this.stopRecordingOwned(), 'recording', 'replay', 'core'));
     }
+    if (this.#rawDump !== null && !this.ownerBusy('rawDump')) {
+      await attempt(() => this.track(this.stopRawDumpOwned(false), 'rawDump', 'replay', 'core'));
+    }
     if (!await this.drainAcceptedOperations()) {
       firstError ??= new Error('Ti Cloud Storage teardown operations did not settle');
     }
@@ -398,20 +567,37 @@ export class TiCloudStorageExampleSession {
     if (!this.ownerBusy('file')) {
       for (const file of [...this.#retiredMedia]) await attempt(() => this.deleteRecent(file));
     }
-    if (this.#videoOutput !== null && !this.ownerBusy('videoOutput')) {
-      await attempt(() => retryWhileInUse(() => this.#videoOutput!.detach()));
-      await attempt(() => retryWhileInUse(() => this.#videoOutput!.unmount()));
+    if (!this.ownerBusy('videoOutput')) {
+      for (const [channelId, output] of this.#videoOutputs) {
+        if (this.#attachedVideoChannelIds.has(channelId)) {
+          if (await attempt(() => retryWhileInUse(() => output.detach()))) {
+            this.#attachedVideoChannelIds.delete(channelId);
+          }
+        }
+        await attempt(() => retryWhileInUse(() => output.unmount()));
+        const view = this.#views.get(channelId);
+        if (view !== undefined && await attempt(() => retryWhileInUse(() => view.dispose()))) {
+          this.#views.delete(channelId);
+        }
+        if (await attempt(() => retryWhileInUse(() => output.dispose()))) {
+          this.#videoOutputs.delete(channelId);
+          this.#attachedVideoChannelIds.delete(channelId);
+        }
+      }
+      for (const [channelId, view] of this.#views) {
+        if (this.#videoOutputs.has(channelId)) continue;
+        if (await attempt(() => retryWhileInUse(() => view.dispose()))) this.#views.delete(channelId);
+      }
     }
-    if (!this.ownerBusy('videoOutput') && this.#view !== null &&
-        await attempt(() => retryWhileInUse(() => this.#view!.dispose()))) this.#view = null;
-    if (!this.ownerBusy('videoOutput') && this.#videoOutput !== null &&
-        await attempt(() => retryWhileInUse(() => this.#videoOutput!.dispose()))) this.#videoOutput = null;
     if (this.#audioOutput !== null) {
-      await attempt(() => retryWhileInUse(() => this.#audioOutput!.detach()));
-      if (await attempt(() => retryWhileInUse(() => this.#audioOutput!.dispose()))) this.#audioOutput = null;
+      if (this.#audioAttached) await attempt(() => retryWhileInUse(() => this.#audioOutput!.detach()));
+      if (await attempt(() => retryWhileInUse(() => this.#audioOutput!.dispose()))) {
+        this.#audioOutput = null;
+        this.#audioAttached = false;
+      }
     }
     if (this.#replay !== null && !this.ownerBusy('replay') && this.#audioOutput === null &&
-        this.#videoOutput === null && this.#recordingTask === null) {
+        this.#videoOutputs.size === 0 && this.#recordingTask === null && this.#rawDump === null) {
       await attempt(() => retryWhileInUse(() => this.#replay!.stop()));
       if (await attempt(() => retryWhileInUse(() => this.#replay!.dispose()))) this.#replay = null;
     }
@@ -419,8 +605,9 @@ export class TiCloudStorageExampleSession {
         this.#exportTask === null &&
         await attempt(() => retryWhileInUse(() => this.#cloudStorage!.dispose()))) this.#cloudStorage = null;
     if (this.#initialized && this.#cloudStorage === null && this.#replay === null &&
-        this.#audioOutput === null && this.#videoOutput === null && this.#view === null &&
-        this.#recordingTask === null && this.#exportTask === null && this.#recentRecording === null &&
+        this.#audioOutput === null && this.#videoOutputs.size === 0 && this.#views.size === 0 &&
+        this.#recordingTask === null && this.#rawDump === null && this.#exportTask === null &&
+        this.#recentRecording === null &&
         this.#recentSnapshot === null && this.#retiredMedia.size === 0 && !this.ownerBusy('core')) {
       if (await attempt(() => retryWhileInUse(() => TiCloudStorage.shutdown()))) this.#initialized = false;
     }
@@ -438,8 +625,12 @@ export class TiCloudStorageExampleSession {
       lastSavedFile: null,
       message: firstError === null ? '' : failureOf(firstError).message,
       uploadingLogs: false, mediaBusy: false,
+      rawDumpPhase: 'idle',
+      rawDumpCaptureId: null,
       lastError: firstError === null ? null : failureOf(firstError),
+      videoStates: {}, videoChannelIds: [], selectedVideoChannelId: null, hasAudio: false,
     };
+    this.#rawDumpPendingUpload = false;
     this.publish();
     if (firstError !== null) throw firstError;
   }
@@ -449,10 +640,11 @@ export class TiCloudStorageExampleSession {
     return this.#replay;
   }
 
-  private async replaceRecent(kind: 'recording' | 'snapshot', file: TiRtcMediaFile): Promise<void> {
+  private async replaceRecent(kind: 'recording' | 'snapshot', file: TiRtcMediaFile, targetId: number | null): Promise<void> {
     if (kind === 'recording') {
       const previous = this.#recentRecording;
       this.#recentRecording = file as TiCloudStorageRecordingFile;
+      this.#recentRecordingTargetId = targetId;
       this.update({recentRecording: true, lastSavedFile: null});
       if (previous !== null) {
         try { await this.deleteRecent(previous); } catch (reason) {
@@ -463,6 +655,7 @@ export class TiCloudStorageExampleSession {
     } else {
       const previous = this.#recentSnapshot;
       this.#recentSnapshot = file as TiCloudStorageSnapshotFile;
+      this.#recentSnapshotTargetId = targetId;
       this.update({recentSnapshot: true, lastSavedFile: null});
       if (previous !== null) {
         try { await this.deleteRecent(previous); } catch (reason) {
@@ -482,6 +675,22 @@ export class TiCloudStorageExampleSession {
 
   private ensureAccepting(): void {
     if (this.#quiescing) throw new Error('Ti Cloud Storage session is leaving');
+  }
+
+  private selectedVideoOutput(): TiCloudStorageVideoOutput | null {
+    return this.#selectedVideoChannelId === null ? null : this.#videoOutputs.get(this.#selectedVideoChannelId) ?? null;
+  }
+
+  private requireSelectedVideoChannelId(): number {
+    if (this.#selectedVideoChannelId === null) throw new Error('video output is unavailable');
+    return this.#selectedVideoChannelId;
+  }
+
+  private replayOutputsCompleted(videoStates: Readonly<Record<string, string>> = this.#state.videoStates): boolean {
+    const audioCompleted = this.#audioChannelId === null ||
+      (this.#audioAttached && this.#audioOutput?.state === 'completed');
+    return audioCompleted && this.#videoChannelIds.every((id) =>
+      this.#attachedVideoChannelIds.has(id) && videoStates[String(id)] === 'completed');
   }
 
   private track<T>(operation: Promise<T>, ...owners: OperationOwner[]): Promise<T> {

@@ -15,7 +15,7 @@ const configStatus = document.querySelector<HTMLElement>('#config-status')!;
 const statusElement = document.querySelector<HTMLElement>('#status')!;
 const stageStatus = document.querySelector<HTMLElement>('#stage-status')!;
 const metrics = document.querySelector<HTMLElement>('#metrics')!;
-const remoteVideo = document.querySelector<HTMLElement>('#remote-video')!;
+const remoteVideoGrid = document.querySelector<HTMLElement>('#remote-video-grid')!;
 const metricsPanel = document.querySelector<HTMLElement>('.metrics-panel')!;
 const commandPanel = document.querySelector<HTMLDialogElement>('#command-panel')!;
 const preferenceSheet = document.querySelector<HTMLDialogElement>('#preference-sheet')!;
@@ -24,9 +24,12 @@ const recordButton = document.querySelector<HTMLButtonElement>('#record')!;
 const saveMediaButton = document.querySelector<HTMLButtonElement>('#save-media')!;
 const muteButton = document.querySelector<HTMLButtonElement>('#mute')!;
 const localAudioButton = document.querySelector<HTMLButtonElement>('#local-audio')!;
+const rawDumpButton = document.querySelector<HTMLButtonElement>('#raw-dump')!;
 let currentState: ExampleState | null = null;
 let settingsVisible = false;
 let productMode: 'rtc' | 'ti-cloud-storage' = 'rtc';
+let rtcMaximizedVideoId: number | null = null;
+let cloudMaximizedVideoId: number | null = null;
 
 const DEFAULT_SETTINGS: ExampleSettings = {
   videoDecoderPreference: 'auto',
@@ -143,10 +146,73 @@ document.querySelectorAll<HTMLButtonElement>('[data-setting]').forEach((button) 
 });
 renderSettings();
 
-function numericField(data: FormData, name: string, fallback: number): number {
+function optionalNumericField(data: FormData, name: string): number | null {
   const text = String(data.get(name) ?? '').trim();
-  return text === '' ? fallback : Number(text);
+  return text === '' ? null : Number(text);
 }
+
+function installVideoIdEditor(
+  containerId: string, addId: string, fieldName: string, label: string,
+  fieldTestPrefix: string, removeTestPrefix: string,
+): (next: readonly string[]) => void {
+  const container = document.querySelector<HTMLElement>(`#${containerId}`)!;
+  const add = document.querySelector<HTMLButtonElement>(`#${addId}`)!;
+  const values = () => [...container.querySelectorAll<HTMLInputElement>(`input[name="${fieldName}"]`)].map((input) => input.value);
+  const render = (next: readonly string[]) => {
+    container.replaceChildren(...next.map((value, index) => {
+      const row = document.createElement('label');
+      row.className = 'field video-id-field';
+      const title = document.createElement('span');
+      title.textContent = `${label} ${index + 1}`;
+      const input = document.createElement('input');
+      input.name = fieldName;
+      input.inputMode = 'numeric';
+      input.value = value;
+      input.dataset.testid = `${fieldTestPrefix}_${index + 1}`;
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'remove-video-id';
+      remove.textContent = '删除';
+      remove.dataset.testid = `${removeTestPrefix}_${index + 1}`;
+      remove.addEventListener('click', () => render(values().filter((_, itemIndex) => itemIndex !== index)));
+      row.append(title, input, remove);
+      return row;
+    }));
+    add.disabled = next.length >= 3;
+    add.textContent = `＋ 添加视频（${next.length}/3）`;
+  };
+  add.addEventListener('click', () => { if (values().length < 3) render([...values(), '']); });
+  render(values());
+  return render;
+}
+
+const renderRtcVideoIds = installVideoIdEditor(
+  'rtc-video-stream-fields', 'rtc-add-video-stream', 'videoStreamId', 'video_stream_id',
+  'tirtc_example_video_stream_id_field', 'tirtc_example_remove_video_stream_id_button',
+);
+const renderCloudVideoIds = installVideoIdEditor(
+  'cloud-video-channel-fields', 'cloud-add-video-channel', 'videoChannelId', 'video_channel_id',
+  'tirtc_example_cloud_storage_video_channel_field', 'tirtc_example_remove_cloud_storage_video_channel_button',
+);
+
+function storedVideoIds(listKey: string, fallback: readonly string[]): readonly string[] {
+  const stored = localStorage.getItem(listKey);
+  if (stored !== null) {
+    try {
+      const values = JSON.parse(stored) as unknown;
+      if (Array.isArray(values)) return values.filter((value): value is string => typeof value === 'string').slice(0, 3);
+    } catch { /* fall through to the current default */ }
+  }
+  return fallback;
+}
+
+renderRtcVideoIds(storedVideoIds('tirtc_example.rtc.video_stream_ids', ['11']));
+renderCloudVideoIds(storedVideoIds(
+  'tirtc_example.cloud.video_channel_ids', ['11']));
+(form.elements.namedItem('audioStreamId') as HTMLInputElement).value =
+  localStorage.getItem('tirtc_example.rtc.audio_stream_id') ?? '10';
+(document.querySelector<HTMLInputElement>('#ti-cloud-storage-config input[name="audioChannelId"]')!).value =
+  localStorage.getItem('tirtc_example.cloud.audio_channel_id') ?? '10';
 
 function config(): ExampleConfig {
   const data = new FormData(form);
@@ -155,19 +221,25 @@ function config(): ExampleConfig {
     endpoint: String(data.get('endpoint') ?? '').trim(),
     remoteId: String(data.get('remoteId') ?? '').trim(),
     tokenServerAddress: String(data.get('tokenServerAddress') ?? '').trim(),
-    audioStreamId: numericField(data, 'audioStreamId', 10),
-    videoStreamId: numericField(data, 'videoStreamId', 11),
+    audioStreamId: optionalNumericField(data, 'audioStreamId'),
+    videoStreamIds: data.getAll('videoStreamId').map(String).map((value) => value.trim()).filter(Boolean).map(Number),
     settings,
   };
 }
 
 async function updateBounds(): Promise<void> {
-  const bounds = remoteVideo.getBoundingClientRect();
-  if (bounds.width < 1 || bounds.height < 1) return;
-  await example.setVideoBounds({
-    x: Math.round(bounds.x), y: Math.round(bounds.y),
-    width: Math.round(bounds.width), height: Math.round(bounds.height),
-  });
+  await Promise.all([...remoteVideoGrid.querySelectorAll<HTMLElement>('[data-video-id]')].map((tile) => {
+    const bounds = tile.getBoundingClientRect();
+    return example.setVideoBounds(Number(tile.dataset.videoId), {
+      x: Math.round(bounds.x), y: Math.round(bounds.y),
+      width: Math.round(bounds.width), height: Math.round(bounds.height),
+    });
+  }));
+}
+
+function syncGridViewportClass(grid: HTMLElement): void {
+  grid.classList.toggle('wide', innerWidth >= 600);
+  grid.classList.toggle('compact', innerWidth < 600);
 }
 
 function setBusy(busy: boolean, uploadingLogs = false): void {
@@ -182,14 +254,16 @@ function setBusy(busy: boolean, uploadingLogs = false): void {
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
   const next = config();
-  if (!Number.isInteger(next.audioStreamId) || !Number.isInteger(next.videoStreamId) ||
-      next.audioStreamId! < 0 || next.audioStreamId! > 15 ||
-      next.videoStreamId! < 0 || next.videoStreamId! > 15 ||
-      next.audioStreamId === next.videoStreamId) {
-    configStatus.textContent = '音频和视频流 ID 必须是 0..15 内不同的整数。';
+  const videos = next.videoStreamIds ?? [];
+  if ((next.audioStreamId !== null && (!Number.isInteger(next.audioStreamId) || next.audioStreamId! < 0 || next.audioStreamId! > 15)) ||
+      videos.length > 3 || videos.some((id) => !Number.isInteger(id) || id < 0 || id > 15) ||
+      new Set(videos).size !== videos.length || (next.audioStreamId !== null && videos.includes(next.audioStreamId!))) {
+    configStatus.textContent = '可选一路音频和最多三路不重复视频，Stream ID 必须是 0..15 内的整数。';
     return;
   }
   setBusy(true);
+  localStorage.setItem('tirtc_example.rtc.audio_stream_id', next.audioStreamId === null ? '' : String(next.audioStreamId));
+  localStorage.setItem('tirtc_example.rtc.video_stream_ids', JSON.stringify(videos.map(String)));
   configStatus.textContent = '';
   document.querySelector('#player-remote-id')!.textContent = next.remoteId;
   try {
@@ -201,7 +275,14 @@ form.addEventListener('submit', async (event) => {
   }
 });
 
-window.addEventListener('resize', () => { void updateBounds(); });
+window.addEventListener('resize', () => {
+  syncGridViewportClass(remoteVideoGrid);
+  syncGridViewportClass(tiCloudStorageVideoGrid);
+  requestAnimationFrame(() => {
+    if (productMode === 'rtc') void updateBounds();
+    else void tiCloudStorageUpdateBounds();
+  });
+});
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -235,6 +316,8 @@ document.querySelector('#save-snapshot')!.addEventListener('click', () =>
   void command(() => example.saveRecent('snapshot')));
 document.querySelector('#logs')!.addEventListener('click', () =>
   void command(() => example.uploadLogs()));
+rawDumpButton.addEventListener('click', () =>
+  void command(() => example.toggleRawDump()));
 document.querySelector('#config-logs')!.addEventListener('click', () =>
   void command(() => example.uploadLogs()));
 document.querySelector('#ti-cloud-storage-config-logs')!.addEventListener('click', () =>
@@ -245,6 +328,37 @@ document.querySelector('#stop-playback')!.addEventListener('click', () =>
 document.querySelector('#command-toggle')!.addEventListener('click', () => {
   commandPanel.showModal();
   document.querySelector<HTMLInputElement>('#message')!.focus();
+});
+commandPanel.addEventListener('close', () => {
+  document.querySelector<HTMLElement>('[data-testid="tirtc_example_player_more_button"]')!.focus();
+});
+commandPanel.addEventListener('pointerdown', (event) => {
+  if (event.target === commandPanel) commandPanel.close('cancel');
+});
+const actionMenus = [...document.querySelectorAll<HTMLDetailsElement>('.action-menu')];
+function closeActionMenu(menu: HTMLDetailsElement, restoreFocus = true): void {
+  if (!menu.open) return;
+  menu.open = false;
+  if (restoreFocus) menu.querySelector<HTMLElement>('summary')?.focus();
+}
+for (const menu of actionMenus) {
+  menu.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !menu.open) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeActionMenu(menu);
+  });
+  menu.querySelectorAll<HTMLButtonElement>('.action-menu-popover button').forEach((button) => {
+    button.addEventListener('click', () => closeActionMenu(menu, button.id !== 'command-toggle'));
+  });
+}
+document.addEventListener('pointerdown', (event) => {
+  for (const menu of actionMenus) {
+    if (menu.open && event.target instanceof Node && !menu.contains(event.target)) {
+      event.preventDefault();
+      closeActionMenu(menu);
+    }
+  }
 });
 document.querySelector('#send')!.addEventListener('click', () => {
   const input = document.querySelector<HTMLInputElement>('#message')!;
@@ -347,6 +461,79 @@ function updateMetrics(state: ExampleState): void {
     `音频 ${count(audioStutter?.stutterCount)} / 最长 ${duration(audioStutter?.stutterPeakMs)}`;
 }
 
+function renderRtcVideoGrid(state: ExampleState): void {
+  const ids = [...state.videoStreamIds];
+  const focusedLaneId = document.activeElement instanceof HTMLElement && remoteVideoGrid.contains(document.activeElement)
+    ? document.activeElement.closest<HTMLElement>('[data-video-id]')?.dataset.videoId ?? null
+    : null;
+  if (rtcMaximizedVideoId !== null && !ids.includes(rtcMaximizedVideoId)) rtcMaximizedVideoId = null;
+  remoteVideoGrid.className = `video-stage video-grid count-${ids.length}${rtcMaximizedVideoId === null ? '' : ' maximized'}`;
+  syncGridViewportClass(remoteVideoGrid);
+  if (ids.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'video-tile-status';
+    empty.textContent = state.hasAudio ? '仅音频播放' : '未配置音视频';
+    remoteVideoGrid.replaceChildren(empty);
+    return;
+  }
+  const orderedIds = [...ids].sort((left, right) =>
+    left === state.selectedVideoStreamId ? -1 : right === state.selectedVideoStreamId ? 1 : 0);
+  remoteVideoGrid.replaceChildren(...orderedIds.map((streamId) => {
+    const index = ids.indexOf(streamId);
+    const selected = state.selectedVideoStreamId === streamId;
+    const tile = document.createElement('div');
+    tile.className = `video-tile${selected ? ' selected primary' : ' secondary'}${rtcMaximizedVideoId === streamId ? ' maximized' : ''}`;
+    tile.dataset.videoId = String(streamId);
+    tile.dataset.testid = `tirtc_example_rtc_video_lane_${streamId}`;
+    tile.tabIndex = 0;
+    tile.role = 'button';
+    tile.ariaLabel = `视频 ${index + 1}，Stream ${streamId}`;
+    tile.ariaPressed = String(selected);
+    if (rtcMaximizedVideoId !== null && rtcMaximizedVideoId !== streamId) tile.hidden = true;
+    const label = document.createElement('span');
+    label.className = 'video-tile-label';
+    label.textContent = `视频 ${index + 1} · Stream ${streamId}`;
+    const laneState = state.videoStates[String(streamId)] ?? 'idle';
+    const status = document.createElement('span');
+    status.className = 'video-tile-status';
+    status.textContent = laneState === 'failed' ? '播放失败' : '等待视频';
+    status.hidden = laneState === 'rendering';
+    const action = document.createElement('button');
+    action.className = 'video-tile-action';
+    action.type = 'button';
+    action.textContent = rtcMaximizedVideoId === streamId ? '宫格' : '放大';
+    action.hidden = state.selectedVideoStreamId !== streamId;
+    action.addEventListener('click', (event) => {
+      event.stopPropagation();
+      rtcMaximizedVideoId = rtcMaximizedVideoId === streamId ? null : streamId;
+      renderRtcVideoGrid(state);
+      requestAnimationFrame(() => void updateBounds());
+    });
+    const activate = () => {
+      if (selected) {
+        rtcMaximizedVideoId = rtcMaximizedVideoId === streamId ? null : streamId;
+        renderRtcVideoGrid(state);
+        requestAnimationFrame(() => void updateBounds());
+      } else {
+        void command(() => example.selectVideoStream(streamId));
+      }
+    };
+    tile.addEventListener('click', activate);
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activate();
+      }
+    });
+    tile.append(status, label, action);
+    return tile;
+  }));
+  if (focusedLaneId !== null) {
+    [...remoteVideoGrid.querySelectorAll<HTMLElement>('[data-video-id]')]
+      .find((tile) => tile.dataset.videoId === focusedLaneId)?.focus();
+  }
+}
+
 example.onState((state) => {
   currentState = state;
   if (productMode !== 'rtc') return;
@@ -354,10 +541,17 @@ example.onState((state) => {
   form.hidden = !configuring || settingsVisible;
   settingsPage.hidden = !configuring || !settingsVisible;
   player.hidden = configuring;
+  renderRtcVideoGrid(state);
   setBusy(state.phase === 'connecting', state.uploadingLogs);
   const playerLogs = document.querySelector<HTMLButtonElement>('#logs')!;
   playerLogs.disabled = state.uploadingLogs;
   playerLogs.textContent = state.uploadingLogs ? '上传中' : '上传日志';
+  rawDumpButton.classList.toggle('capturing', state.rawDumpPhase === 'capturing');
+  rawDumpButton.disabled = ['finalizing', 'uploading'].includes(state.rawDumpPhase) ||
+    state.connectionState !== 'connected';
+  rawDumpButton.querySelector('strong')!.textContent =
+    state.rawDumpPhase === 'capturing' ? '结束上传' :
+      state.rawDumpPhase === 'failed' ? '重试上传' : '抓数据';
 
   setPlayerFeedback(state.lastError
     ? `${state.message} · ${state.lastError.message}`
@@ -384,8 +578,11 @@ example.onState((state) => {
     ? 'M12 2a10 10 0 1 0 0 20 10 10 0 0 0 0-20zm-3 7h6v6H9V9z'
     : 'M12 5a7 7 0 1 0 0 14 7 7 0 0 0 0-14z');
   recordButton.title = state.recording ? '停止本地保存' : '开始本地保存';
-  recordButton.disabled = state.phase !== 'playing';
-  document.querySelector<HTMLButtonElement>('#snapshot')!.disabled = state.phase !== 'playing';
+  const selectedVideoReady = state.selectedVideoStreamId !== null &&
+    state.videoStates[String(state.selectedVideoStreamId)] === 'rendering';
+  recordButton.disabled = !state.recording && (state.phase !== 'playing' || !selectedVideoReady);
+  recordButton.title = state.recording ? '停止本地保存' : `开始本地保存 · Stream ${state.selectedVideoStreamId ?? '-'}`;
+  document.querySelector<HTMLButtonElement>('#snapshot')!.disabled = state.phase !== 'playing' || !selectedVideoReady;
   saveMediaButton.disabled = !state.recentRecording && !state.recentSnapshot;
   (document.querySelector<HTMLButtonElement>('#save-recording')!).disabled = !state.recentRecording;
   (document.querySelector<HTMLButtonElement>('#save-snapshot')!).disabled = !state.recentSnapshot;
@@ -394,7 +591,7 @@ example.onState((state) => {
     ? 'M4 9v6h4l5 4V5L8 9H4zm11.5-.5v2.1a3 3 0 0 1 0 2.8v2.1a5 5 0 0 0 0-7zm0-3.5v2a7 7 0 0 1 0 10v2a9 9 0 0 0 0-14z'
     : 'M16.5 12 20 8.5l-1.4-1.4-3.5 3.5-3.5-3.5-1.4 1.4 3.5 3.5-3.5 3.5 1.4 1.4 3.5-3.5 3.5 3.5 1.4-1.4-3.5-3.5zM4 9h4l5-4v3.2L9.2 12 13 15.8V19l-5-4H4V9z');
   muteButton.querySelector('span')!.textContent = state.audioMuted ? '恢复声音' : '静音';
-  muteButton.disabled = state.connectionState !== 'connected';
+  muteButton.disabled = state.connectionState !== 'connected' || !state.hasAudio;
   localAudioButton.classList.toggle('active', state.localAudioRunning);
   setButtonIcon(localAudioButton, state.localAudioRunning
     ? 'm19 11-2 0a5 5 0 0 1-.5 2.2l1.5 1.5A7 7 0 0 0 19 11zM4.3 3 3 4.3l6 6V11a3 3 0 0 0 4.7 2.5l1.4 1.4A5 5 0 0 1 7 11H5a7 7 0 0 0 6 6.9V21H8v2h8v-2h-3v-3.1c1.3-.2 2.5-.8 3.5-1.6l3.2 3.2 1.3-1.3L4.3 3zM15 10.2V5a3 3 0 0 0-5.9-.7L15 10.2z'
@@ -415,7 +612,7 @@ example.onState((state) => {
 
 const tiCloudStorageForm = document.querySelector<HTMLFormElement>('#ti-cloud-storage-config')!;
 const tiCloudStoragePlayer = document.querySelector<HTMLElement>('#ti-cloud-storage-player')!;
-const tiCloudStorageVideo = document.querySelector<HTMLElement>('#ti-cloud-storage-video')!;
+const tiCloudStorageVideoGrid = document.querySelector<HTMLElement>('#ti-cloud-storage-video-grid')!;
 const tiCloudStorageRanges = document.querySelector<HTMLElement>('#ti-cloud-storage-ranges')!;
 const tiCloudStorageConfigStatus = document.querySelector<HTMLElement>('#ti-cloud-storage-config-status')!;
 const tiCloudStorageStatus = document.querySelector<HTMLElement>('#ti-cloud-storage-status')!;
@@ -434,6 +631,7 @@ const tiCloudStorageRecord = document.querySelector<HTMLButtonElement>('#ti-clou
 const tiCloudStorageSnapshot = document.querySelector<HTMLButtonElement>('#ti-cloud-storage-snapshot')!;
 const tiCloudStorageSave = document.querySelector<HTMLButtonElement>('#ti-cloud-storage-save')!;
 const tiCloudStorageMute = document.querySelector<HTMLButtonElement>('#ti-cloud-storage-mute')!;
+const tiCloudStorageRawDump = document.querySelector<HTMLButtonElement>('#ti-cloud-storage-raw-dump')!;
 let tiCloudStorageState: TiCloudStorageExampleState | null = null;
 let tiCloudStorageMuted = false;
 const TI_CLOUD_STORAGE_TIME_ZONE = 'Asia/Shanghai';
@@ -442,6 +640,12 @@ let tiCloudStorageVisibleMonth = tiCloudStorageSelectedDate.slice(0, 7);
 let tiCloudStorageAvailableDates = new Set<string>();
 let tiCloudStorageDayQueryGeneration = 0;
 let tiCloudStorageMonthQueryGeneration = 0;
+type RecordingsSurfaceState = Readonly<{
+  kind: 'idle' | 'loading' | 'error' | 'empty' | 'populated' | 'export-busy';
+  message: string;
+}>;
+let tiCloudStorageMonthStatus: RecordingsSurfaceState = {kind: 'idle', message: ''};
+let tiCloudStoragePlaybackStatus: RecordingsSurfaceState = {kind: 'idle', message: ''};
 
 function showProduct(mode: 'rtc' | 'ti-cloud-storage'): void {
   productMode = mode;
@@ -513,7 +717,36 @@ function tiCloudStorageRenderCalendar(): void {
     });
     cells.push(button);
   }
+  while (cells.length < 42) {
+    const trailing = document.createElement('i');
+    trailing.setAttribute('aria-hidden', 'true');
+    cells.push(trailing);
+  }
   tiCloudStorageCalendar.replaceChildren(...cells);
+}
+
+function renderTiCloudStorageRecordingsState(): void {
+  const visible = tiCloudStoragePlaybackStatus.kind === 'export-busy'
+    ? tiCloudStoragePlaybackStatus
+    : ['error', 'loading'].includes(tiCloudStorageMonthStatus.kind)
+      ? tiCloudStorageMonthStatus
+      : tiCloudStoragePlaybackStatus.kind !== 'idle'
+        ? tiCloudStoragePlaybackStatus
+        : tiCloudStorageMonthStatus;
+  tiCloudStorageRecordingsSheet.dataset.state = visible.kind;
+  tiCloudStorageRecordingsSheet.dataset.monthState = tiCloudStorageMonthStatus.kind;
+  tiCloudStorageRecordingsSheet.dataset.playbackState = tiCloudStoragePlaybackStatus.kind;
+  tiCloudStorageQueryStatus.textContent = visible.message;
+}
+
+function setTiCloudStorageMonthStatus(kind: RecordingsSurfaceState['kind'], message: string): void {
+  tiCloudStorageMonthStatus = {kind, message};
+  renderTiCloudStorageRecordingsState();
+}
+
+function setTiCloudStoragePlaybackStatus(kind: RecordingsSurfaceState['kind'], message: string): void {
+  tiCloudStoragePlaybackStatus = {kind, message};
+  renderTiCloudStorageRecordingsState();
 }
 
 async function tiCloudStorageQueryMonth(): Promise<void> {
@@ -521,7 +754,7 @@ async function tiCloudStorageQueryMonth(): Promise<void> {
   const generation = ++tiCloudStorageMonthQueryGeneration;
   tiCloudStorageAvailableDates = new Set();
   tiCloudStorageRenderCalendar();
-  tiCloudStorageQueryStatus.textContent = '正在加载月份…';
+  setTiCloudStorageMonthStatus('loading', '正在加载月份…');
   document.querySelector<HTMLButtonElement>('#ti-cloud-storage-calendar-retry')!.hidden = true;
   let result: Awaited<ReturnType<ExampleApi['tiCloudStorageQueryDays']>>;
   try {
@@ -530,7 +763,9 @@ async function tiCloudStorageQueryMonth(): Promise<void> {
     );
   } catch (error) {
     if (generation === tiCloudStorageMonthQueryGeneration && month === tiCloudStorageVisibleMonth) {
-      tiCloudStorageQueryStatus.textContent = `月份加载失败 · ${errorMessage(error)} · 点击月份切换按钮重试`;
+      setTiCloudStorageMonthStatus(
+        'error', `月份加载失败 · ${errorMessage(error)} · 点击月份切换按钮重试`,
+      );
       document.querySelector<HTMLButtonElement>('#ti-cloud-storage-calendar-retry')!.hidden = false;
     }
     return;
@@ -538,7 +773,10 @@ async function tiCloudStorageQueryMonth(): Promise<void> {
   if (generation !== tiCloudStorageMonthQueryGeneration || month !== tiCloudStorageVisibleMonth) return;
   tiCloudStorageAvailableDates = new Set(result.filter((day) => day.hasRecording).map((day) => day.date));
   tiCloudStorageRenderCalendar();
-  tiCloudStorageQueryStatus.textContent = tiCloudStorageAvailableDates.size === 0 ? '本月没有可用录像' : '';
+  setTiCloudStorageMonthStatus(
+    tiCloudStorageAvailableDates.size === 0 ? 'empty' : 'populated',
+    tiCloudStorageAvailableDates.size === 0 ? '本月没有可用录像' : `本月有 ${tiCloudStorageAvailableDates.size} 天录像`,
+  );
 }
 
 function tiCloudStorageFormatClock(timeMs: number): string {
@@ -558,8 +796,8 @@ function tiCloudStorageConfig(): TiCloudStorageExampleConfig {
   return {
     appId: String(data.get('appId') ?? '').trim(),
     endpoint: String(data.get('endpoint') ?? '').trim(),
-    audioChannelId: Number(data.get('audioChannelId')),
-    videoChannelId: Number(data.get('videoChannelId')),
+    audioChannelId: optionalNumericField(data, 'audioChannelId'),
+    videoChannelIds: data.getAll('videoChannelId').map(String).map((value) => value.trim()).filter(Boolean).map(Number),
   };
 }
 
@@ -568,14 +806,14 @@ async function tiCloudStorageQueryDay(): Promise<void> {
   const generation = ++tiCloudStorageDayQueryGeneration;
   const bounds = tiCloudStorageSelectedDay();
   if (!bounds) {
-    tiCloudStorageQueryStatus.textContent = '请选择有效日期。';
+    setTiCloudStoragePlaybackStatus('error', '请选择有效日期。');
     return;
   }
   try {
     await example.tiCloudStorageQuery(bounds.startTimeMs, bounds.endTimeMs);
   } catch (error) {
     if (generation === tiCloudStorageDayQueryGeneration && date === tiCloudStorageSelectedDate) {
-      tiCloudStorageQueryStatus.textContent = `查询失败 · ${errorMessage(error)}`;
+      setTiCloudStoragePlaybackStatus('error', `查询失败 · ${errorMessage(error)}`);
     }
   }
 }
@@ -589,12 +827,17 @@ function tiCloudStorageOpenRecordings(query: boolean): void {
 tiCloudStorageForm.addEventListener('submit', async (event) => {
   event.preventDefault();
   const next = tiCloudStorageConfig();
-  if (!Number.isInteger(next.audioChannelId) || next.audioChannelId < 0 || next.audioChannelId > 255 ||
-      !Number.isInteger(next.videoChannelId) || next.videoChannelId < 0 || next.videoChannelId > 255) {
-    tiCloudStorageConfigStatus.textContent = '音频和视频 Channel ID 必须是 0..255 内的整数。';
+  const videos = next.videoChannelIds;
+  if ((next.audioChannelId !== null && (!Number.isInteger(next.audioChannelId) || next.audioChannelId < 0 || next.audioChannelId > 255)) ||
+      videos.length > 3 || videos.some((id) => !Number.isInteger(id) || id < 0 || id > 255) ||
+      new Set(videos).size !== videos.length) {
+    tiCloudStorageConfigStatus.textContent = '可选一路音频和最多三路不重复视频，Channel ID 必须是 0..255 内的整数。';
     return;
   }
   tiCloudStorageConfigStatus.textContent = '初始化中…';
+  localStorage.setItem('tirtc_example.cloud.audio_channel_id',
+    next.audioChannelId === null ? '' : String(next.audioChannelId));
+  localStorage.setItem('tirtc_example.cloud.video_channel_ids', JSON.stringify(videos.map(String)));
   try {
     await example.tiCloudStorageConfigure(next);
     tiCloudStorageConfigStatus.textContent = '';
@@ -606,15 +849,15 @@ tiCloudStorageForm.addEventListener('submit', async (event) => {
 });
 
 async function tiCloudStorageUpdateBounds(): Promise<void> {
-  const bounds = tiCloudStorageVideo.getBoundingClientRect();
-  if (bounds.width < 1 || bounds.height < 1) return;
-  await example.tiCloudStorageSetVideoBounds({
-    x: Math.round(bounds.x), y: Math.round(bounds.y),
-    width: Math.round(bounds.width), height: Math.round(bounds.height),
-  });
+  await Promise.all([...tiCloudStorageVideoGrid.querySelectorAll<HTMLElement>('[data-video-id]')].map((tile) => {
+    const bounds = tile.getBoundingClientRect();
+    return example.tiCloudStorageSetVideoBounds(Number(tile.dataset.videoId), {
+      x: Math.round(bounds.x), y: Math.round(bounds.y),
+      width: Math.round(bounds.width), height: Math.round(bounds.height),
+    });
+  }));
 }
 
-window.addEventListener('resize', () => { if (productMode === 'ti-cloud-storage') void tiCloudStorageUpdateBounds(); });
 document.querySelector('#ti-cloud-storage-leave')!.addEventListener('click', async () => {
   tiCloudStorageDayQueryGeneration += 1;
   tiCloudStorageMonthQueryGeneration += 1;
@@ -623,6 +866,12 @@ document.querySelector('#ti-cloud-storage-leave')!.addEventListener('click', asy
   showProduct('ti-cloud-storage');
 });
 document.querySelector('#ti-cloud-storage-open-recordings')!.addEventListener('click', () => tiCloudStorageOpenRecordings(false));
+tiCloudStorageRecordingsSheet.addEventListener('pointerdown', (event) => {
+  if (event.target === tiCloudStorageRecordingsSheet) tiCloudStorageRecordingsSheet.close('cancel');
+});
+tiCloudStorageRecordingsSheet.addEventListener('close', () => {
+  document.querySelector<HTMLButtonElement>('#ti-cloud-storage-open-recordings')!.focus();
+});
 document.querySelector('#ti-cloud-storage-previous-month')!.addEventListener('click', () => {
   tiCloudStorageVisibleMonth = tiCloudStorageShiftMonth(-1);
   void tiCloudStorageQueryMonth();
@@ -671,6 +920,8 @@ tiCloudStorageRecord.addEventListener('click', () => {
 });
 tiCloudStorageSnapshot.addEventListener('click', () =>
   void tiCloudStorageCommand(() => example.tiCloudStorageTakeSnapshot(), '截图完成'));
+tiCloudStorageRawDump.addEventListener('click', () =>
+  void tiCloudStorageCommand(() => example.tiCloudStorageToggleRawDump()));
 tiCloudStorageMute.addEventListener('click', () => {
   tiCloudStorageMuted = !tiCloudStorageMuted;
   void tiCloudStorageCommand(async () => {
@@ -697,15 +948,97 @@ tiCloudStorageSeek.addEventListener('change', () => {
   void tiCloudStorageCommand(() => example.tiCloudStorageSeek(value), '已跳转');
 });
 
+function renderTiCloudStorageVideoGrid(state: TiCloudStorageExampleState): void {
+  const ids = [...state.videoChannelIds];
+  const focusedLaneId = document.activeElement instanceof HTMLElement && tiCloudStorageVideoGrid.contains(document.activeElement)
+    ? document.activeElement.closest<HTMLElement>('[data-video-id]')?.dataset.videoId ?? null
+    : null;
+  if (cloudMaximizedVideoId !== null && !ids.includes(cloudMaximizedVideoId)) cloudMaximizedVideoId = null;
+  tiCloudStorageVideoGrid.className = `video-stage video-grid count-${ids.length}${cloudMaximizedVideoId === null ? '' : ' maximized'}`;
+  syncGridViewportClass(tiCloudStorageVideoGrid);
+  if (ids.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'video-tile-status';
+    empty.textContent = state.hasAudio ? '仅音频回放' : '未配置音视频';
+    tiCloudStorageVideoGrid.replaceChildren(empty);
+    return;
+  }
+  const orderedIds = [...ids].sort((left, right) =>
+    left === state.selectedVideoChannelId ? -1 : right === state.selectedVideoChannelId ? 1 : 0);
+  tiCloudStorageVideoGrid.replaceChildren(...orderedIds.map((channelId) => {
+    const index = ids.indexOf(channelId);
+    const selected = state.selectedVideoChannelId === channelId;
+    const tile = document.createElement('div');
+    tile.className = `video-tile${selected ? ' selected primary' : ' secondary'}${cloudMaximizedVideoId === channelId ? ' maximized' : ''}`;
+    tile.dataset.videoId = String(channelId);
+    tile.dataset.testid = `tirtc_example_cloud_video_lane_${channelId}`;
+    tile.tabIndex = 0;
+    tile.role = 'button';
+    tile.ariaLabel = `视频 ${index + 1}，Channel ${channelId}`;
+    tile.ariaPressed = String(selected);
+    if (cloudMaximizedVideoId !== null && cloudMaximizedVideoId !== channelId) tile.hidden = true;
+    const label = document.createElement('span');
+    label.className = 'video-tile-label';
+    label.textContent = `视频 ${index + 1} · Channel ${channelId}`;
+    const laneState = state.videoStates[String(channelId)] ?? 'idle';
+    const status = document.createElement('span');
+    status.className = 'video-tile-status';
+    status.textContent = laneState === 'failed' ? '播放失败' : laneState === 'completed' ? '播放完成' : '等待视频';
+    status.hidden = ['rendering', 'playing'].includes(laneState);
+    const action = document.createElement('button');
+    action.className = 'video-tile-action';
+    action.type = 'button';
+    action.textContent = cloudMaximizedVideoId === channelId ? '宫格' : '放大';
+    action.hidden = state.selectedVideoChannelId !== channelId;
+    action.addEventListener('click', (event) => {
+      event.stopPropagation();
+      cloudMaximizedVideoId = cloudMaximizedVideoId === channelId ? null : channelId;
+      renderTiCloudStorageVideoGrid(state);
+      requestAnimationFrame(() => void tiCloudStorageUpdateBounds());
+    });
+    const activate = () => {
+      if (selected) {
+        cloudMaximizedVideoId = cloudMaximizedVideoId === channelId ? null : channelId;
+        renderTiCloudStorageVideoGrid(state);
+        requestAnimationFrame(() => void tiCloudStorageUpdateBounds());
+      } else {
+        void tiCloudStorageCommand(() => example.tiCloudStorageSelectVideo(channelId));
+      }
+    };
+    tile.addEventListener('click', activate);
+    tile.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        activate();
+      }
+    });
+    tile.append(status, label, action);
+    return tile;
+  }));
+  if (focusedLaneId !== null) {
+    [...tiCloudStorageVideoGrid.querySelectorAll<HTMLElement>('[data-video-id]')]
+      .find((tile) => tile.dataset.videoId === focusedLaneId)?.focus();
+  }
+}
+
 example.tiCloudStorageOnState((state) => {
   tiCloudStorageState = state;
   if (productMode !== 'ti-cloud-storage') return;
   const configured = state.phase !== 'configuration';
   tiCloudStorageForm.hidden = configured;
   tiCloudStoragePlayer.hidden = !configured;
-  tiCloudStorageQueryStatus.textContent = state.querying ? '正在查询录像…' :
-    state.lastError ? `查询失败 · ${state.lastError.message}` :
-      state.ranges.length === 0 ? '当天没有可用录像' : '';
+  renderTiCloudStorageVideoGrid(state);
+  if (state.exportProgress !== null) {
+    setTiCloudStoragePlaybackStatus('export-busy', `正在导出 · ${Math.round(state.exportProgress * 100)}%`);
+  } else if (state.querying) {
+    setTiCloudStoragePlaybackStatus('loading', '正在查询录像…');
+  } else if (state.lastError) {
+    setTiCloudStoragePlaybackStatus('error', `查询失败 · ${state.lastError.message}`);
+  } else if (state.ranges.length === 0) {
+    setTiCloudStoragePlaybackStatus('empty', '当天没有可用录像');
+  } else {
+    setTiCloudStoragePlaybackStatus('populated', `找到 ${state.ranges.length} 段录像`);
+  }
   document.querySelector<HTMLButtonElement>('#ti-cloud-storage-query-retry')!.hidden =
     state.querying || state.lastError === null;
   tiCloudStorageRanges.replaceChildren(...state.ranges.map((range, index) => {
@@ -718,6 +1051,7 @@ example.tiCloudStorageOnState((state) => {
     playButton.querySelector('strong')!.textContent =
       `${tiCloudStorageFormatClock(range.startTimeMs)} — ${tiCloudStorageFormatClock(range.endTimeMs)}`;
     playButton.querySelector('small')!.textContent = tiCloudStorageFormatDuration(range.endTimeMs - range.startTimeMs);
+    playButton.setAttribute('aria-label', `播放录像 ${index + 1}，${playButton.querySelector('strong')!.textContent}`);
     playButton.addEventListener('click', async () => {
       try {
         await example.tiCloudStoragePlayRange(index);
@@ -732,6 +1066,8 @@ example.tiCloudStorageOnState((state) => {
     exportButton.className = 'ti-cloud-storage-range-export';
     exportButton.textContent = state.exportProgress === null ? '⇩' : `${Math.round(state.exportProgress * 100)}%`;
     exportButton.title = '下载';
+    exportButton.setAttribute('aria-label', state.exportProgress === null
+      ? `导出录像 ${index + 1}` : `正在导出录像 ${index + 1}，${Math.round(state.exportProgress * 100)}%`);
     exportButton.disabled = state.exportProgress !== null;
     exportButton.addEventListener('click', () =>
       void tiCloudStorageCommand(() => example.tiCloudStorageStartExport(index), '范围下载已开始'));
@@ -757,16 +1093,24 @@ example.tiCloudStorageOnState((state) => {
   tiCloudStoragePause.querySelector('span')!.textContent = state.replayState === 'paused' ? '继续播放' : '暂停播放';
   tiCloudStorageSpeed.disabled = !playing;
   tiCloudStorageSpeed.value = String(state.speed);
-  tiCloudStorageRecord.disabled = !playing;
+  const hasSelectedVideo = state.selectedVideoChannelId !== null;
+  tiCloudStorageRecord.disabled = !playing || !hasSelectedVideo;
   tiCloudStorageRecord.classList.toggle('recording', state.recording);
   tiCloudStorageRecord.textContent = state.recording ? '■' : '●';
-  tiCloudStorageRecord.title = state.recording ? '停止本地保存' : '开始本地保存';
-  tiCloudStorageSnapshot.disabled = !playing;
-  tiCloudStorageMute.disabled = !playing || state.speed !== 1;
+  tiCloudStorageRecord.title = state.recording ? '停止本地保存' : `开始本地保存 · Channel ${state.selectedVideoChannelId ?? '-'}`;
+  tiCloudStorageSnapshot.disabled = !playing || !hasSelectedVideo;
+  tiCloudStorageSnapshot.title = `截图 · Channel ${state.selectedVideoChannelId ?? '-'}`;
+  tiCloudStorageMute.disabled = !playing || state.speed !== 1 || !state.hasAudio;
   tiCloudStorageMute.classList.toggle('muted', tiCloudStorageMuted || state.speed !== 1);
   tiCloudStorageSave.disabled = !state.recentRecording && !state.recentSnapshot;
+  tiCloudStorageRawDump.classList.toggle('capturing', state.rawDumpPhase === 'capturing');
+  tiCloudStorageRawDump.disabled = ['finalizing', 'uploading'].includes(state.rawDumpPhase) || !playing;
+  tiCloudStorageRawDump.querySelector('strong')!.textContent =
+    state.rawDumpPhase === 'capturing' ? '结束上传' :
+      state.rawDumpPhase === 'failed' ? '重试上传' : '抓数据';
   document.querySelector<HTMLButtonElement>('#ti-cloud-storage-logs')!.textContent = state.uploadingLogs ? '上传中' : '上传日志';
   tiCloudStorageStatus.textContent = state.lastError ? `操作失败 · ${state.lastError.message}` :
     state.exportProgress !== null ? `正在导出 · ${Math.round(state.exportProgress * 100)}%` :
       state.message || (state.lastSavedFile ? `已保存 · ${state.lastSavedFile}` : '');
+  if (configured) requestAnimationFrame(() => void tiCloudStorageUpdateBounds());
 });

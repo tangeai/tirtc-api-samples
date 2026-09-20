@@ -5,8 +5,9 @@ import type {ExampleApi, ExampleConfig, ExampleState} from './shared/types';
 
 const api: ExampleApi = Object.freeze({
   configure: (config: ExampleConfig) => ipcRenderer.invoke('tirtc-example:configure', config),
-  setVideoBounds: (bounds: Rectangle) =>
-    ipcRenderer.invoke('tirtc-example:video-bounds', bounds),
+  setVideoBounds: (streamId: number, bounds: Rectangle) =>
+    ipcRenderer.invoke('tirtc-example:video-bounds', streamId, bounds),
+  selectVideoStream: (streamId: number) => ipcRenderer.invoke('tirtc-example:video-select', streamId),
   sendMessage: (message: string) => ipcRenderer.invoke('tirtc-example:message', message),
   sendCommand: (commandId: number, message: string) =>
     ipcRenderer.invoke('tirtc-example:command', commandId, message),
@@ -18,6 +19,7 @@ const api: ExampleApi = Object.freeze({
   setAudioMuted: (muted) => ipcRenderer.invoke('tirtc-example:audio-muted', muted),
   setLocalAudioRunning: (running) => ipcRenderer.invoke('tirtc-example:local-audio-running', running),
   uploadLogs: () => ipcRenderer.invoke('tirtc-example:logs-upload'),
+  toggleRawDump: () => ipcRenderer.invoke('tirtc-example:raw-dump-toggle'),
   leave: () => ipcRenderer.invoke('tirtc-example:leave'),
   onState(listener: (state: ExampleState) => void) {
     const callback = (_event: Electron.IpcRendererEvent, state: ExampleState) => listener(state);
@@ -30,7 +32,10 @@ const api: ExampleApi = Object.freeze({
   tiCloudStorageQueryDays: (startDate, endDate, timeZoneId) =>
     ipcRenderer.invoke('tirtc-example:ti-cloud-storage-query-days', startDate, endDate, timeZoneId),
   tiCloudStoragePlayRange: (index) => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-play', index),
-  tiCloudStorageSetVideoBounds: (bounds) => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-video-bounds', bounds),
+  tiCloudStorageSetVideoBounds: (channelId, bounds) =>
+    ipcRenderer.invoke('tirtc-example:ti-cloud-storage-video-bounds', channelId, bounds),
+  tiCloudStorageSelectVideo: (channelId) =>
+    ipcRenderer.invoke('tirtc-example:ti-cloud-storage-video-select', channelId),
   tiCloudStoragePause: () => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-pause'),
   tiCloudStorageResume: () => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-resume'),
   tiCloudStorageSeek: (timeMs) => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-seek', timeMs),
@@ -42,6 +47,8 @@ const api: ExampleApi = Object.freeze({
   tiCloudStorageStartExport: (index) => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-export', index),
   tiCloudStorageSaveRecent: (kind) => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-save-recent', kind),
   tiCloudStorageUploadLogs: () => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-logs-upload'),
+  tiCloudStorageToggleRawDump: () =>
+    ipcRenderer.invoke('tirtc-example:ti-cloud-storage-raw-dump-toggle'),
   tiCloudStorageLeave: () => ipcRenderer.invoke('tirtc-example:ti-cloud-storage-leave'),
   tiCloudStorageOnState(listener) {
     const callback = (_event: Electron.IpcRendererEvent, state: import('./shared/types').TiCloudStorageExampleState) => listener(state);

@@ -28,8 +28,8 @@ export type ExampleConfig = Readonly<{
   endpoint: string;
   remoteId: string;
   tokenServerAddress?: string;
-  audioStreamId?: number;
-  videoStreamId?: number;
+  audioStreamId?: number | null;
+  videoStreamIds?: ReadonlyArray<number>;
   settings?: ExampleSettings;
 }>;
 
@@ -47,13 +47,20 @@ export type ExampleState = Readonly<{
   recentSnapshot: boolean;
   lastSavedFile: string | null;
   uploadingLogs: boolean;
+  rawDumpPhase: 'idle' | 'capturing' | 'finalizing' | 'uploading' | 'completed' | 'failed';
+  rawDumpCaptureId: string | null;
   lastError: ExampleFailure | null;
   metrics: unknown | null;
+  videoStates: Readonly<Record<string, string>>;
+  videoStreamIds: ReadonlyArray<number>;
+  selectedVideoStreamId: number | null;
+  hasAudio: boolean;
 }>;
 
 export type ExampleApi = Readonly<{
   configure(config: ExampleConfig): Promise<void>;
-  setVideoBounds(bounds: Rectangle): Promise<void>;
+  setVideoBounds(streamId: number, bounds: Rectangle): Promise<void>;
+  selectVideoStream(streamId: number): Promise<void>;
   sendMessage(message: string): Promise<void>;
   sendCommand(commandId: number, message: string): Promise<void>;
   startRecording(): Promise<void>;
@@ -64,13 +71,15 @@ export type ExampleApi = Readonly<{
   setAudioMuted(muted: boolean): Promise<void>;
   setLocalAudioRunning(running: boolean): Promise<void>;
   uploadLogs(): Promise<void>;
+  toggleRawDump(): Promise<void>;
   leave(): Promise<void>;
   onState(listener: (state: ExampleState) => void): () => void;
   tiCloudStorageConfigure(config: TiCloudStorageExampleConfig): Promise<void>;
   tiCloudStorageQuery(startTimeMs: number, endTimeMs: number): Promise<void>;
   tiCloudStorageQueryDays(startDate: string, endDate: string, timeZoneId: string): Promise<ReadonlyArray<TiCloudStorageRecordingDay>>;
   tiCloudStoragePlayRange(index: number): Promise<void>;
-  tiCloudStorageSetVideoBounds(bounds: Rectangle): Promise<void>;
+  tiCloudStorageSetVideoBounds(channelId: number, bounds: Rectangle): Promise<void>;
+  tiCloudStorageSelectVideo(channelId: number): Promise<void>;
   tiCloudStoragePause(): Promise<void>;
   tiCloudStorageResume(): Promise<void>;
   tiCloudStorageSeek(timeMs: number): Promise<void>;
@@ -82,6 +91,7 @@ export type ExampleApi = Readonly<{
   tiCloudStorageStartExport(index: number): Promise<void>;
   tiCloudStorageSaveRecent(kind: 'recording' | 'snapshot'): Promise<void>;
   tiCloudStorageUploadLogs(): Promise<void>;
+  tiCloudStorageToggleRawDump(): Promise<void>;
   tiCloudStorageLeave(): Promise<void>;
   tiCloudStorageOnState(listener: (state: TiCloudStorageExampleState) => void): () => void;
 }>;
@@ -89,8 +99,8 @@ export type ExampleApi = Readonly<{
 export type TiCloudStorageExampleConfig = Readonly<{
   appId: string;
   endpoint: string;
-  videoChannelId: number;
-  audioChannelId: number;
+  videoChannelIds: ReadonlyArray<number>;
+  audioChannelId: number | null;
 }>;
 
 export type TiCloudStorageExampleState = Readonly<{
@@ -108,6 +118,12 @@ export type TiCloudStorageExampleState = Readonly<{
   lastSavedFile: string | null;
   message: string;
   uploadingLogs: boolean;
+  rawDumpPhase: 'idle' | 'capturing' | 'finalizing' | 'uploading' | 'completed' | 'failed';
+  rawDumpCaptureId: string | null;
   mediaBusy: boolean;
   lastError: ExampleFailure | null;
+  videoStates: Readonly<Record<string, string>>;
+  videoChannelIds: ReadonlyArray<number>;
+  selectedVideoChannelId: number | null;
+  hasAudio: boolean;
 }>;
