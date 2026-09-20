@@ -9,6 +9,7 @@ import {
   Text,
   TextInput,
   TextInputProps,
+  useWindowDimensions,
   View,
   ViewStyle,
 } from 'react-native';
@@ -38,7 +39,8 @@ export function ExampleScreenRoot({
 }
 
 export function ConfigureShell({children}: {children: ReactNode}) {
-  return <View style={uiStyles.configureBody}>{children}</View>;
+  const window = useWindowDimensions();
+  return <View style={[uiStyles.configureBody, window.width >= 840 ? uiStyles.configureBodyWide : null]}>{children}</View>;
 }
 
 export function ConfigureHeader({
@@ -109,6 +111,7 @@ export function InputField({
   multiline,
   keyboardType,
   secureTextEntry,
+  secureToggleAccessibilityLabel,
   editable,
   style,
 }: {
@@ -122,12 +125,18 @@ export function InputField({
   multiline?: boolean;
   keyboardType?: KeyboardTypeOptions;
   secureTextEntry?: boolean;
+  secureToggleAccessibilityLabel?: string;
   editable?: boolean;
   style?: StyleProp<ViewStyle>;
 }) {
+  const [secureValueVisible, setSecureValueVisible] = React.useState(false);
+  const secureToggleLabel = secureToggleAccessibilityLabel
+    ? `${secureToggleAccessibilityLabel} ${secureValueVisible ? 'Hide Token' : 'Show Token'}`
+    : null;
   return (
     <View style={[uiStyles.inputWrap, style]}>
       <Text style={uiStyles.inputLabel}>{label}</Text>
+      <View style={secureTextEntry ? uiStyles.secureInputRow : null}>
       <TextInput
         accessibilityLabel={accessibilityLabel}
         testID={automationTestId(accessibilityLabel)}
@@ -140,11 +149,24 @@ export function InputField({
         autoCorrect={autoCorrect}
         multiline={multiline}
         keyboardType={keyboardType}
-        secureTextEntry={secureTextEntry}
+        secureTextEntry={secureTextEntry && !secureValueVisible}
         editable={editable}
         textContentType={secureTextEntry ? 'none' : undefined}
-        style={[uiStyles.input, multiline ? uiStyles.multilineInput : null]}
+        style={[uiStyles.input, secureTextEntry ? uiStyles.secureInput : null, multiline ? uiStyles.multilineInput : null]}
       />
+      {secureTextEntry && secureToggleLabel ? (
+        <Pressable
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel={secureToggleLabel}
+          accessibilityState={{expanded: secureValueVisible}}
+          testID={automationTestId(secureToggleLabel)}
+          onPress={() => setSecureValueVisible((current) => !current)}
+          style={uiStyles.secureToggleButton}>
+          <Text style={uiStyles.secureToggleText}>{secureValueVisible ? '隐藏' : '显示'}</Text>
+        </Pressable>
+      ) : null}
+      </View>
     </View>
   );
 }
@@ -260,6 +282,9 @@ export function StageControlButton({
   tone = 'primary',
   disabled,
   busy,
+  selected,
+  playbackProfile,
+  compactPlayback,
 }: {
   label: string;
   onPress: () => void;
@@ -267,6 +292,9 @@ export function StageControlButton({
   tone?: 'primary' | 'danger' | 'surface' | 'warning';
   disabled?: boolean;
   busy?: boolean;
+  selected?: boolean;
+  playbackProfile?: boolean;
+  compactPlayback?: boolean;
 }) {
   const surface = tone === 'surface';
   return (
@@ -274,6 +302,7 @@ export function StageControlButton({
       accessible
       accessibilityRole="button"
       accessibilityLabel={accessibilityLabel}
+      accessibilityState={selected === undefined ? undefined : {selected}}
       testID={automationTestId(accessibilityLabel)}
       importantForAccessibility="yes"
       collapsable={false}
@@ -281,6 +310,8 @@ export function StageControlButton({
       onPress={onPress}
       style={[
         uiStyles.stageControlButton,
+        playbackProfile ? uiStyles.playbackStageControlButton : null,
+        compactPlayback ? uiStyles.compactPlaybackStageControlButton : null,
         tone === 'danger' ? uiStyles.stageControlDanger : null,
         surface ? uiStyles.stageControlSurface : null,
         tone === 'warning' ? uiStyles.stageControlWarning : null,
@@ -289,10 +320,52 @@ export function StageControlButton({
       {busy ? (
         <ActivityIndicator color={surface ? exampleTheme.primary : exampleTheme.foreground} size="small" />
       ) : null}
-      <Text style={[uiStyles.stageControlText, surface ? uiStyles.stageControlSurfaceText : null]}>
+      <Text
+        numberOfLines={playbackProfile ? 1 : undefined}
+        maxFontSizeMultiplier={playbackProfile ? 1.25 : undefined}
+        style={[uiStyles.stageControlText, surface ? uiStyles.stageControlSurfaceText : null]}>
         {label}
       </Text>
     </Pressable>
+  );
+}
+
+export function RawDumpStageControl({
+  capturing,
+  uploadPending,
+  busy,
+  onPress,
+  accessibilityLabel,
+  disabled,
+}: {
+  capturing: boolean;
+  uploadPending: boolean;
+  busy: boolean;
+  onPress: () => void;
+  accessibilityLabel: string;
+  disabled?: boolean;
+}) {
+  return (
+    <View style={uiStyles.rawDumpStageControl}>
+      <Pressable
+        accessible
+        accessibilityRole="button"
+        accessibilityLabel={accessibilityLabel}
+        accessibilityState={{selected: capturing, disabled: disabled || busy}}
+        testID={automationTestId(accessibilityLabel)}
+        importantForAccessibility="yes"
+        collapsable={false}
+        disabled={disabled || busy}
+        onPress={onPress}
+        style={[
+          uiStyles.rawDumpButton,
+          capturing ? uiStyles.rawDumpButtonCapturing : null,
+          disabled || busy ? uiStyles.rawDumpButtonDisabled : null,
+        ]}>
+        {busy ? <ActivityIndicator color={exampleTheme.foreground} size="small" /> : null}
+        {!busy ? <Text style={uiStyles.rawDumpButtonText}>{capturing ? '结束上传' : uploadPending ? '重试上传' : '抓数据'}</Text> : null}
+      </Pressable>
+    </View>
   );
 }
 

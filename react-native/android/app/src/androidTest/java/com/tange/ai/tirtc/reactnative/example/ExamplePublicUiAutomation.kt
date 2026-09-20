@@ -23,7 +23,8 @@ internal val DOWNLINK_TEXT_MARKERS = listOf("video rendering", "播放中")
 
 internal fun visibleText(desc: String): String {
   return when (desc) {
-    "TiRTC Scan Token QR" -> "扫码"
+    "TiRTC QR Input" -> "扫码 / 粘贴"
+    "Ti Cloud Storage QR Input" -> "扫码 / 粘贴"
     "TiRTC Start Downlink" -> "开始连接、拉流播放"
     "TiRTC Player Send Command" -> "发送命令"
     "TiRTC Player Upload Logs" -> "上传日志"

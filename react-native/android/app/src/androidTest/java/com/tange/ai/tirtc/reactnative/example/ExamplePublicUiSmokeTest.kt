@@ -6,9 +6,13 @@ import android.graphics.Color
 import android.graphics.Rect
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
+import android.view.inputmethod.InputMethodManager
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
+import androidx.test.runner.lifecycle.ActivityLifecycleMonitorRegistry
+import androidx.test.runner.lifecycle.Stage
 import androidx.test.uiautomator.By
 import androidx.test.uiautomator.BySelector
 import androidx.test.uiautomator.UiDevice
@@ -17,6 +21,7 @@ import androidx.test.uiautomator.UiScrollable
 import androidx.test.uiautomator.UiSelector
 import androidx.test.uiautomator.Until
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -24,6 +29,7 @@ import java.io.ByteArrayOutputStream
 import java.io.File
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.math.ceil
 
 @RunWith(AndroidJUnit4::class)
 class ExamplePublicUiSmokeTest {
@@ -33,13 +39,33 @@ class ExamplePublicUiSmokeTest {
 
   @Test
   fun runPublicUiFlow() {
+    if (arg("flow", "downlink") == "input-media") {
+      launchSdkCase()
+      val deadline = System.currentTimeMillis() + 90000
+      while (System.currentTimeMillis() < deadline) {
+        if (hasAnyText(listOf("Input Media Case Failed"))) {
+          dumpFailureArtifacts("input-media-failed")
+          throw AssertionError("input media fixture failed")
+        }
+        if (hasAnyText(listOf("Input Media Case Passed"))) {
+          marker("input-media-completed")
+          return
+        }
+        Thread.sleep(250)
+      }
+      dumpFailureArtifacts("input-media-timeout")
+      throw AssertionError("input media fixture timed out")
+    }
     if (arg("flow", "downlink") == "ti-cloud-storage-sdk") {
+      CloudStorageCallbackLifecycle.verify()
       launchSdkCase()
       runCloudStorageSdkCase()
+      CloudStorageModuleLifecycle.verify(ApplicationProvider.getApplicationContext())
       return
     }
     launchExample()
     when (arg("flow", "downlink")) {
+      "auxiliary" -> verifyAuxiliaryUiContract()
       "ti-cloud-storage" -> runCloudStorageFlow()
       "stress" -> {
         fillCommonConfig()
@@ -96,12 +122,14 @@ class ExamplePublicUiSmokeTest {
       setConfigField("Ti Cloud Storage Config appId", arg("ti-cloud-storage-app-id"))
       setConfigField("Ti Cloud Storage Config endpoint", arg("ti-cloud-storage-endpoint"))
       setConfigField("Ti Cloud Storage Config token", token.concatToString())
-      setConfigField("Ti Cloud Storage Config audioChannelId", arg("ti-cloud-storage-audio-channel-id", "10"))
-      setConfigField("Ti Cloud Storage Config videoChannelId", arg("ti-cloud-storage-video-channel-id", "11"))
+      setConfigField("Ti Cloud Storage Config audioId", arg("ti-cloud-storage-audio-channel-id", "10"))
+      val videoChannelIds = csvArg("ti-cloud-storage-video-channel-ids", arg("ti-cloud-storage-video-channel-id", "11"))
+      setVideoFields("Ti Cloud Storage Config", videoChannelIds)
       marker("ti-cloud-storage-config-filled")
       tiCloudStorageUiGateCheckpoint("configure")
       clickDesc("Ti Cloud Storage Open")
       waitForDesc("Ti Cloud Storage Recordings Sheet", CONNECT_TIMEOUT_MS)
+      verifyVisibleRecordingsState("populated", "录像已加载", CONNECT_TIMEOUT_MS)
       waitForDesc("Ti Cloud Storage Play $startTimeMs", CONNECT_TIMEOUT_MS)
       tiCloudStorageUiGateCheckpoint("sheet", startTimeMs)
       clickDesc("Ti Cloud Storage Play $startTimeMs")
@@ -109,79 +137,133 @@ class ExamplePublicUiSmokeTest {
       val videoDeadline = System.currentTimeMillis() + CONNECT_TIMEOUT_MS
       while (System.currentTimeMillis() < videoDeadline && !hasVisibleVideoFrame()) Thread.sleep(750)
       assertTrue("Ti Cloud Storage video frame was not visible", hasVisibleVideoFrame())
+      videoChannelIds.forEach { channelId ->
+        assertNotNull("missing video Channel $channelId lane", waitForPlaybackLane("Video Channel $channelId", SHORT_TIMEOUT_MS))
+      }
+      videoChannelIds.lastOrNull()?.let {
+        val lane = "Video Channel $it"
+        clickPlaybackLane(lane)
+        assertNotNull("Ti Cloud Storage playback lane could not be selected: $it", waitForSelectedLane(lane))
+      }
       marker("ti-cloud-storage-visible-video-ok")
       tiCloudStorageUiGateCheckpoint("playback")
 
-      Thread.sleep(5_000L)
-      val speedControl =
-        device.findObject(By.desc("Ti Cloud Storage Speed"))
-          ?: device.findObject(By.res(PACKAGE_NAME, automationId("Ti Cloud Storage Speed")))
-          ?: device.findObject(By.textContains("1×"))
-      assertNotNull("Ti Cloud Storage speed control is missing", speedControl)
-      val speedBounds = Rect(speedControl.visibleBounds)
-      repeat(6) {
-        device.click(speedBounds.centerX(), speedBounds.centerY())
-        Thread.sleep(1_500L)
-      }
-      waitAnyText(listOf("播放倍速：1/2×"), SHORT_TIMEOUT_MS, "ti-cloud-storage-speed-x0_5")
-      Thread.sleep(2_000L)
-      device.click(speedBounds.centerX(), speedBounds.centerY())
-      waitForCloudStorageSpeedX1()
+      clickDesc("Ti Cloud Storage Raw Dump")
+      waitAnyText(listOf("正在抓取诊断数据"), SHORT_TIMEOUT_MS, "ti-cloud-storage-raw-dump-start")
+      Thread.sleep(10_000L)
+      clickDesc("Ti Cloud Storage Raw Dump")
+      waitForLogUpload("ti-cloud-storage", "-")
+      marker("ti-cloud-storage-raw-dump-upload-ok")
 
+      Thread.sleep(5_000L)
       clickDesc("Ti Cloud Storage Pause Resume")
       waitAnyText(listOf("已暂停"), SHORT_TIMEOUT_MS, "ti-cloud-storage-pause")
       Thread.sleep(3_000L)
+
+      var speedHalf = false
+      repeat(7) {
+        if (speedHalf) return@repeat
+        val speedControl = device.findObject(By.desc("Ti Cloud Storage Speed"))
+          ?: device.findObject(By.res(PACKAGE_NAME, automationId("Ti Cloud Storage Speed")))
+        assertNotNull("Ti Cloud Storage speed control is missing", speedControl)
+        clickControl(speedControl!!)
+        Thread.sleep(500L)
+        speedHalf = hasAnyText(listOf("播放倍速：1/2×"))
+      }
+      if (!speedHalf) {
+        dumpFailureArtifacts("ti-cloud-storage-speed-x0_5")
+      }
+      assertTrue("Ti Cloud Storage speed did not reach 1/2×", speedHalf)
+      marker("ti-cloud-storage-speed-x0_5-ok")
+      Thread.sleep(2_000L)
+      val speedControl = device.findObject(By.desc("Ti Cloud Storage Speed"))
+        ?: device.findObject(By.res(PACKAGE_NAME, automationId("Ti Cloud Storage Speed")))
+      assertNotNull("Ti Cloud Storage speed control is missing", speedControl)
+      clickControl(speedControl!!)
+      waitForCloudStorageSpeedX1()
+
       clickDesc("Ti Cloud Storage Pause Resume")
       waitAnyText(listOf("继续播放", "正在播放"), SHORT_TIMEOUT_MS, "ti-cloud-storage-resume")
 
       clickDesc("Ti Cloud Storage Mute")
       waitAnyText(listOf("已静音"), SHORT_TIMEOUT_MS, "ti-cloud-storage-mute")
       Thread.sleep(2_000L)
-      clickDesc("Ti Cloud Storage Mute")
-      waitAnyText(listOf("已恢复声音"), SHORT_TIMEOUT_MS, "ti-cloud-storage-unmute")
 
       val seek = requireNotNull(findControl("Ti Cloud Storage Seek", "")) { "Ti Cloud Storage seek control missing" }
       val seekBounds = seek.visibleBounds
-      device.click(seekBounds.left + seekBounds.width() * 45 / 100, seekBounds.centerY())
-      waitAnyText(listOf("已跳转"), SHORT_TIMEOUT_MS, "ti-cloud-storage-seek")
+      var seeked = false
+      for (startPercent in listOf(75, 95, 50)) {
+        if (seeked) break
+        device.swipe(
+          seekBounds.left + seekBounds.width() * startPercent / 100,
+          seekBounds.centerY(),
+          seekBounds.left + seekBounds.width() * 45 / 100,
+          seekBounds.centerY(),
+          100,
+        )
+        Thread.sleep(1_500L)
+        seeked = hasAnyText(listOf("已跳转"))
+      }
+      if (!seeked) {
+        dumpFailureArtifacts("ti-cloud-storage-seek")
+      }
+      assertTrue("Ti Cloud Storage seek did not reach 45%", seeked)
+      marker("ti-cloud-storage-seek-ok")
       Thread.sleep(3_000L)
 
-      clickDesc("Ti Cloud Storage Snapshot")
+      verifyMenuCancellation("Ti Cloud Storage More")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Snapshot")
       waitAnyText(listOf("截图完成"), SHORT_TIMEOUT_MS, "ti-cloud-storage-snapshot")
-      clickDesc("Ti Cloud Storage Save Gallery")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Save Gallery")
       waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-snapshot-gallery")
 
-      clickDesc("Ti Cloud Storage Recording")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Recording")
       waitAnyText(listOf("边播边录已开始"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-started")
       Thread.sleep(7_000L)
-      clickDesc("Ti Cloud Storage Recording")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Recording")
       waitAnyText(listOf("边播边录完成"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-completed")
-      clickDesc("Ti Cloud Storage Save Gallery")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Save Gallery")
       waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-recording-gallery")
 
       clickDesc("Ti Cloud Storage Recordings")
       clickDesc("Ti Cloud Storage Export $startTimeMs")
+      verifyVisibleRecordingsState("export-busy", "正在下载录像", SHORT_TIMEOUT_MS)
       clickDesc("Ti Cloud Storage Close Recordings")
       waitAnyText(listOf("范围下载完成"), STORE_EXPORT_TIMEOUT_MS, "ti-cloud-storage-export-completed")
-      clickDesc("Ti Cloud Storage Save Gallery")
+      clickMenuAction("Ti Cloud Storage More", "Ti Cloud Storage Save Gallery")
       waitAnyText(listOf("已保存到系统相册"), SHORT_TIMEOUT_MS, "ti-cloud-storage-export-gallery")
 
       clickDesc("Ti Cloud Storage Recordings")
       clickDesc("Ti Cloud Storage Play $startTimeMs")
       waitAnyText(listOf("正在播放"), CONNECT_TIMEOUT_MS, "ti-cloud-storage-replay-restarted")
+      assertNotNull(
+        "Ti Cloud Storage mute preference was not retained after replay recreation",
+        waitForSelectedLane("Ti Cloud Storage Mute"),
+      )
+      marker("ti-cloud-storage-replay-muted-preference-ok")
       waitForCloudStorageReplayRendering()
-      val replayDeadline = System.currentTimeMillis() + STORE_CONTINUOUS_PLAYBACK_MS
+      val replayDeadline = System.currentTimeMillis() + STORE_PLAYBACK_COMPLETION_TIMEOUT_MS
+      var outputCompleted = false
       while (System.currentTimeMillis() < replayDeadline) {
         assertTrue("Ti Cloud Storage replay failed", !hasAnyText(listOf("播放失败", "回放失败", "输出失败")))
+        if (hasAnyText(listOf("Ti Cloud Storage Status: 播放完成"))) {
+          outputCompleted = true
+          break
+        }
         assertTrue("Ti Cloud Storage replay buffered after rendering", !hasAnyText(listOf("缓冲中")))
         Thread.sleep(1_000L)
       }
-      marker("ti-cloud-storage-continuous-playback-ok duration_ms=$STORE_CONTINUOUS_PLAYBACK_MS")
+      assertTrue("Ti Cloud Storage replay did not reach Output completion", outputCompleted)
+      marker("ti-cloud-storage-continuous-playback-ok terminal=output_completed")
 
-      clickDesc("Ti Cloud Storage Upload Logs")
-      waitForLogUpload("ti-cloud-storage", "-")
+      clickDesc("Ti Cloud Storage Mute")
+      waitAnyText(listOf("已恢复声音"), SHORT_TIMEOUT_MS, "ti-cloud-storage-unmute")
+
       clickDesc("Ti Cloud Storage Back")
-      waitForControlVisible("Ti Cloud Storage Open", SHORT_TIMEOUT_MS)
+      assertNotNull(
+        "Ti Cloud Storage configure entry is not reachable after back navigation",
+        findControl("Ti Cloud Storage Open", "播放云录像"),
+      )
       marker("ti-cloud-storage-returned-to-configure")
       tiCloudStorageUiGateCheckpoint("entry")
       marker("ti-cloud-storage-public-ui-done")
@@ -215,6 +297,11 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun tiCloudStorageUiGateCheckpoint(name: String, expectedStartMs: Long? = null) {
+    val configureEntry = if (name == "configure") {
+      findControl("Ti Cloud Storage Open", "播放云录像")
+    } else {
+      null
+    }
     val fileName = "ti-cloud-storage-ui-$name.png"
     val checkpointDir = instrumentation.targetContext.getExternalFilesDir(null)
       ?: instrumentation.targetContext.cacheDir
@@ -222,14 +309,19 @@ class ExamplePublicUiSmokeTest {
     assertTrue("Ti Cloud Storage checkpoint screenshot failed: $name", device.takeScreenshot(file))
     when (name) {
       "configure" -> {
-        val entry = device.findObject(By.desc("Ti Cloud Storage Open"))
-        assertNotNull("Ti Cloud Storage configure entry is not visible", entry)
-        assertTrue("Ti Cloud Storage configure entry is not visible", entry.visibleBounds.height() > 0)
-        val audio = device.findObject(By.desc("Ti Cloud Storage Config audioChannelId"))
-        val video = device.findObject(By.desc("Ti Cloud Storage Config videoChannelId"))
+        assertNotNull("Ti Cloud Storage configure entry is not visible", configureEntry)
+        assertTrue("Ti Cloud Storage configure entry is not visible", configureEntry!!.visibleBounds.height() > 0)
+        scrollConfigureToTop()
+        val audio = findControl("Ti Cloud Storage Config audioId", arg("ti-cloud-storage-audio-channel-id", "10"))
         assertNotNull("Ti Cloud Storage audio channel field is missing", audio)
-        assertNotNull("Ti Cloud Storage video channel field is missing", video)
-        assertTrue("Ti Cloud Storage channel fields are not on the same row", audio.visibleBounds.top == video.visibleBounds.top)
+        val videoChannelIds = csvArg(
+          "ti-cloud-storage-video-channel-ids",
+          arg("ti-cloud-storage-video-channel-id", "11"),
+        )
+        videoChannelIds.forEachIndexed { index, channelId ->
+          val video = findControl("Ti Cloud Storage Config videoId ${index + 1}", channelId)
+          assertNotNull("Ti Cloud Storage video channel field ${index + 1} is missing", video)
+        }
       }
       "sheet" -> {
         val sheet = device.findObject(By.desc("Ti Cloud Storage Recordings Sheet"))
@@ -255,9 +347,26 @@ class ExamplePublicUiSmokeTest {
         )
       }
       "playback" -> {
-        val stage = device.findObject(By.descContains("录像播放中"))
-        assertNotNull("Ti Cloud Storage playback stage is missing", stage)
-        val bounds = stage.visibleBounds
+        val videoChannelIds = csvArg(
+          "ti-cloud-storage-video-channel-ids",
+          arg("ti-cloud-storage-video-channel-id", "11"),
+        )
+        val initialLanes = videoChannelIds.mapNotNull { channelId ->
+          findPlaybackLane("Video Channel $channelId")
+        }
+        assertTrue("Ti Cloud Storage playback lanes are missing", initialLanes.size == videoChannelIds.size)
+        verifyMosaicSelection(videoChannelIds.map { "Video Channel $it" })
+        val refreshedLanes = videoChannelIds.map { channelId ->
+          val lane = waitForPlaybackLane("Video Channel $channelId", SHORT_TIMEOUT_MS)
+          assertNotNull("Ti Cloud Storage playback lane is missing after mosaic restore: $channelId", lane)
+          lane!!
+        }
+        val bounds = Rect(
+          refreshedLanes.minOf { it.visibleBounds.left },
+          refreshedLanes.minOf { it.visibleBounds.top },
+          refreshedLanes.maxOf { it.visibleBounds.right },
+          refreshedLanes.maxOf { it.visibleBounds.bottom },
+        )
         val widthRatio = bounds.width().toDouble() / device.displayWidth
         val heightRatio = bounds.height().toDouble() / device.displayHeight
         assertTrue("Ti Cloud Storage video stage is squeezed horizontally: $widthRatio", widthRatio >= 0.6)
@@ -287,13 +396,26 @@ class ExamplePublicUiSmokeTest {
       runBackgroundForegroundProbe("client", "TiRTC Player Stop")
       waitClientDownlink(captureVideoEvidence = false)
     }
-    clickDesc("TiRTC Player Send Command")
+    clickDesc("TiRTC Player Raw Dump")
+    waitAnyText(listOf("正在抓取诊断数据"), SHORT_TIMEOUT_MS, "client-raw-dump-start")
+    Thread.sleep(10_000L)
+    clickDesc("TiRTC Player Raw Dump")
+    marker("client_log_upload_clicked raw_dump=true")
+    waitForLogUpload("client")
+    marker("client_raw_dump_upload_ok")
+    verifyMenuCancellation("TiRTC Player More")
+    openMenuWithKeyboardFocus("TiRTC Player More")
+    activateWithKeyboard("TiRTC Player Send Command")
+    assertMenuDidNotStealFocus("TiRTC Player More", "TiRTC Command Panel Echo Preset")
+    device.pressBack()
+    waitForInputFocus("TiRTC Player More", "command panel did not restore focus after Android Back")
+    openMenuWithKeyboardFocus("TiRTC Player More")
+    activateWithKeyboard("TiRTC Player Send Command")
+    assertMenuDidNotStealFocus("TiRTC Player More", "TiRTC Command Panel Echo Preset")
     clickDesc("TiRTC Command Panel Echo Preset")
     clickDesc("TiRTC Command Panel Send Command")
-    clickDesc("TiRTC Command Panel Close")
-    clickDesc("TiRTC Player Upload Logs")
-    marker("client_log_upload_clicked")
-    waitForLogUpload("client")
+    activateWithKeyboard("TiRTC Command Panel Close")
+    waitForInputFocus("TiRTC Player More", "command close button did not restore focus to More")
     marker("client_public_actions_clicked")
     Thread.sleep(arg("holdMs", "2000").toLongOrNull() ?: 2_000L)
     clickDesc("TiRTC Player Stop")
@@ -311,13 +433,13 @@ class ExamplePublicUiSmokeTest {
       val localLoop = index + 1
       val loop = loopOffset + localLoop
       marker("stress_loop_${loop}_start")
-      clickDesc("TiRTC Start Downlink")
+      clickStressControl("TiRTC Start Downlink", scrollIfMissing = true)
       marker("stress_loop_${loop}_downlink_clicked package=${device.currentPackageName}")
       waitClientDownlink(captureVideoEvidence = false)
       marker("stress_fabric_output_loop_${loop}_ok")
       Thread.sleep(arg("holdMs", "2000").toLongOrNull() ?: 2_000L)
-      clickDesc("TiRTC Player Stop")
-      waitObject(By.desc("TiRTC Config appId"), SHORT_TIMEOUT_MS)
+      clickStressControl("TiRTC Player Stop")
+      waitForControlVisible("TiRTC Config appId", SHORT_TIMEOUT_MS)
       marker("stress_loop_${loop}_done")
       if (localLoop < loops) {
         Thread.sleep(STRESS_RECONNECT_COOLDOWN_MS)
@@ -331,13 +453,77 @@ class ExamplePublicUiSmokeTest {
 
   private fun fillCommonConfig() {
     waitObject(By.desc("TiRTC Config appId"), LAUNCH_TIMEOUT_MS)
-    setConfigField("appId", arg("appId"))
-    setConfigField("endpoint", arg("endpoint"))
-    setConfigField("remoteId", arg("remoteId"))
-    setConfigField("audioStreamId", arg("audioStreamId", "10"))
-    setConfigField("videoStreamId", arg("videoStreamId", "11"))
-    setConfigField("token", arg("token"))
-    marker("config_filled")
+    val token = fetchOneUseToken(arg("tokenUrl"))
+    try {
+      setConfigField("appId", arg("appId"))
+      setConfigField("endpoint", arg("endpoint"))
+      setConfigField("remoteId", arg("remoteId"))
+      setConfigField("audioId", arg("audioStreamId", "10"))
+      setVideoFields("TiRTC Config", csvArg("videoStreamIds", arg("videoStreamId", "11")))
+      setConfigField("token", token.concatToString())
+      marker("config_filled")
+    } finally {
+      token.fill('\u0000')
+    }
+  }
+
+  private fun verifyAuxiliaryUiContract() {
+    clickDesc("TiRTC 偏好设置")
+    assertNotNull("playback settings section is missing", waitObject(By.text("客户端播放"), SHORT_TIMEOUT_MS))
+    assertNotNull("talkback settings section is missing", waitObject(By.text("客户端语音对讲"), SHORT_TIMEOUT_MS))
+    assertMinimumTargetDp("TiRTC Settings Back", 48)
+    clickDesc("TiRTC Settings Back")
+
+    setConfigField("endpoint", "https://keep-rtc.example")
+    setConfigField("appId", "keep-rtc-app")
+    setConfigField("remoteId", "KEEPDEVICE")
+    setConfigField("audioId", "70")
+    clickDesc("TiRTC QR Input")
+    replaceAuxiliaryText("TiRTC QR Manual Content", "invalid")
+    clickDesc("TiRTC QR Apply Content")
+    waitAnyText(listOf("二维码内容无效"), SHORT_TIMEOUT_MS, "rtc-qr-invalid")
+    replaceAuxiliaryText("TiRTC QR Manual Content", "{\"app_id\":\"m4-rtc-app\",\"remote_id\":\"M4DEVICE\",\"token\":\"v1.m4-test\",\"endpoint\":\"https://m4-rtc.example\"}")
+    clickDesc("TiRTC QR Apply Content")
+    waitObject(By.desc("TiRTC Config appId"), SHORT_TIMEOUT_MS)
+    waitForFieldValue("TiRTC Config appId", "m4-rtc-app")
+    waitForFieldValue("TiRTC Config remoteId", "M4DEVICE")
+    waitForFieldValue("TiRTC Config endpoint", "https://m4-rtc.example")
+    assertSyntheticTokenValue("TiRTC Config token", "v1.m4-test", "TiRTC Config Show Token", "TiRTC Config Hide Token")
+    waitForFieldValue("TiRTC Config audioId", "70")
+
+    clickText("云录像")
+    setConfigField("Ti Cloud Storage Config appId", "keep-cloud-app")
+    setConfigField("Ti Cloud Storage Config endpoint", "https://keep-cloud.example")
+    setConfigField("Ti Cloud Storage Config audioId", "71")
+    clickDesc("Ti Cloud Storage QR Input")
+    replaceAuxiliaryText("Ti Cloud Storage QR Manual Content", "invalid value")
+    clickDesc("Ti Cloud Storage QR Apply Content")
+    waitAnyText(listOf("二维码内容无效"), SHORT_TIMEOUT_MS, "cloud-qr-invalid")
+    replaceAuxiliaryText("Ti Cloud Storage QR Manual Content", "{\"app_id\":\"m4-cloud-app\",\"token\":\"m4-cloud-token\",\"endpoint\":\"https://m4-cloud.example\"}")
+    clickDesc("Ti Cloud Storage QR Apply Content")
+    waitObject(By.desc("Ti Cloud Storage Config appId"), SHORT_TIMEOUT_MS)
+    waitForFieldValue("Ti Cloud Storage Config appId", "m4-cloud-app")
+    waitForFieldValue("Ti Cloud Storage Config endpoint", "https://m4-cloud.example")
+    assertSyntheticTokenValue("Ti Cloud Storage Config token", "m4-cloud-token", "Ti Cloud Storage Config Show Token", "Ti Cloud Storage Config Hide Token")
+    waitForFieldValue("Ti Cloud Storage Config audioId", "71")
+    clickText("RTC")
+    marker("auxiliary_ui_contract_ok")
+  }
+
+  private fun replaceAuxiliaryText(desc: String, value: String) {
+    val field = findControl(desc, desc)
+    assertNotNull("missing auxiliary field $desc", field)
+    field!!.click()
+    field.text = value
+    dismissSoftKeyboardIfShown()
+    waitForFieldValue(desc, value)
+  }
+
+  private fun verifyVisibleRecordingsState(state: String, text: String, timeoutMs: Long) {
+    val node = waitObject(By.descContains("Ti Cloud Storage Recordings State $state"), timeoutMs)
+    assertNotNull("missing recordings state $state", node)
+    assertTrue("recordings state $state has no visible bounds", node!!.visibleBounds.width() > 1 && node.visibleBounds.height() > 1)
+    assertTrue("recordings state text $text is not visible", hasAnyText(listOf(text)))
   }
 
   private fun launchExample() {
@@ -386,8 +572,19 @@ class ExamplePublicUiSmokeTest {
     field!!.click()
     field.text = value
     dismissSoftKeyboardIfShown()
-    if (desc != "Ti Cloud Storage Config token") {
+    if (desc != "TiRTC Config token" && desc != "Ti Cloud Storage Config token") {
       waitForFieldValue(desc, value)
+    }
+  }
+
+  private fun csvArg(name: String, fallback: String): List<String> =
+    arg(name, fallback).split(',').map(String::trim).filter(String::isNotEmpty).take(3)
+
+  private fun setVideoFields(prefix: String, values: List<String>) {
+    values.forEachIndexed { index, value ->
+      val label = "$prefix videoId ${index + 1}"
+      if (!device.hasObject(By.desc(label))) clickDesc("$prefix add video")
+      setConfigField(if (prefix == "TiRTC Config") "videoId ${index + 1}" else label, value)
     }
   }
 
@@ -399,20 +596,20 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun fetchOneUseToken(url: String): CharArray {
-    require(url.isNotEmpty()) { "missing Ti Cloud Storage token URL" }
+    require(url.isNotEmpty()) { "missing one-use token URL" }
     val connection = URL(url).openConnection() as HttpURLConnection
     connection.connectTimeout = SHORT_TIMEOUT_MS.toInt()
     connection.readTimeout = SHORT_TIMEOUT_MS.toInt()
     connection.useCaches = false
     return try {
-      check(connection.responseCode == HttpURLConnection.HTTP_OK) { "Ti Cloud Storage token handoff failed" }
+      check(connection.responseCode == HttpURLConnection.HTTP_OK) { "one-use token handoff failed" }
       val output = ByteArrayOutputStream()
       connection.inputStream.use { input ->
         val buffer = ByteArray(4096)
         while (true) {
           val count = input.read(buffer)
           if (count < 0) break
-          check(output.size() + count <= 64 * 1024) { "Ti Cloud Storage token handoff is too large" }
+          check(output.size() + count <= 64 * 1024) { "one-use token handoff is too large" }
           output.write(buffer, 0, count)
         }
         buffer.fill(0)
@@ -442,6 +639,13 @@ class ExamplePublicUiSmokeTest {
     throw AssertionError("field $desc did not retain the provided value")
   }
 
+  private fun assertSyntheticTokenValue(field: String, expected: String, show: String, hide: String) {
+    clickDesc(show)
+    waitForFieldValue(field, expected)
+    clickDesc(hide)
+    assertNotNull("token field did not return to hidden state", waitObject(By.desc(show), SHORT_TIMEOUT_MS))
+  }
+
   private fun collapseSystemOverlays() {
     try {
       device.executeShellCommand("cmd statusbar collapse")
@@ -457,6 +661,22 @@ class ExamplePublicUiSmokeTest {
       dumpFailureArtifacts(desc)
     }
     assertNotNull("missing control $desc", item)
+    clickControl(item!!)
+    Thread.sleep(300)
+  }
+
+  private fun clickStressControl(desc: String, scrollIfMissing: Boolean = false) {
+    ensureExampleWindow()
+    dismissSoftKeyboardIfShown()
+    val text = visibleText(desc)
+    var item = findControlNow(desc, text)
+    if (item == null && scrollIfMissing) {
+      item = scrollToDesc(desc) ?: scrollToText(text) ?: swipeToControl(desc, text)
+    }
+    if (item == null) {
+      dumpFailureArtifacts(desc)
+    }
+    assertNotNull("missing stress control $desc", item)
     clickControl(item!!)
     Thread.sleep(300)
   }
@@ -483,6 +703,15 @@ class ExamplePublicUiSmokeTest {
       ?: waitObject(By.textContains(text), 3_000L)
       ?: scrollToDesc(desc)
       ?: scrollToText(text)
+      ?: swipeToControl(desc, text)
+  }
+
+  private fun findControlNow(desc: String, text: String): UiObject2? {
+    return device.findObject(By.res(PACKAGE_NAME, automationId(desc)))
+      ?: device.findObject(By.desc(desc))
+      ?: device.findObject(By.descContains(desc))
+      ?: device.findObject(By.text(text))
+      ?: device.findObject(By.textContains(text))
   }
 
   private fun waitAnyText(values: List<String>, timeoutMs: Long, stage: String) {
@@ -549,6 +778,13 @@ class ExamplePublicUiSmokeTest {
         streamSeen = true
       }
       if (hasPlayerControls() && hasVisibleVideoFrame()) {
+        val videoLanes = csvArg("videoStreamIds", arg("videoStreamId", "11")).map { streamId ->
+          val lane = waitForPlaybackLane("Video Stream $streamId", SHORT_TIMEOUT_MS)
+          assertNotNull("missing video Stream $streamId lane", lane)
+          lane!!
+        }
+        assertRenderingAccessibilityStatus(videoLanes)
+        verifyMosaicSelection(csvArg("videoStreamIds", arg("videoStreamId", "11")).map { "Video Stream $it" })
         if (captureVideoEvidence) {
           saveDownlinkVideoScreenshot()
         }
@@ -652,6 +888,9 @@ class ExamplePublicUiSmokeTest {
   }
 
   private fun waitPlayerDiagnostics() {
+    if (!hasControl("TiRTC Player Diagnostics")) {
+      clickDesc("TiRTC Downlink Metrics Expand")
+    }
     waitDiagnosticsPanel(
       device = device,
       desc = "TiRTC Player Diagnostics",
@@ -661,6 +900,142 @@ class ExamplePublicUiSmokeTest {
       marker = ::marker,
       dumpFailureArtifacts = ::dumpFailureArtifacts,
     )
+    assertMinimumTargetDp("TiRTC Downlink Metrics Help", 48)
+    assertMinimumTargetDp("TiRTC Downlink Metrics Collapse", 48)
+  }
+
+  private fun assertMinimumTargetDp(desc: String, minimumDp: Int) {
+    val control = waitObject(By.desc(desc), SHORT_TIMEOUT_MS)
+    assertNotNull("missing target for bounds check: $desc", control)
+    val density = instrumentation.targetContext.resources.displayMetrics.density
+    val minimumPx = ceil(minimumDp * density).toInt()
+    assertTrue("$desc width is below ${minimumDp}dp (${minimumPx}px)", control!!.visibleBounds.width() >= minimumPx)
+    assertTrue("$desc height is below ${minimumDp}dp (${minimumPx}px)", control.visibleBounds.height() >= minimumPx)
+  }
+
+  private fun clickMenuAction(menu: String, action: String) {
+    clickDesc(menu)
+    clickDesc(action)
+  }
+
+  private fun verifyMenuCancellation(menu: String) {
+    openMenuWithKeyboardFocus(menu)
+    device.pressBack()
+    waitForInputFocus(menu, "playback menu trigger did not restore keyboard focus")
+  }
+
+  private fun openMenuWithKeyboardFocus(desc: String) {
+    focusWithKeyboard(desc)
+    device.pressEnter()
+    assertNotNull("keyboard activation did not open menu: $desc", waitObject(By.desc("$desc Cancel"), SHORT_TIMEOUT_MS))
+  }
+
+  private fun activateWithKeyboard(desc: String) {
+    focusWithKeyboard(desc)
+    device.pressEnter()
+  }
+
+  private fun focusWithKeyboard(desc: String) {
+    val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      val trigger = device.findObject(By.desc(desc))
+      if (trigger?.isFocused == true) return
+      device.pressKeyCode(KeyEvent.KEYCODE_TAB)
+      Thread.sleep(100)
+    }
+    dumpFailureArtifacts("playback_menu_keyboard_focus")
+    throw AssertionError("keyboard traversal did not focus control: $desc")
+  }
+
+  private fun waitForInputFocus(desc: String, failureMessage: String) {
+    val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      if (device.findObject(By.desc(desc))?.isFocused == true) {
+        Thread.sleep(500)
+        if (device.findObject(By.desc(desc))?.isFocused == true) return
+      }
+      Thread.sleep(100)
+    }
+    dumpFailureArtifacts("playback_menu_focus_restore")
+    throw AssertionError(failureMessage)
+  }
+
+  private fun assertMenuDidNotStealFocus(menu: String, destination: String) {
+    assertNotNull("menu action did not open destination: $destination", waitObject(By.desc(destination), SHORT_TIMEOUT_MS))
+    Thread.sleep(250)
+    assertFalse("dismissed menu stole focus from action destination: $menu", device.findObject(By.desc(menu))?.isFocused == true)
+  }
+
+  private fun verifyMosaicSelection(lanes: List<String>) {
+    if (lanes.size < 2) return
+    restoreMosaicBaseline(lanes)
+    val baseline = waitForPlaybackLane(lanes.first(), SHORT_TIMEOUT_MS)
+    assertNotNull("baseline playback lane is missing", baseline)
+    if (!baseline!!.isSelected) {
+      clickPlaybackLane(lanes.first())
+      assertNotNull("baseline playback lane was not selected", waitForSelectedLane(lanes.first()))
+    }
+    val target = lanes.last()
+    if (target != lanes.first()) clickPlaybackLane(target)
+    val selected = waitForSelectedLane(target)
+      ?: throw AssertionError("selected playback lane state was not exposed")
+    if (lanes.size == 3) {
+      val primaryArea = selected.visibleBounds.width().toLong() * selected.visibleBounds.height()
+      lanes.dropLast(1).forEach { lane ->
+        val secondary = waitForPlaybackLane(lane, SHORT_TIMEOUT_MS)
+        assertNotNull("secondary playback lane disappeared before maximize: $lane", secondary)
+        val secondaryArea = secondary!!.visibleBounds.width().toLong() * secondary.visibleBounds.height()
+        assertTrue("selected lane is not the primary visual area", primaryArea > secondaryArea)
+      }
+    }
+    assertNotNull("maximize entry is not exposed", waitObject(By.desc("放大视频"), SHORT_TIMEOUT_MS))
+    clickDesc("放大视频")
+    val maximized = waitForPlaybackLane(target, SHORT_TIMEOUT_MS)
+    assertNotNull("maximized playback lane is missing", maximized)
+    waitForLanesAbsent(lanes.dropLast(1))
+    assertNotNull("mosaic restore entry is not exposed", waitObject(By.desc("返回宫格"), SHORT_TIMEOUT_MS))
+    clickDesc("返回宫格")
+    lanes.forEach { lane ->
+      assertNotNull("playback lane did not return after restore: $lane", waitForPlaybackLane(lane, SHORT_TIMEOUT_MS))
+    }
+  }
+
+  private fun waitForSelectedLane(desc: String): UiObject2? {
+    val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      findPlaybackLane(desc)?.let { if (it.isSelected) return it }
+      Thread.sleep(100L)
+    }
+    dumpFailureArtifacts("playback_lane_selected")
+    return null
+  }
+
+  private fun clickPlaybackLane(desc: String) {
+    val lane = waitForPlaybackLane(desc, SHORT_TIMEOUT_MS)
+      ?: throw AssertionError("playback lane is missing: $desc")
+    val bounds = lane.visibleBounds
+    device.click(bounds.centerX(), bounds.top + maxOf(1, bounds.height() / 4))
+    Thread.sleep(300L)
+  }
+
+  private fun waitForLanesAbsent(lanes: List<String>) {
+    val deadline = System.currentTimeMillis() + SHORT_TIMEOUT_MS
+    while (System.currentTimeMillis() < deadline) {
+      if (lanes.none(::isPlaybackLaneVisuallyPresent)) return
+      Thread.sleep(100L)
+    }
+    dumpFailureArtifacts("playback_lane_maximized")
+    throw AssertionError("non-selected lanes remained in maximized layout: ${lanes.joinToString()}")
+  }
+
+  private fun restoreMosaicBaseline(lanes: List<String>) {
+    val visible = lanes.filter(::isPlaybackLaneVisuallyPresent)
+    if (visible.size == lanes.size) return
+    assertTrue("mosaic reset found no visible lane", visible.isNotEmpty())
+    clickDesc("返回宫格")
+    lanes.forEach { lane ->
+      assertNotNull("playback lane did not return while resetting layout: $lane", waitForPlaybackLane(lane, SHORT_TIMEOUT_MS))
+    }
   }
 
   private fun waitForLogUpload(role: String, separator: String = "_") {
@@ -683,6 +1058,17 @@ class ExamplePublicUiSmokeTest {
     marker("$role${separator}log${separator}upload${separator}timeout")
     dumpFailureArtifacts("${role}_log_upload")
     throw AssertionError("timed out waiting for log upload result for $role")
+  }
+
+  private fun assertRenderingAccessibilityStatus(lanes: List<UiObject2>) {
+    lanes.forEach { lane ->
+      val accessibleStatus = listOfNotNull(lane.contentDescription, lane.text).joinToString(" ")
+      assertTrue(
+        "video lane accessibility status is not rendering: $accessibleStatus",
+        accessibleStatus.contains("播放中"),
+      )
+    }
+    marker("client_downlink_video_accessibility_rendering_ok")
   }
 
   private fun visibleLogUploadId(): String? {
@@ -756,7 +1142,8 @@ class ExamplePublicUiSmokeTest {
 
   private fun hasVisibleVideoFrame(): Boolean {
     if (device.currentPackageName != PACKAGE_NAME) {
-      ensureExampleWindow()
+      collapseSystemOverlays()
+      device.wait(Until.hasObject(By.pkg(PACKAGE_NAME).depth(0)), 1_000L)
       if (device.currentPackageName != PACKAGE_NAME) {
         return false
       }
@@ -772,39 +1159,17 @@ class ExamplePublicUiSmokeTest {
           return false
         }
     try {
-      val left = bitmap.width / 10
-      val right = bitmap.width * 9 / 10
-      val top = bitmap.height * 42 / 100
-      val bottom = bitmap.height * 68 / 100
-      val stepX = ((right - left) / 32).coerceAtLeast(1)
-      val stepY = ((bottom - top) / 18).coerceAtLeast(1)
-      var samples = 0
-      var visibleSamples = 0
-      var y = top
-      while (y < bottom) {
-        var x = left
-        while (x < right) {
-          val pixel = bitmap.getPixel(x, y)
-          val red = Color.red(pixel)
-          val green = Color.green(pixel)
-          val blue = Color.blue(pixel)
-          val maxChannel = maxOf(red, green, blue)
-          val minChannel = minOf(red, green, blue)
-          val luma = (red * 299 + green * 587 + blue * 114) / 1000
-          val chromaSpread = maxChannel - minChannel
-          if (luma >= VIDEO_FRAME_BRIGHT_LUMA_THRESHOLD ||
-            (luma >= VIDEO_FRAME_CHROMATIC_LUMA_THRESHOLD &&
-              chromaSpread >= VIDEO_FRAME_CHROMATIC_SPREAD_THRESHOLD)
-          ) {
-            visibleSamples += 1
-          }
-          samples += 1
-          x += stepX
-        }
-        y += stepY
+      val laneLabels = expectedVideoLaneLabels()
+      if (laneLabels.isEmpty()) {
+        return false
       }
-      val visible =
-        samples > 0 && visibleSamples * 100 / samples >= VIDEO_FRAME_MINIMUM_VISIBLE_PERCENT
+      val laneBounds = laneLabels.mapNotNull { label ->
+        findPlaybackLane(label)?.visibleBounds
+      }
+      if (laneBounds.size != laneLabels.size) {
+        return false
+      }
+      val visible = laneBounds.all { bounds -> hasVisiblePixels(bitmap, videoContentBand(bounds)) }
       if (visible) {
         saveDownlinkVideoScreenshot()
       }
@@ -813,6 +1178,61 @@ class ExamplePublicUiSmokeTest {
       bitmap.recycle()
       file.delete()
     }
+  }
+
+  private fun expectedVideoLaneLabels(): List<String> {
+    if (arg("flow", "downlink") == "ti-cloud-storage") {
+      return csvArg(
+        "ti-cloud-storage-video-channel-ids",
+        arg("ti-cloud-storage-video-channel-id", "11"),
+      ).map { channelId -> "Video Channel $channelId" }
+    }
+    return csvArg("videoStreamIds", arg("videoStreamId", "11"))
+      .map { streamId -> "Video Stream $streamId" }
+  }
+
+  private fun videoContentBand(bounds: Rect): Rect {
+    return Rect(
+      bounds.left + bounds.width() / 10,
+      bounds.top + bounds.height() * 35 / 100,
+      bounds.right - bounds.width() / 10,
+      bounds.top + bounds.height() * 65 / 100,
+    )
+  }
+
+  private fun hasVisiblePixels(bitmap: android.graphics.Bitmap, bounds: Rect): Boolean {
+    val left = bounds.left.coerceIn(0, bitmap.width)
+    val right = bounds.right.coerceIn(left, bitmap.width)
+    val top = bounds.top.coerceIn(0, bitmap.height)
+    val bottom = bounds.bottom.coerceIn(top, bitmap.height)
+    val stepX = ((right - left) / 32).coerceAtLeast(1)
+    val stepY = ((bottom - top) / 18).coerceAtLeast(1)
+    var samples = 0
+    var visibleSamples = 0
+    var y = top
+    while (y < bottom) {
+      var x = left
+      while (x < right) {
+        val pixel = bitmap.getPixel(x, y)
+        val red = Color.red(pixel)
+        val green = Color.green(pixel)
+        val blue = Color.blue(pixel)
+        val maxChannel = maxOf(red, green, blue)
+        val minChannel = minOf(red, green, blue)
+        val luma = (red * 299 + green * 587 + blue * 114) / 1000
+        val chromaSpread = maxChannel - minChannel
+        if (luma >= VIDEO_FRAME_BRIGHT_LUMA_THRESHOLD ||
+          (luma >= VIDEO_FRAME_CHROMATIC_LUMA_THRESHOLD &&
+            chromaSpread >= VIDEO_FRAME_CHROMATIC_SPREAD_THRESHOLD)
+        ) {
+          visibleSamples += 1
+        }
+        samples += 1
+        x += stepX
+      }
+      y += stepY
+    }
+    return samples > 0 && visibleSamples * 100 / samples >= VIDEO_FRAME_MINIMUM_VISIBLE_PERCENT
   }
 
   private fun saveDownlinkVideoScreenshot() {
@@ -828,6 +1248,39 @@ class ExamplePublicUiSmokeTest {
     return device.findObject(selector)
   }
 
+  private fun findPlaybackLane(desc: String): UiObject2? {
+    val testId = when {
+      desc.startsWith("Video Stream ") -> "video-stream-${desc.removePrefix("Video Stream ")}"
+      desc.startsWith("Video Channel ") -> "video-channel-${desc.removePrefix("Video Channel ")}"
+      else -> null
+    }
+    if (testId != null) {
+      device.findObject(By.res(PACKAGE_NAME, testId))?.let { return it }
+    }
+    return device.findObject(By.desc(desc))
+      ?: device.findObjects(By.descContains(desc))
+        .filter { it.visibleBounds.width() > 0 && it.visibleBounds.height() > 0 }
+        .maxWithOrNull(
+          compareBy<UiObject2> { it.isClickable }
+            .thenBy { it.visibleBounds.width().toLong() * it.visibleBounds.height() },
+        )
+  }
+
+  private fun isPlaybackLaneVisuallyPresent(desc: String): Boolean {
+    val bounds = findPlaybackLane(desc)?.visibleBounds ?: return false
+    val parkedLimitPx = ceil(2 * instrumentation.targetContext.resources.displayMetrics.density).toInt()
+    return bounds.width() > parkedLimitPx && bounds.height() > parkedLimitPx
+  }
+
+  private fun waitForPlaybackLane(desc: String, timeoutMs: Long): UiObject2? {
+    val deadline = System.currentTimeMillis() + timeoutMs
+    while (System.currentTimeMillis() < deadline) {
+      findPlaybackLane(desc)?.let { return it }
+      Thread.sleep(100L)
+    }
+    return findPlaybackLane(desc)
+  }
+
   private fun ensureExampleWindow() {
     collapseSystemOverlays()
     val currentPackage = device.currentPackageName
@@ -839,9 +1292,27 @@ class ExamplePublicUiSmokeTest {
 
   private fun dismissSoftKeyboardIfShown() {
     try {
+      instrumentation.runOnMainSync {
+        val activity = ActivityLifecycleMonitorRegistry.getInstance()
+          .getActivitiesInStage(Stage.RESUMED)
+          .firstOrNull()
+        val focusedView = activity?.currentFocus
+        val windowToken = focusedView?.windowToken ?: activity?.window?.decorView?.windowToken
+        val inputMethodManager = activity?.getSystemService(android.content.Context.INPUT_METHOD_SERVICE)
+          as? InputMethodManager
+        if (windowToken != null) {
+          inputMethodManager?.hideSoftInputFromWindow(windowToken, 0)
+        }
+        focusedView?.clearFocus()
+      }
+      Thread.sleep(250)
       val inputState = device.executeShellCommand("dumpsys input_method")
+      val appWindow = device.findObject(By.pkg(PACKAGE_NAME).depth(0))
       val imeVisible = inputState.contains("mInputShown=true") ||
-        Regex("mImeWindowVis=(?!0\\b)\\d+").containsMatchIn(inputState)
+        Regex("mImeWindowVis=(?!0(?:x0)?\\b)(?:0x[0-9a-fA-F]+|\\d+)").containsMatchIn(inputState) ||
+        device.hasObject(By.pkg("com.google.android.inputmethod.latin")) ||
+        device.hasObject(By.pkg("com.android.inputmethod.latin")) ||
+        (appWindow != null && appWindow.visibleBounds.bottom < device.displayHeight * 9 / 10)
       if (imeVisible) {
         device.pressBack()
         Thread.sleep(500)
@@ -939,6 +1410,41 @@ class ExamplePublicUiSmokeTest {
     return device.findObject(By.text(text)) ?: device.findObject(By.textContains(text))
   }
 
+  private fun swipeToControl(desc: String, text: String): UiObject2? {
+    repeat(6) {
+      device.swipe(
+        device.displayWidth / 2,
+        device.displayHeight * 4 / 5,
+        device.displayWidth / 2,
+        device.displayHeight / 3,
+        24,
+      )
+      device.waitForIdle()
+      Thread.sleep(SCROLL_SETTLE_MS)
+      val item = device.findObject(By.res(PACKAGE_NAME, automationId(desc)))
+        ?: device.findObject(By.desc(desc))
+        ?: device.findObject(By.descContains(desc))
+        ?: device.findObject(By.text(text))
+        ?: device.findObject(By.textContains(text))
+      if (item != null) return item
+    }
+    return null
+  }
+
+  private fun scrollConfigureToTop() {
+    repeat(6) {
+      device.swipe(
+        device.displayWidth / 2,
+        device.displayHeight / 3,
+        device.displayWidth / 2,
+        device.displayHeight * 4 / 5,
+        24,
+      )
+      device.waitForIdle()
+      Thread.sleep(SCROLL_SETTLE_MS)
+    }
+  }
+
   private fun marker(name: String) {
     Log.i(MARKER_TAG, "marker=$name")
   }
@@ -961,7 +1467,7 @@ class ExamplePublicUiSmokeTest {
   private companion object {
     const val SCROLL_SETTLE_MS = 750L
     const val STORE_EXPORT_TIMEOUT_MS = 240_000L
-    const val STORE_CONTINUOUS_PLAYBACK_MS = 119_000L
+    const val STORE_PLAYBACK_COMPLETION_TIMEOUT_MS = 210_000L
     const val STORE_SDK_CASE_TIMEOUT_MS = 900_000L
   }
 }

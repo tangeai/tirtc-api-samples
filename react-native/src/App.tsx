@@ -12,7 +12,13 @@ import {SettingsScreen} from './ExampleSettings';
 import {TiCloudStorageScreen} from './ExampleCloudStoragePage';
 import {loadStoredConfig, saveStoredConfig} from './ExampleStorage';
 import {tiCloudStorageResolveToken, resolveToken} from './ExampleToken';
-import {ExampleConfig, Page, initialConfig, parseStreamIds} from './ExampleTypes';
+import {
+  ExampleConfig,
+  Page,
+  initialConfig,
+  parseCloudStorageChannelIds,
+  parseStreamIds,
+} from './ExampleTypes';
 
 export default function App(): React.ReactElement {
   const [page, setPage] = useState<Page>('configure');
@@ -51,6 +57,14 @@ export default function App(): React.ReactElement {
     }
     setBusy(true);
     setStatus('Token 校验中');
+    let streams: ReturnType<typeof parseStreamIds>;
+    try {
+      streams = parseStreamIds(config);
+    } catch (error) {
+      setStatus(String(error));
+      setBusy(false);
+      return;
+    }
     let token: string;
     try {
       token = await resolveToken(config);
@@ -64,7 +78,7 @@ export default function App(): React.ReactElement {
     setPage('player');
     setStatus('连接中');
     try {
-      await clientSession.start(nextConfig, parseStreamIds(nextConfig));
+      await clientSession.start(nextConfig, streams);
     } catch (error) {
       setStatus(`播放启动失败 ${String(error)}`);
     } finally {
@@ -77,6 +91,7 @@ export default function App(): React.ReactElement {
     setBusy(true);
     setStatus('Ti Cloud Storage Token 校验中');
     try {
+      const media = parseCloudStorageChannelIds(config);
       const token = await tiCloudStorageResolveToken(config.tiCloudStorageToken);
       setConfig((current) => ({...current, tiCloudStorageToken: token}));
       setPage('tiCloudStorage');

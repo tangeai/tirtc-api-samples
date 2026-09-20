@@ -10,14 +10,23 @@
 		0C80B921A6F3F58F76C31292 /* libPods-TiRtcExample.a in Frameworks */ = {isa = PBXBuildFile; fileRef = 5DCACB8F33CDC322A6C60F78 /* libPods-TiRtcExample.a */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		22D1498339AA7A06B41868B4 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		57AA063A6702C6AC7412F6C1 /* TiRtcNativeSnapshotLifecycleTests.mm in Sources */ = {isa = PBXBuildFile; fileRef = 3D1D3B172B8A7974534BE391 /* TiRtcNativeSnapshotLifecycleTests.mm */; };
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
+		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
+		A90FABCBA3B620DC1A71D859 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = F0AE902FE33FD490DD31AFDB /* Foundation.framework */; };
+		E00000000000000000000001 /* ExamplePublicUiSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */; };
 		E10000000000000000000001 /* ExampleMediaModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000003 /* ExampleMediaModule.swift */; };
 		E10000000000000000000002 /* ExampleMediaModule.m in Sources */ = {isa = PBXBuildFile; fileRef = E10000000000000000000004 /* ExampleMediaModule.m */; };
-		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
-		E00000000000000000000001 /* ExamplePublicUiSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
+		347A8F1062F9C222B553D57A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 13B07F861A680F5B00A75B9A;
+			remoteInfo = TiRtcExample;
+		};
 		E00000000000000000000003 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 83CBB9F71A601CBA00E9B192 /* Project object */;
@@ -33,15 +42,18 @@
 		13B07FB61A68108700A75B9A /* Info.plist */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = Info.plist; path = TiRtcExample/Info.plist; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = TiRtcExample/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-TiRtcExample.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TiRtcExample.debug.xcconfig"; path = "Target Support Files/Pods-TiRtcExample/Pods-TiRtcExample.debug.xcconfig"; sourceTree = "<group>"; };
+		3D1D3B172B8A7974534BE391 /* TiRtcNativeSnapshotLifecycleTests.mm */ = {isa = PBXFileReference; includeInIndex = 1; path = TiRtcNativeSnapshotLifecycleTests.mm; sourceTree = "<group>"; };
+		4B313C6F816072FBFD1901BC /* TiRtcNativeLifecycleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TiRtcNativeLifecycleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		5709B34CF0A7D63546082F79 /* Pods-TiRtcExample.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-TiRtcExample.release.xcconfig"; path = "Target Support Files/Pods-TiRtcExample/Pods-TiRtcExample.release.xcconfig"; sourceTree = "<group>"; };
 		5DCACB8F33CDC322A6C60F78 /* libPods-TiRtcExample.a */ = {isa = PBXFileReference; explicitFileType = archive.ar; includeInIndex = 0; path = "libPods-TiRtcExample.a"; sourceTree = BUILT_PRODUCTS_DIR; };
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = TiRtcExample/AppDelegate.swift; sourceTree = "<group>"; };
-		E10000000000000000000003 /* ExampleMediaModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExampleMediaModule.swift; path = TiRtcExample/ExampleMediaModule.swift; sourceTree = "<group>"; };
-		E10000000000000000000004 /* ExampleMediaModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ExampleMediaModule.m; path = TiRtcExample/ExampleMediaModule.m; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = TiRtcExample/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExamplePublicUiSmokeTests.swift; sourceTree = "<group>"; };
 		E00000000000000000000004 /* TiRtcExampleTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = TiRtcExampleTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		E10000000000000000000003 /* ExampleMediaModule.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = ExampleMediaModule.swift; path = TiRtcExample/ExampleMediaModule.swift; sourceTree = "<group>"; };
+		E10000000000000000000004 /* ExampleMediaModule.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; name = ExampleMediaModule.m; path = TiRtcExample/ExampleMediaModule.m; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		F0AE902FE33FD490DD31AFDB /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = System/Library/Frameworks/Foundation.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,6 +62,14 @@
 			buildActionMask = 2147483647;
 			files = (
 				0C80B921A6F3F58F76C31292 /* libPods-TiRtcExample.a in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		316A24B0F008386B5100C5DD /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A90FABCBA3B620DC1A71D859 /* Foundation.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -82,6 +102,7 @@
 			children = (
 				ED297162215061F000B7C4FE /* JavaScriptCore.framework */,
 				5DCACB8F33CDC322A6C60F78 /* libPods-TiRtcExample.a */,
+				A5BEC37F527D327BDCC15317 /* iOS */,
 			);
 			name = Frameworks;
 			sourceTree = "<group>";
@@ -102,6 +123,7 @@
 				83CBBA001A601CBA00E9B192 /* Products */,
 				2D16E6871FA4F8E400B85C8A /* Frameworks */,
 				BBD78D7AC51CEA395F1C20DB /* Pods */,
+				F0609F090E8D51ED528C57A9 /* TiRtcNativeLifecycleTests */,
 			);
 			indentWidth = 2;
 			sourceTree = "<group>";
@@ -113,8 +135,17 @@
 			children = (
 				13B07F961A680F5B00A75B9A /* TiRtcExample.app */,
 				E00000000000000000000004 /* TiRtcExampleTests.xctest */,
+				4B313C6F816072FBFD1901BC /* TiRtcNativeLifecycleTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		A5BEC37F527D327BDCC15317 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				F0AE902FE33FD490DD31AFDB /* Foundation.framework */,
+			);
+			name = iOS;
 			sourceTree = "<group>";
 		};
 		BBD78D7AC51CEA395F1C20DB /* Pods */ = {
@@ -132,6 +163,15 @@
 				E00000000000000000000002 /* ExamplePublicUiSmokeTests.swift */,
 			);
 			path = TiRtcExampleTests;
+			sourceTree = "<group>";
+		};
+		F0609F090E8D51ED528C57A9 /* TiRtcNativeLifecycleTests */ = {
+			isa = PBXGroup;
+			children = (
+				3D1D3B172B8A7974534BE391 /* TiRtcNativeSnapshotLifecycleTests.mm */,
+			);
+			name = TiRtcNativeLifecycleTests;
+			path = TiRtcNativeLifecycleTests;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -154,6 +194,24 @@
 			productName = TiRtcExampleTests;
 			productReference = E00000000000000000000004 /* TiRtcExampleTests.xctest */;
 			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		0265F58BEFED16EA5679CDDC /* TiRtcNativeLifecycleTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B321BF79EEB6CBD7945760DB /* Build configuration list for PBXNativeTarget "TiRtcNativeLifecycleTests" */;
+			buildPhases = (
+				E189F82E07309CDA85A1C444 /* Sources */,
+				316A24B0F008386B5100C5DD /* Frameworks */,
+				E00BEDF8B470CFCE02A239DF /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				BCC851173184E99CFBC363FD /* PBXTargetDependency */,
+			);
+			name = TiRtcNativeLifecycleTests;
+			productName = TiRtcNativeLifecycleTests;
+			productReference = 4B313C6F816072FBFD1901BC /* TiRtcNativeLifecycleTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 		13B07F861A680F5B00A75B9A /* TiRtcExample */ = {
 			isa = PBXNativeTarget;
@@ -208,6 +266,7 @@
 			targets = (
 				13B07F861A680F5B00A75B9A /* TiRtcExample */,
 				00E356ED1AD99517003FC87E /* TiRtcExampleTests */,
+				0265F58BEFED16EA5679CDDC /* TiRtcNativeLifecycleTests */,
 			);
 		};
 /* End PBXProject section */
@@ -224,6 +283,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		E00000000000000000000009 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		E00BEDF8B470CFCE02A239DF /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -326,9 +392,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		E189F82E07309CDA85A1C444 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				57AA063A6702C6AC7412F6C1 /* TiRtcNativeSnapshotLifecycleTests.mm in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		BCC851173184E99CFBC363FD /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = TiRtcExample;
+			target = 13B07F861A680F5B00A75B9A /* TiRtcExample */;
+			targetProxy = 347A8F1062F9C222B553D57A /* PBXContainerItemProxy */;
+		};
 		E0000000000000000000000A /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 13B07F861A680F5B00A75B9A /* TiRtcExample */;
@@ -553,6 +633,37 @@
 			};
 			name = Release;
 		};
+		D373E9E725BE88D9021B0688 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Public/ReactCodegen/TiRtcSpec",
+				);
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tange.ai.tirtc.reactnative.example.native-lifecycle-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(inherited)",
+					"-fmodules",
+					"-fcxx-modules",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TiRtcExample.app/TiRtcExample";
+			};
+			name = Debug;
+		};
 		E0000000000000000000000B /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -600,6 +711,38 @@
 			};
 			name = Release;
 		};
+		EA9A7C52879DA2DB4E4FC1C5 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_MODULES = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/Headers/Public/ReactCodegen/TiRtcSpec",
+				);
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = "com.tange.ai.tirtc.reactnative.example.native-lifecycle-tests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				OTHER_CPLUSPLUSFLAGS = (
+					"$(inherited)",
+					"-fmodules",
+					"-fcxx-modules",
+				);
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/TiRtcExample.app/TiRtcExample";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -617,6 +760,15 @@
 			buildConfigurations = (
 				83CBBA201A601CBA00E9B192 /* Debug */,
 				83CBBA211A601CBA00E9B192 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B321BF79EEB6CBD7945760DB /* Build configuration list for PBXNativeTarget "TiRtcNativeLifecycleTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				EA9A7C52879DA2DB4E4FC1C5 /* Release */,
+				D373E9E725BE88D9021B0688 /* Debug */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

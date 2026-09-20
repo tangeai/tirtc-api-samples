@@ -14,6 +14,7 @@ import {
   type TiRtcRecordingTask,
   type TiRtcRecordingFile,
   type TiRtcSnapshotFile,
+  type TiRawDump,
 } from 'tirtc-react-native';
 import {
   clonePayload,
@@ -37,38 +38,62 @@ import {
   validSize,
   videoDecoderPreferenceFromConfig,
 } from './ExampleSessionShared';
-import {parseLocalAudioStreamId, type ExampleConfig} from './ExampleTypes';
+import {parseLocalAudioStreamId, type ExampleConfig, type MediaSelection} from './ExampleTypes';
 
 export class ClientSession {
   conn: TiRtcConn | null = null;
   audioOutput: TiRtcAudioOutput | null = null;
-  videoOutput: TiRtcVideoOutput | null = null;
+  readonly videoOutputs = new Map<number, TiRtcVideoOutput>();
+  readonly renderSizes = new Map<number, TiRtcSize>();
+  readonly videoStates = new Map<number, TiRtcVideoOutputState>();
+  readonly videoErrors = new Map<number, number>();
+  selectedVideoStreamId: number | null = null;
   talkback: TiRtcAudioInput | null = null;
-  renderSize: TiRtcSize | null = null;
   audioOutputMuted = false;
   onTalkbackStateChanged: ((running: boolean) => void) | null = null;
   recordingTask: TiRtcRecordingTask | null = null;
+  rawDump: TiRawDump | null = null;
+  private rawDumpUploadPending = false;
+  private recordingTargetId: number | null = null;
   private latestMediaFile: TiRtcRecordingFile | TiRtcSnapshotFile | null = null;
+  private latestMediaTargetId: number | null = null;
   private readonly ownedMediaFiles = new Set<TiRtcRecordingFile | TiRtcSnapshotFile>();
   private connState: TiRtcConnState = TiRtcConnState.idle;
   private audioState: TiRtcAudioOutputState = TiRtcAudioOutputState.idle;
-  private videoState: TiRtcVideoOutputState = TiRtcVideoOutputState.idle;
   private talkbackState: TiRtcInputState = TiRtcInputState.idle;
   private firstVideoRendered = false;
   private renderPoll: ReturnType<typeof setInterval> | null = null;
-  private downlinkStreams: {audio: number; video: number} | null = null;
+  private downlinkStreams: MediaSelection | null = null;
+  private localAudioStreamId = 14;
   private downlinkSubscribed = false;
   private readonly streamMessageOverlay = new DemoStreamMessageOverlayController();
   private pendingLocalEchoReplies = 0;
+  private generation = 0;
   commandEvents: CommandPanelEvent[] = [];
 
   constructor(private readonly setStatus: (status: string) => void) {}
 
-  async start(config: ExampleConfig, streams: {audio: number; video: number}) {
+  get videoOutput(): TiRtcVideoOutput | null {
+    return this.selectedVideoStreamId === null ? null : this.videoOutputs.get(this.selectedVideoStreamId) ?? null;
+  }
+
+  get renderSize(): TiRtcSize | null {
+    return this.selectedVideoStreamId === null ? null : this.renderSizes.get(this.selectedVideoStreamId) ?? null;
+  }
+
+  get hasLatestMedia(): boolean {
+    return this.latestMediaFile !== null;
+  }
+
+  async start(config: ExampleConfig, streams: MediaSelection) {
     await this.stop();
+    const generation = ++this.generation;
     this.stopRenderPoll();
-    this.renderSize = null;
+    this.renderSizes.clear();
+    this.videoStates.clear();
+    this.selectedVideoStreamId = null;
     this.audioOutputMuted = false;
+    this.localAudioStreamId = parseLocalAudioStreamId(config);
     TiRtcLogging.i(
       'TiRtcRnExample',
       `client_start_begin app_id_present=${config.appId.length > 0} endpoint_present=${config.endpoint.length > 0} remote_id_present=${config.remoteId.length > 0}`,
@@ -84,15 +109,14 @@ export class ClientSession {
       return;
     }
 
-    this.conn = new TiRtcConn();
-    this.conn.onStateChanged = (state, code) => {
+    const connection = new TiRtcConn();
+    this.conn = connection;
+    this.downlinkStreams = {...streams};
+    connection.onStateChanged = (state, code) => {
+      if (generation !== this.generation || this.conn !== connection) return;
       this.connState = state;
       if (state === TiRtcConnState.connected) {
-        const subscribeCode = this.subscribeDownlinkIfReady();
-        if (subscribeCode !== 0) {
-          void this.failStartup(`订阅失败 · ${TiRtc.formatError(subscribeCode)}`);
-          return;
-        }
+        this.subscribeDownlinkIfReady();
         this.setStatus('client connected');
         return;
       }
@@ -102,83 +126,109 @@ export class ClientSession {
       }
       this.setStatus(`conn ${state} code=${code}`);
     };
-    this.conn.onCommand = (commandId, data) => {
+    connection.onCommand = (commandId, data) => {
+      if (generation !== this.generation || this.conn !== connection) return;
       this.handleReceivedCommand(commandId, data);
     };
-    this.conn.onStreamMessage = (streamId, _timestampMs, data) => {
-      this.handleStreamMessage(streams.video, streamId, data);
+    connection.onStreamMessage = (streamId, _timestampMs, data) => {
+      if (generation !== this.generation || this.conn !== connection) return;
+      this.handleStreamMessage(streams.videos.includes(streamId) ? streamId : (streams.videos[0] ?? streams.audio ?? 0), streamId, data);
     };
 
-    this.audioOutput = new TiRtcAudioOutput();
-    this.videoOutput = new TiRtcVideoOutput();
-    this.audioOutput.onStateChanged = (state) => {
-      this.audioState = state;
-      if (state === TiRtcAudioOutputState.playing) {
-        this.setStatus('audio playing');
-      }
-    };
-    this.videoOutput.onStateChanged = (state) => {
-      this.videoState = state;
-      if (state === TiRtcVideoOutputState.rendering) {
-        this.markVideoRendering(this.videoOutput?.renderSize ?? null);
-      }
-    };
-    this.audioOutput.onError = (code) => {
-      this.setStatus(`音频播放失败 · ${TiRtc.formatError(code)}`);
-    };
-    this.videoOutput.onError = (code) => {
-      this.setStatus(`视频播放失败 · ${TiRtc.formatError(code)}`);
-    };
-    this.videoOutput.onRenderSizeChanged = (size) => {
-      this.markVideoRendering(size);
-    };
     const outputBufferStrategy = outputBufferStrategyFromConfig(config.outputBufferPolicy);
-    const audioOptionsCode = this.audioOutput.configure({bufferStrategy: outputBufferStrategy});
-    TiRtcLogging.i('TiRtcRnExample', `client_audio_output_options_done code=${audioOptionsCode}`);
-    if (audioOptionsCode !== 0) {
-      await this.failStartup(`音频播放配置失败 · ${TiRtc.formatError(audioOptionsCode)}`);
-      return;
+    if (streams.audio !== null) {
+      const audioOutput = new TiRtcAudioOutput();
+      this.audioOutput = audioOutput;
+      audioOutput.onStateChanged = (state) => {
+        if (generation !== this.generation || this.audioOutput !== audioOutput) return;
+        this.audioState = state;
+        if (state === TiRtcAudioOutputState.playing) this.setStatus('audio playing');
+        if (state === TiRtcAudioOutputState.failed) {
+          this.retireAudioOutput(audioOutput);
+          this.setStatus('音频播放失败');
+        }
+      };
+      audioOutput.onError = (code) => {
+        if (generation !== this.generation || this.audioOutput !== audioOutput) return;
+        this.audioState = TiRtcAudioOutputState.failed;
+        this.retireAudioOutput(audioOutput);
+        this.setStatus(`音频播放失败 · ${TiRtc.formatError(code)}`);
+      };
+      const audioOptionsCode = audioOutput.configure({bufferStrategy: outputBufferStrategy});
+      if (audioOptionsCode !== 0) {
+        this.audioState = TiRtcAudioOutputState.failed;
+        this.audioOutput = null;
+        audioOutput.dispose();
+        this.setStatus(`音频播放配置失败 · ${TiRtc.formatError(audioOptionsCode)}`);
+      } else {
+        const audioAttachCode = audioOutput.attach(connection, streams.audio);
+        if (audioAttachCode !== 0) {
+          this.audioState = TiRtcAudioOutputState.failed;
+          this.audioOutput = null;
+          audioOutput.dispose();
+          this.setStatus(`音频播放启动失败 · ${TiRtc.formatError(audioAttachCode)}`);
+        }
+      }
     }
-    const videoOptionsCode = this.videoOutput.setOptions({
-      decoderPreference: videoDecoderPreferenceFromConfig(config.videoDecoderPreference),
-      bufferStrategy: outputBufferStrategy,
-    });
-    TiRtcLogging.i('TiRtcRnExample', `client_video_output_options_done code=${videoOptionsCode}`);
-    if (videoOptionsCode !== 0) {
-      await this.failStartup(`视频播放配置失败 · ${TiRtc.formatError(videoOptionsCode)}`);
-      return;
+    for (const streamId of streams.videos) {
+      const output = new TiRtcVideoOutput();
+      this.videoOutputs.set(streamId, output);
+      this.videoStates.set(streamId, TiRtcVideoOutputState.idle);
+      output.onStateChanged = (state) => {
+        if (generation !== this.generation || this.videoOutputs.get(streamId) !== output) return;
+        this.videoStates.set(streamId, state);
+        if (state === TiRtcVideoOutputState.rendering) {
+          this.videoErrors.delete(streamId);
+          this.markVideoRendering(streamId, output.renderSize);
+        }
+      };
+      output.onError = (code) => {
+        if (generation !== this.generation || this.videoOutputs.get(streamId) !== output) return;
+        this.videoStates.set(streamId, TiRtcVideoOutputState.failed);
+        this.videoErrors.set(streamId, code);
+        this.setStatus(`视频 ${streamId} 播放失败 · ${TiRtc.formatError(code)}`);
+      };
+      output.onRenderSizeChanged = (size) => {
+        if (generation !== this.generation || this.videoOutputs.get(streamId) !== output) return;
+        this.markVideoRendering(streamId, size);
+      };
+      const optionsCode = output.setOptions({
+        decoderPreference: videoDecoderPreferenceFromConfig(config.videoDecoderPreference),
+        bufferStrategy: outputBufferStrategy,
+      });
+      if (optionsCode !== 0) {
+        this.videoStates.set(streamId, TiRtcVideoOutputState.failed);
+        this.videoErrors.set(streamId, optionsCode);
+        this.setStatus(`视频 ${streamId} 配置失败 · ${TiRtc.formatError(optionsCode)}`);
+        continue;
+      }
+      const attachCode = output.attach(connection, streamId);
+      if (attachCode !== 0) {
+        this.videoStates.set(streamId, TiRtcVideoOutputState.failed);
+        this.videoErrors.set(streamId, attachCode);
+        this.setStatus(`视频 ${streamId} 启动失败 · ${TiRtc.formatError(attachCode)}`);
+      }
     }
-    const audioAttachCode = this.audioOutput.attach(this.conn, streams.audio);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_audio_output_attach_done code=${audioAttachCode} stream_id=${streams.audio}`,
-    );
-    if (audioAttachCode !== 0) {
-      await this.failStartup(`音频播放启动失败 · ${TiRtc.formatError(audioAttachCode)}`);
-      return;
-    }
-    const videoAttachCode = this.videoOutput.attach(this.conn, streams.video);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_video_output_attach_done code=${videoAttachCode} stream_id=${streams.video}`,
-    );
-    if (videoAttachCode !== 0) {
-      await this.failStartup(`视频播放启动失败 · ${TiRtc.formatError(videoAttachCode)}`);
-      return;
-    }
-    this.downlinkStreams = {...streams};
-    const connectCode = this.conn.connect(config.remoteId, config.token);
+    this.selectedVideoStreamId = streams.videos[0] ?? null;
+    const connectCode = connection.connect(config.remoteId, config.token);
     TiRtcLogging.i('TiRtcRnExample', `client_connect_done code=${connectCode}`);
     if (connectCode !== 0) {
       await this.failStartup(`连接失败 · ${TiRtc.formatError(connectCode)}`);
       return;
     }
-    const subscribeCode = this.subscribeDownlinkIfReady();
-    if (subscribeCode !== 0) {
-      await this.failStartup(`订阅失败 · ${TiRtc.formatError(subscribeCode)}`);
-      return;
-    }
-    this.setStatus(this.downlinkSubscribed ? '等待首帧' : '等待连接');
+    this.subscribeDownlinkIfReady();
+    const hasUsableVideo = streams.videos.some(
+      (streamId) => this.videoStates.get(streamId) !== TiRtcVideoOutputState.failed,
+    );
+    this.setStatus(
+      !this.downlinkSubscribed
+        ? '等待连接'
+        : hasUsableVideo
+          ? '等待首帧'
+          : this.audioOutput !== null
+            ? '等待音频'
+            : 'client connected',
+    );
     this.startRenderPoll();
   }
 
@@ -230,7 +280,7 @@ export class ClientSession {
       return;
     }
     await this.stopTalkback();
-    const streamId = parseLocalAudioStreamId(config);
+    const streamId = this.localAudioStreamId;
     this.talkback = new TiRtcAudioInput();
     this.talkback.onStateChanged = (state) => {
       this.setTalkbackState(state);
@@ -286,6 +336,40 @@ export class ClientSession {
     return upload;
   }
 
+  async toggleRawDump(): Promise<{capturing: boolean; status: string; upload: boolean}> {
+    if (this.rawDumpUploadPending) {
+      return {capturing: false, status: '诊断数据已保留 · 正在重试上传', upload: true};
+    }
+    if (this.rawDump !== null) {
+      const result = await this.rawDump.stop();
+      if (!result.success || result.data === null) {
+        return {capturing: true, status: `诊断抓取停止失败 · #${result.code ?? 0}`, upload: false};
+      }
+      this.rawDump = null;
+      this.rawDumpUploadPending = true;
+      return {capturing: false, status: `诊断抓取完成 · ${result.data.captureId}`, upload: true};
+    }
+    if (this.conn === null || this.downlinkStreams === null) {
+      return {capturing: false, status: '诊断抓取失败 · 播放未就绪', upload: false};
+    }
+    const result = await this.conn.startRawDump({
+      audioStreamIds: this.downlinkStreams.audio === null ? [] : [this.downlinkStreams.audio],
+      videoStreamIds: this.downlinkStreams.videos,
+      uplinkAudioStreamIds: [this.localAudioStreamId],
+    });
+    if (!result.success || result.data === null) {
+      return {capturing: false, status: `诊断抓取失败 · #${result.code ?? 0}`, upload: false};
+    }
+    this.rawDump = result.data;
+    return {capturing: true, status: '正在抓取诊断数据 · 再次点击结束并上传日志', upload: false};
+  }
+
+  finishRawDumpUpload(success: boolean): void {
+    if (success) this.rawDumpUploadPending = false;
+  }
+
+  isRawDumpUploadPending(): boolean { return this.rawDumpUploadPending; }
+
   diagnostics(): string[] {
     const connMetrics = this.conn?.getMetricsSnapshot().snapshot ?? null;
     const audioMetrics = this.audioOutput?.getMetricsSnapshot().snapshot ?? null;
@@ -298,7 +382,7 @@ export class ClientSession {
       `conn ${this.connState} · ready ${connMetrics?.isReady ? 'yes' : '-'}`,
       `metrics conn ${connMetrics ? 'yes' : '-'} · ${formatDuration(connMetrics?.connectDurationMs)}`,
       `audio ${this.audioState} · ${formatRate(audioMetrics?.audioInputBitrateKbps)}`,
-      `video ${this.videoState} · ${formatFps(videoMetrics?.videoRenderFps)}`,
+      `video ${this.selectedVideoStreamId === null ? '未配置' : this.videoStates.get(this.selectedVideoStreamId) ?? TiRtcVideoOutputState.idle} · ${formatFps(videoMetrics?.videoRenderFps)}`,
       `render ${formatSize(renderSize)} · first ${this.firstVideoRendered ? 'yes' : 'no'}`,
       `debug a:${audioDebug?.codec ?? '-'} v:${videoDebug?.codec ?? '-'} ${formatSize(videoDebugSize(videoDebug))}`,
     ];
@@ -338,12 +422,19 @@ export class ClientSession {
   }
 
   async stop() {
+    this.generation += 1;
+    if (this.rawDump !== null) {
+      await this.rawDump.stop();
+      this.rawDump = null;
+    }
+    this.rawDumpUploadPending = false;
     if (this.recordingTask !== null) {
       const result = await this.recordingTask.stop();
       if (result.success && result.data !== null) {
         this.ownedMediaFiles.add(result.data);
       }
       this.recordingTask = null;
+      this.recordingTargetId = null;
     }
     for (const file of this.ownedMediaFiles) {
       if (await file.delete() === 0) {
@@ -351,26 +442,29 @@ export class ClientSession {
       }
     }
     if (this.ownedMediaFiles.size === 0) this.latestMediaFile = null;
+    this.latestMediaTargetId = null;
     this.stopRenderPoll();
     this.streamMessageOverlay.clear();
     await this.stopTalkback();
     this.unsubscribeDownlink();
     this.audioOutput?.detach();
-    this.videoOutput?.detach();
+    for (const output of this.videoOutputs.values()) output.detach();
     this.conn?.disconnect();
     this.audioOutput?.dispose();
-    this.videoOutput?.dispose();
+    for (const output of this.videoOutputs.values()) output.dispose();
     this.conn?.dispose();
     this.audioOutput = null;
     this.audioOutputMuted = false;
-    this.videoOutput = null;
+    this.videoOutputs.clear();
     this.conn = null;
     this.downlinkStreams = null;
     this.downlinkSubscribed = false;
-    this.renderSize = null;
+    this.renderSizes.clear();
+    this.videoErrors.clear();
     this.connState = TiRtcConnState.idle;
     this.audioState = TiRtcAudioOutputState.idle;
-    this.videoState = TiRtcVideoOutputState.idle;
+    this.videoStates.clear();
+    this.selectedVideoStreamId = null;
     this.setTalkbackState(TiRtcInputState.idle);
     this.firstVideoRendered = false;
     this.pendingLocalEchoReplies = 0;
@@ -384,8 +478,10 @@ export class ClientSession {
       this.recordingTask = null;
       if (result.success && result.data !== null) {
         this.latestMediaFile = result.data;
+        this.latestMediaTargetId = this.recordingTargetId;
         this.ownedMediaFiles.add(result.data);
       }
+      this.recordingTargetId = null;
       return result.success ? `本地保存完成 · ${result.data?.path ?? ''}` : `本地保存失败 · #${result.code ?? 0}`;
     }
     const connection = this.conn;
@@ -396,25 +492,52 @@ export class ClientSession {
     if (streams === null) {
       return '开始本地保存失败 · 流未就绪';
     }
+    const streamId = this.selectedVideoStreamId;
+    if (streamId === null) return '开始本地保存失败 · 未选择视频';
+    if (this.videoStateFor(streamId) !== TiRtcVideoOutputState.rendering) {
+      return '开始本地保存失败 · 视频未就绪';
+    }
     const result = connection.startRecording({
-      videoStreamId: streams.video,
-      audioStreamId: streams.audio,
+      videoStreamId: streamId,
+      audioStreamId: streams.audio ?? undefined,
     });
     if (!result.success || result.data === null) {
       return `开始本地保存失败 · #${result.code ?? 0}`;
     }
     this.recordingTask = result.data;
+    this.recordingTargetId = streamId;
     return '正在本地保存';
   }
 
   async takeSnapshot(): Promise<string> {
-    const result = await this.videoOutput?.takeSnapshot();
+    const streamId = this.selectedVideoStreamId;
+    if (streamId === null || this.videoStateFor(streamId) !== TiRtcVideoOutputState.rendering) return '';
+    const output = this.videoOutputs.get(streamId);
+    const result = await output?.takeSnapshot();
     if (result?.success === true && result.data !== null) {
       this.latestMediaFile = result.data;
+      this.latestMediaTargetId = streamId;
       this.ownedMediaFiles.add(result.data);
       return result.data.path;
     }
     return '';
+  }
+
+  selectVideoStream(streamId: number): void {
+    if (this.videoOutputs.has(streamId)) this.selectedVideoStreamId = streamId;
+  }
+
+  videoStateFor(streamId: number): TiRtcVideoOutputState {
+    return this.videoStates.get(streamId) ?? TiRtcVideoOutputState.idle;
+  }
+
+  videoFailureFor(streamId: number): string {
+    const code = this.videoErrors.get(streamId);
+    return code === undefined ? '播放失败' : `播放失败 · ${TiRtc.formatError(code)}`;
+  }
+
+  renderSizeFor(streamId: number): TiRtcSize | null {
+    return this.renderSizes.get(streamId) ?? null;
   }
 
   async moveLatestMediaToGallery(): Promise<boolean> {
@@ -422,7 +545,7 @@ export class ClientSession {
     if (!await prepareGalleryWritePermission()) return false;
     const file = this.latestMediaFile;
     const result = await file.moveToGallery(
-      galleryFileName('durationMs' in file ? 'mp4' : 'jpg'),
+      galleryFileName('durationMs' in file ? 'mp4' : 'jpg', this.latestMediaTargetId ?? undefined),
     );
     if (result.success) this.ownedMediaFiles.delete(file);
     return result.success;
@@ -443,14 +566,15 @@ export class ClientSession {
   private startRenderPoll() {
     this.stopRenderPoll();
     this.renderPoll = setInterval(() => {
-      const output = this.videoOutput;
-      if (!output) {
+      if (this.videoOutputs.size === 0) {
         this.stopRenderPoll();
         return;
       }
-      const size = validSize(output.renderSize) ?? this.debugRenderSize(output);
-      if (output.state === TiRtcVideoOutputState.rendering || this.hasVideoRendered(output) || size !== null) {
-        this.markVideoRendering(size);
+      for (const [streamId, output] of this.videoOutputs) {
+        const size = validSize(output.renderSize) ?? this.debugRenderSize(output);
+        if (output.state === TiRtcVideoOutputState.rendering || this.hasVideoRendered(output) || size !== null) {
+          this.markVideoRendering(streamId, size);
+        }
       }
     }, 500);
   }
@@ -475,29 +599,29 @@ export class ClientSession {
     if (this.connState !== TiRtcConnState.connected || this.conn === null || this.downlinkStreams === null) {
       return 0;
     }
-    const audioCode = this.conn.subscribeAudio(this.downlinkStreams.audio);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_subscribe_audio_done code=${audioCode} stream_id=${this.downlinkStreams.audio}`,
-    );
-    if (audioCode !== 0) {
-      return audioCode;
+    if (this.downlinkStreams.audio !== null && this.audioOutput !== null) {
+      const audioCode = this.conn.subscribeAudio(this.downlinkStreams.audio);
+      if (audioCode !== 0) {
+        const audioOutput = this.audioOutput;
+        this.audioOutput = null;
+        this.audioState = TiRtcAudioOutputState.failed;
+        audioOutput.detach();
+        audioOutput.dispose();
+        this.setStatus(`音频订阅失败 · ${TiRtc.formatError(audioCode)}`);
+      }
     }
-    const videoCode = this.conn.subscribeVideo(this.downlinkStreams.video);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_subscribe_video_done code=${videoCode} stream_id=${this.downlinkStreams.video}`,
-    );
-    if (videoCode !== 0) {
-      return videoCode;
-    }
-    const keyFrameCode = this.conn.requestKeyFrame(this.downlinkStreams.video);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_request_key_frame_done code=${keyFrameCode} stream_id=${this.downlinkStreams.video}`,
-    );
-    if (keyFrameCode !== 0) {
-      return keyFrameCode;
+    for (const streamId of this.downlinkStreams.videos) {
+      if (this.videoStates.get(streamId) === TiRtcVideoOutputState.failed) continue;
+      const videoCode = this.conn.subscribeVideo(streamId);
+      if (videoCode !== 0) {
+        this.videoStates.set(streamId, TiRtcVideoOutputState.failed);
+        this.setStatus(`视频 ${streamId} 订阅失败 · ${TiRtc.formatError(videoCode)}`);
+        continue;
+      }
+      const keyFrameCode = this.conn.requestKeyFrame(streamId);
+      if (keyFrameCode !== 0) {
+        this.setStatus(`视频 ${streamId} 关键帧请求失败 · ${TiRtc.formatError(keyFrameCode)}`);
+      }
     }
     this.downlinkSubscribed = true;
     return 0;
@@ -507,26 +631,32 @@ export class ClientSession {
     if (this.conn === null || this.downlinkStreams === null) {
       return;
     }
-    const videoCode = this.conn.unsubscribeVideo(this.downlinkStreams.video);
-    const audioCode = this.conn.unsubscribeAudio(this.downlinkStreams.audio);
-    TiRtcLogging.i(
-      'TiRtcRnExample',
-      `client_unsubscribe_downlink_done audio_code=${audioCode} video_code=${videoCode}`,
-    );
+    for (const streamId of this.downlinkStreams.videos) this.conn.unsubscribeVideo(streamId);
+    if (this.downlinkStreams.audio !== null) this.conn.unsubscribeAudio(this.downlinkStreams.audio);
     this.downlinkSubscribed = false;
   }
 
-  private markVideoRendering(size: TiRtcSize | null) {
+  private retireAudioOutput(output: TiRtcAudioOutput) {
+    if (this.audioOutput !== output) return;
+    const audioStreamId = this.downlinkStreams?.audio;
+    if (this.conn !== null && audioStreamId !== null && audioStreamId !== undefined) {
+      this.conn.unsubscribeAudio(audioStreamId);
+    }
+    this.audioOutput = null;
+    output.detach();
+    output.dispose();
+  }
+
+  private markVideoRendering(streamId: number, size: TiRtcSize | null) {
     const nextSize = validSize(size);
     if (nextSize !== null) {
-      this.renderSize = nextSize;
+      this.renderSizes.set(streamId, nextSize);
       this.firstVideoRendered = true;
-      this.stopRenderPoll();
-      this.setStatus(`video rendering ${nextSize.width}x${nextSize.height}`);
+      this.setStatus(`video ${streamId} rendering ${nextSize.width}x${nextSize.height}`);
       return;
     }
     this.firstVideoRendered = true;
-    this.setStatus('video rendering');
+    this.setStatus(`video ${streamId} rendering`);
   }
 
   private setTalkbackState(state: TiRtcInputState) {

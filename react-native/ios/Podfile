@@ -20,7 +20,7 @@ if linkage != nil
 end
 
 target 'TiRtcExample' do
-  pod 'TiRTC', '2.4.2'
+  pod 'TiRTC', '2.5.0'
 
   config = use_native_modules!
 
@@ -29,6 +29,10 @@ target 'TiRtcExample' do
     # An absolute path to your application root.
     :app_path => "#{Pod::Config.instance.installation_root}/.."
   )
+
+  target 'TiRtcNativeLifecycleTests' do
+    inherit! :search_paths
+  end
 
   post_install do |installer|
     react_native_post_install(

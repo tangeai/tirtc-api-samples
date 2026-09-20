@@ -6,7 +6,7 @@ type LogUploadRunner = () => Promise<TiRtcLoggingUploadResult>;
 
 export function useExampleLogUpload(upload: LogUploadRunner): {
   uploadingLogs: boolean;
-  uploadLogs: () => void;
+  uploadLogs: () => Promise<boolean>;
 } {
   const uploadRef = useRef(upload);
   const runningRef = useRef(false);
@@ -16,20 +16,30 @@ export function useExampleLogUpload(upload: LogUploadRunner): {
     uploadRef.current = upload;
   }, [upload]);
 
-  const uploadLogs = useCallback(() => {
+  const pendingRef = useRef<Promise<boolean> | null>(null);
+  const uploadLogs = useCallback((): Promise<boolean> => {
     if (runningRef.current) {
-      return;
+      return pendingRef.current ?? Promise.resolve(false);
     }
     runningRef.current = true;
     setUploadingLogs(true);
-    Promise.resolve()
+    const pending = Promise.resolve()
       .then(() => uploadRef.current())
-      .then(showLogUploadResult)
-      .catch(showLogUploadFailure)
+      .then((result) => {
+        showLogUploadResult(result);
+        return result.code === 0;
+      })
+      .catch(() => {
+        showLogUploadFailure();
+        return false;
+      })
       .finally(() => {
         runningRef.current = false;
+        pendingRef.current = null;
         setUploadingLogs(false);
       });
+    pendingRef.current = pending;
+    return pending;
   }, []);
 
   return {uploadingLogs, uploadLogs};

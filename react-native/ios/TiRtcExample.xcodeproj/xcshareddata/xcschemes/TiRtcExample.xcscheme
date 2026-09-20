@@ -38,6 +38,16 @@
                ReferencedContainer = "container:TiRtcExample.xcodeproj">
             </BuildableReference>
          </TestableReference>
+         <TestableReference
+            skipped = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "0265F58BEFED16EA5679CDDC"
+               BuildableName = "TiRtcNativeLifecycleTests.xctest"
+               BlueprintName = "TiRtcNativeLifecycleTests"
+               ReferencedContainer = "container:TiRtcExample.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
    </TestAction>
    <LaunchAction

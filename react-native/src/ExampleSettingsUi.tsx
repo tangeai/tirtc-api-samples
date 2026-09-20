@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   Modal,
+  Platform,
   Pressable,
   StyleSheet,
   Switch,
@@ -106,7 +107,8 @@ export function PreferenceSheet({
       transparent
       animationType="slide"
       onRequestClose={onClose}>
-      <Pressable style={styles.modalBackdrop} onPress={onClose}>
+      <View style={styles.modalBackdrop}>
+        <Pressable accessibilityRole="button" accessibilityLabel="TiRTC Settings Sheet Cancel" style={styles.dismissScrim} onPress={onClose} />
         <Pressable style={styles.sheet} onPress={(event) => event.stopPropagation()}>
           <Text style={styles.sheetTitle}>{state.title}</Text>
           {state.options.map((option) => (
@@ -125,7 +127,7 @@ export function PreferenceSheet({
             </Pressable>
           ))}
         </Pressable>
-      </Pressable>
+      </View>
     </Modal>
   );
 }
@@ -165,10 +167,10 @@ export function StreamIdDialog({
             style={styles.dialogInput}
           />
           <View style={styles.dialogActions}>
-            <Pressable style={styles.dialogButton} onPress={onCancel}>
+            <Pressable accessibilityRole="button" accessibilityLabel="TiRTC Settings Stream ID Cancel" style={styles.dialogButton} onPress={onCancel}>
               <Text style={styles.dialogButtonText}>取消</Text>
             </Pressable>
-            <Pressable style={[styles.dialogButton, styles.dialogPrimaryButton]} onPress={onSave}>
+            <Pressable accessibilityRole="button" accessibilityLabel="TiRTC Settings Stream ID Save" style={[styles.dialogButton, styles.dialogPrimaryButton]} onPress={onSave}>
               <Text style={[styles.dialogButtonText, styles.dialogPrimaryButtonText]}>保存</Text>
             </Pressable>
           </View>
@@ -248,6 +250,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
     backgroundColor: 'rgba(0,0,0,0.22)',
   },
+  dismissScrim: {position: 'absolute', left: 0, right: 0, top: 0, bottom: 0},
   sheet: {
     borderTopLeftRadius: 22,
     borderTopRightRadius: 22,
@@ -263,7 +266,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   optionRow: {
-    minHeight: 52,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
@@ -301,7 +304,8 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   dialogButton: {
-    minHeight: 40,
+    minWidth: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     borderRadius: 18,
     paddingHorizontal: 16,
     alignItems: 'center',

@@ -3,7 +3,6 @@ import {
   TiRtcAudioAgcLevel,
   TiRtcAudioAnsLevel,
   TiRtcAudioChannelCount,
-  TiRtcAudioCodec,
   TiRtcAudioSampleRate,
   TiRtcOutputBufferStrategy,
   type TiRtcAudioInputOptions,
@@ -17,9 +16,9 @@ type ExampleMediaModule = Readonly<{
   requestGalleryWritePermission(): Promise<boolean>;
 }>;
 
-export function galleryFileName(extension: 'mp4' | 'jpg', now: Date = new Date()): string {
+export function galleryFileName(extension: 'mp4' | 'jpg', targetId?: number, now: Date = new Date()): string {
   const part = (value: number, width: number) => value.toString().padStart(width, '0');
-  return `客厅角落摄像头-${part(now.getFullYear(), 4)}-${part(now.getMonth() + 1, 2)}-${part(now.getDate(), 2)}-`
+  return `客厅角落摄像头${targetId === undefined ? '' : `-${targetId}`}-${part(now.getFullYear(), 4)}-${part(now.getMonth() + 1, 2)}-${part(now.getDate(), 2)}-`
     + `${part(now.getHours(), 2)}-${part(now.getMinutes(), 2)}-${part(now.getSeconds(), 2)}-`
     + `${part(now.getMilliseconds(), 3)}.${extension}`;
 }
@@ -63,7 +62,7 @@ export function outputBufferStrategyFromConfig(value: string): TiRtcOutputBuffer
 
 export function localAudioInputOptionsFromConfig(config: ExampleConfig): TiRtcAudioInputOptions {
   return {
-    codec: audioCodecFromConfig(config.localAudioCodec),
+    media: audioMediaFromConfig(config.localAudioCodec),
     sampleRate:
       config.localAudioSampleRateHz === '8000' ? TiRtcAudioSampleRate.rate8k : TiRtcAudioSampleRate.rate16k,
     channels: TiRtcAudioChannelCount.mono,
@@ -73,18 +72,18 @@ export function localAudioInputOptionsFromConfig(config: ExampleConfig): TiRtcAu
   };
 }
 
-function audioCodecFromConfig(value: string): TiRtcAudioCodec {
+function audioMediaFromConfig(value: string): number {
   switch (value) {
     case 'aac':
-      return TiRtcAudioCodec.aac;
+      return 3;
     case 'pcm':
-      return TiRtcAudioCodec.pcm;
+      return 1;
     case 'opus':
-      return TiRtcAudioCodec.opus;
+      return 4;
     case 'amr':
-      return TiRtcAudioCodec.amr;
+      return 5;
     default:
-      return TiRtcAudioCodec.g711a;
+      return 2;
   }
 }
 

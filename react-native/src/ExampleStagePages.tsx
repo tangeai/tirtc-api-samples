@@ -1,5 +1,5 @@
-import React, {useCallback, useEffect, useState} from 'react';
-import {PermissionsAndroid, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
+import {PermissionsAndroid, Platform, Pressable, StyleSheet, Text, useWindowDimensions, View} from 'react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
 import {Camera} from 'react-native-vision-camera';
 import {CommandPanelSheet} from './ExampleCommandPanel';
@@ -8,9 +8,10 @@ import {DownlinkMetricsOverlay} from './ExampleDownlinkMetricsOverlay';
 import type {DownlinkMetricsOverlayModel} from './ExampleDownlinkMetricsOverlayModel';
 import {useExampleLogUpload} from './ExampleLogUpload';
 import {StreamMessageBubble} from './ExampleStreamMessageBubble';
+import {PlaybackActionMenu} from './ExamplePlaybackMenu';
 import {
   DiagnosticsPanel,
-  OutlineButton,
+  RawDumpStageControl,
   StageControlButton,
   TopBar,
   VideoStage,
@@ -19,6 +20,7 @@ import {
 } from './ExampleUi';
 import {validSize} from './ExampleSessionShared';
 import type {ExampleConfig} from './ExampleTypes';
+import {TiRtcVideoOutputState} from 'tirtc-react-native';
 
 export function PlayerScreen({
   config,
@@ -32,21 +34,60 @@ export function PlayerScreen({
   onBack: () => void;
 }) {
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
   const controlBottom = stageControlBottom(insets.bottom);
-  const renderSize = validSize(session.renderSize ?? session.videoOutput?.renderSize ?? null);
-  const failed = isPlayerFailed(status);
+  const videoStreamIds = [...session.videoOutputs.keys()];
+  const [selectedVideoStreamId, setSelectedVideoStreamId] = useState<number | null>(session.selectedVideoStreamId);
+  const [maximizedVideoStreamId, setMaximizedVideoStreamId] = useState<number | null>(null);
   const [commandPanelVisible, setCommandPanelVisible] = useState(false);
+  const moreButtonRef = useRef<View | null>(null);
   const [talkbackRunning, setTalkbackRunning] = useState(session.talkbackRunning);
   const [talkbackBusy, setTalkbackBusy] = useState(false);
   const [audioMuted, setAudioMuted] = useState(session.audioOutputMuted);
   const [recording, setRecording] = useState(session.recordingTask !== null);
   const [mediaBusy, setMediaBusy] = useState(false);
+  const [rawDumpBusy, setRawDumpBusy] = useState(false);
+  const [rawDumpCapturing, setRawDumpCapturing] = useState(false);
+  const [rawDumpUploadPending, setRawDumpUploadPending] = useState(false);
   const [mediaStatus, setMediaStatus] = useState<string | null>(null);
   const [metricsOverlay, setMetricsOverlay] = useState<DownlinkMetricsOverlayModel | null>(null);
   const runLogUpload = useCallback(() => session.uploadLogs(), [session]);
   const {uploadingLogs, uploadLogs} = useExampleLogUpload(runLogUpload);
   const metricsTop = stageMetricsTop(insets.top);
   const notice = playerStageNotice(status);
+  const selectedVideoReady = selectedVideoStreamId !== null &&
+    session.videoStateFor(selectedVideoStreamId) === TiRtcVideoOutputState.rendering;
+  const compact = window.width < 600;
+  const primaryVideoStreamId = videoStreamIds.find((streamId) => streamId === selectedVideoStreamId)
+    ?? videoStreamIds[0]
+    ?? null;
+  const secondaryVideoStreamIds = videoStreamIds.filter((streamId) => streamId !== primaryVideoStreamId);
+  const sessionSelectedVideoStreamId = session.selectedVideoStreamId;
+  const videoLaneLayout = (streamId: number) => {
+    if (maximizedVideoStreamId !== null) {
+      return streamId === maximizedVideoStreamId ? styles.videoLaneFill : styles.videoLaneParked;
+    }
+    if (streamId === primaryVideoStreamId) {
+      if (secondaryVideoStreamIds.length === 0) return styles.videoLaneFill;
+      return compact ? styles.videoLanePrimaryCompact : styles.videoLanePrimaryWide;
+    }
+    const secondaryIndex = secondaryVideoStreamIds.indexOf(streamId);
+    if (compact) {
+      if (secondaryVideoStreamIds.length === 1) return styles.videoLaneSecondaryCompactSingle;
+      return secondaryIndex === 0
+        ? styles.videoLaneSecondaryCompactLeading
+        : styles.videoLaneSecondaryCompactTrailing;
+    }
+    if (secondaryVideoStreamIds.length === 1) return styles.videoLaneSecondaryWideSingle;
+    return secondaryIndex === 0
+      ? styles.videoLaneSecondaryWideLeading
+      : styles.videoLaneSecondaryWideTrailing;
+  };
+  useEffect(() => {
+    if (sessionSelectedVideoStreamId !== null) {
+      setSelectedVideoStreamId((current) => current ?? sessionSelectedVideoStreamId);
+    }
+  }, [sessionSelectedVideoStreamId]);
   useEffect(() => {
     setTalkbackRunning(session.talkbackRunning);
     session.onTalkbackStateChanged = setTalkbackRunning;
@@ -66,6 +107,20 @@ export function PlayerScreen({
       clearInterval(timer);
     };
   }, [config.videoDecoderPreference, session]);
+  const toggleRawDump = async () => {
+    if (rawDumpBusy || uploadingLogs) return;
+    setRawDumpBusy(true);
+    const result = await session.toggleRawDump();
+    setRawDumpCapturing(result.capturing);
+    setMediaStatus(result.status);
+    setRawDumpBusy(false);
+    if (result.upload) {
+      const success = await uploadLogs();
+      session.finishRawDumpUpload(success);
+      setRawDumpUploadPending(session.isRawDumpUploadPending());
+      setMediaStatus(success ? '诊断数据上传成功' : '诊断数据上传失败 · 点击重试上传');
+    }
+  };
   const toggleTalkback = async () => {
     if (talkbackBusy) {
       return;
@@ -132,29 +187,90 @@ export function PlayerScreen({
       setMediaBusy(false);
     }
   };
+  const renderVideoLane = (streamId: number) => {
+    const output = session.videoOutputs.get(streamId)!;
+    const state = session.videoStateFor(streamId);
+    const size = validSize(session.renderSizeFor(streamId) ?? output.renderSize);
+    const selected = selectedVideoStreamId === streamId;
+    const laneFailed = state === TiRtcVideoOutputState.failed;
+    const rendered = state === TiRtcVideoOutputState.rendering || size !== null;
+    const laneStatus = laneFailed
+      ? session.videoFailureFor(streamId)
+      : state === TiRtcVideoOutputState.rendering
+        ? '播放中'
+        : state === TiRtcVideoOutputState.buffering
+          ? '缓冲中'
+          : '等待视频';
+    return (
+      <View collapsable={false} style={[styles.videoTile, selected ? styles.videoTileSelected : null]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={`Video Stream ${streamId}`}
+          accessibilityValue={{text: laneStatus}}
+          accessibilityState={{selected}}
+          testID={`video-stream-${streamId}`}
+          onPress={() => {
+            if (selected) {
+              setMaximizedVideoStreamId((current) => current === streamId ? null : streamId);
+            } else {
+              session.selectVideoStream(streamId);
+              setSelectedVideoStreamId(streamId);
+            }
+          }}
+          onLongPress={() => setMaximizedVideoStreamId((current) => current === streamId ? null : streamId)}
+          style={styles.videoTileContent}>
+          {output.view({style: styles.videoView})}
+          {laneFailed || !rendered ? (
+            <View pointerEvents="none" style={styles.videoLaneOverlay}>
+              <Text style={styles.videoLaneStatus}>{laneStatus}</Text>
+            </View>
+          ) : null}
+          <Text style={styles.videoLaneLabel}>视频 {videoStreamIds.indexOf(streamId) + 1} · Stream {streamId}</Text>
+        </Pressable>
+      </View>
+    );
+  };
   return (
     <View style={styles.stageRoot}>
-      <VideoStage
-        label={playerStageLabel(status)}
-        failed={failed}
-        showOverlay={shouldShowPlayerStageOverlay(status, renderSize)}>
-        {session.videoOutput?.view({style: styles.videoView})}
-      </VideoStage>
-      <TopBar title={config.remoteId || 'TiRTC Player'} onBack={onBack}>
-        <OutlineButton
-          label="发送命令"
-          accessibilityLabel="TiRTC Player Send Command"
-          compact
-          onPress={() => setCommandPanelVisible(true)}
-        />
-        <OutlineButton
-          label={uploadingLogs ? '上传中' : '上传日志'}
-          accessibilityLabel="TiRTC Player Upload Logs"
-          busy={uploadingLogs}
-          compact
-          onPress={uploadLogs}
-        />
-      </TopBar>
+      <View style={styles.videoGrid}>
+        {videoStreamIds.length === 0 ? (
+          <VideoStage
+            label={config.audioStreamId.trim().length === 0
+              ? '未配置音视频'
+              : session.audioOutput === null ? '音频不可用' : '仅音频播放'}
+            showOverlay
+            failed={false}
+          />
+        ) : (
+          <View style={styles.mosaic}>
+            {videoStreamIds.map((streamId) => {
+              const parked = maximizedVideoStreamId !== null && streamId !== maximizedVideoStreamId;
+              return (
+                <View
+                  key={streamId}
+                  collapsable={false}
+                  pointerEvents={parked ? 'none' : 'auto'}
+                  accessibilityElementsHidden={parked}
+                  importantForAccessibility={parked ? 'no-hide-descendants' : 'auto'}
+                  style={videoLaneLayout(streamId)}>
+                  {renderVideoLane(streamId)}
+                </View>
+              );
+            })}
+          </View>
+        )}
+      </View>
+      <TopBar title={config.remoteId || 'TiRTC Player'} onBack={onBack} />
+      {selectedVideoStreamId !== null ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={maximizedVideoStreamId === selectedVideoStreamId ? '返回宫格' : '放大视频'}
+          testID={maximizedVideoStreamId === selectedVideoStreamId ? 'video-grid-restore' : 'video-maximize'}
+          onPress={() => setMaximizedVideoStreamId((current) => current === selectedVideoStreamId ? null : selectedVideoStreamId)}
+          style={[styles.maximizeButton, {top: insets.top + 76}]}>
+          <Text style={styles.maximizeButtonText}>{maximizedVideoStreamId === selectedVideoStreamId ? '宫格' : '放大'}</Text>
+        </Pressable>
+      ) : null}
       {metricsOverlay !== null ? (
         <View style={[styles.metricsWrap, {top: metricsTop}]}>
           <DownlinkMetricsOverlay metrics={metricsOverlay} />
@@ -169,11 +285,23 @@ export function PlayerScreen({
         </View>
       )}
       {notice ? (
-        <Text style={[styles.stageNotice, {bottom: controlBottom + STAGE_NOTICE_OFFSET}]}>
+        <Text
+          testID="tirtc-player-status"
+          accessible
+          accessibilityLabel="TiRTC Player Status"
+          accessibilityValue={{text: notice}}
+          style={[styles.stageNotice, {bottom: controlBottom + STAGE_NOTICE_OFFSET}]}>
           {notice}
         </Text>
       ) : null}
       {mediaStatus ? <Text style={[styles.stageNotice, {bottom: controlBottom + STAGE_NOTICE_OFFSET}]}>{mediaStatus}</Text> : null}
+      <RawDumpStageControl
+        capturing={rawDumpCapturing}
+        uploadPending={rawDumpUploadPending}
+        busy={rawDumpBusy || uploadingLogs}
+        accessibilityLabel="TiRTC Player Raw Dump"
+        onPress={() => void toggleRawDump()}
+      />
       <View
         style={[
           styles.streamMessageBubbleWrap,
@@ -182,29 +310,46 @@ export function PlayerScreen({
         ]}>
         <StreamMessageBubble text={session.streamMessageText} />
       </View>
-      <View style={[styles.stageControls, {bottom: controlBottom}]}>
+      <View testID="tirtc-player-control-surface" collapsable={false} style={[styles.stageControls, {bottom: controlBottom}]}>
         <View style={styles.stageControlRow}>
-          <MediaActionButton symbol={recording ? '◉' : '●'} label={recording ? '停止本地保存' : '开始本地保存'} disabled={mediaBusy} onPress={toggleRecording} />
-          <MediaActionButton symbol="▣" label="截图" disabled={mediaBusy} onPress={takeSnapshot} />
-          <MediaActionButton symbol="▧" label="保存到系统相册" disabled={mediaBusy} onPress={moveLatestMediaToGallery} />
           <StageControlButton
-            label={audioMuted ? '恢复声音' : '静音'}
+            playbackProfile
+            compactPlayback={compact}
+            label={compact ? '音' : (audioMuted ? '恢复声音' : '静音')}
             accessibilityLabel={audioMuted ? 'TiRTC Player Restore Audio' : 'TiRTC Player Mute Audio'}
             tone={audioMuted ? 'primary' : 'surface'}
+            busy={session.audioOutput === null}
             onPress={toggleAudioOutputMuted}
           />
           <StageControlButton
-            label={talkbackBusy ? '处理中' : talkbackRunning ? '停止麦克风' : '启动麦克风'}
+            playbackProfile
+            compactPlayback={compact}
+            label={compact ? '麦' : (talkbackBusy ? '处理中' : talkbackRunning ? '停止麦克风' : '启动麦克风')}
             accessibilityLabel={talkbackRunning ? 'TiRTC Player Stop Talkback' : 'TiRTC Player Start Talkback'}
             tone={talkbackRunning ? 'primary' : 'surface'}
             busy={talkbackBusy}
             onPress={toggleTalkback}
           />
           <StageControlButton
-            label="停止播放"
+            playbackProfile
+            compactPlayback={compact}
+            label={compact ? '■' : '停止播放'}
             accessibilityLabel="TiRTC Player Stop"
             tone="danger"
             onPress={onBack}
+          />
+          <PlaybackActionMenu
+            accessibilityLabel="TiRTC Player More"
+            triggerRef={moreButtonRef}
+            actions={[
+              {label: '发送命令', accessibilityLabel: 'TiRTC Player Send Command', onPress: () => setCommandPanelVisible(true)},
+              ...(videoStreamIds.length > 0 ? [
+                {label: recording ? '停止本地保存' : `开始本地保存 · ${selectedVideoStreamId ?? ''}`, accessibilityLabel: 'TiRTC Player Recording', disabled: mediaBusy || (!recording && !selectedVideoReady), onPress: () => void toggleRecording()},
+                {label: `截图 · ${selectedVideoStreamId ?? ''}`, accessibilityLabel: 'TiRTC Player Snapshot', disabled: mediaBusy || !selectedVideoReady, onPress: () => void takeSnapshot()},
+                {label: '保存到系统相册', accessibilityLabel: 'TiRTC Player Save Gallery', disabled: mediaBusy || !session.hasLatestMedia, onPress: () => void moveLatestMediaToGallery()},
+              ] : []),
+              {label: uploadingLogs ? '上传中…' : '上传日志', accessibilityLabel: 'TiRTC Player Upload Logs', disabled: uploadingLogs, onPress: uploadLogs},
+            ]}
           />
         </View>
       </View>
@@ -215,26 +360,13 @@ export function PlayerScreen({
         events={session.commandEvents}
         onClose={() => setCommandPanelVisible(false)}
         onSendCommand={(commandId, payload) => session.sendCommand(commandId, payload)}
+        returnFocusRef={moreButtonRef}
       />
     </View>
   );
 }
 
-function MediaActionButton({symbol, label, disabled, onPress}: {
-  symbol: string;
-  label: string;
-  disabled: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable accessibilityRole="button" accessibilityLabel={label} disabled={disabled} onPress={onPress}
-      style={({pressed}) => [styles.mediaAction, (disabled || pressed) && styles.mediaActionDimmed]}>
-      <Text style={styles.mediaActionSymbol}>{symbol}</Text>
-    </Pressable>
-  );
-}
-
-const STAGE_CONTROL_BOTTOM_GAP = 28;
+const STAGE_CONTROL_BOTTOM_GAP = Platform.OS === 'ios' ? 0 : 8;
 const STREAM_MESSAGE_OFFSET = 62;
 const STAGE_NOTICE_OFFSET = 74;
 const STAGE_METRICS_TOP_GAP = 78;
@@ -245,35 +377,6 @@ function stageControlBottom(safeAreaBottom: number): number {
 
 function stageMetricsTop(safeAreaTop: number): number {
   return Math.max(safeAreaTop, 0) + STAGE_METRICS_TOP_GAP;
-}
-
-function playerStageLabel(status: string): string {
-  if (isPlayerFailed(status)) {
-    return '启动失败';
-  }
-  if (status.includes('rendering') || status.includes('playing')) {
-    return '播放中';
-  }
-  if (status.startsWith('stream message')) {
-    return '播放中';
-  }
-  return '连接中';
-}
-
-function shouldShowPlayerStageOverlay(
-  status: string,
-  renderSize: {width: number; height: number} | null,
-): boolean {
-  if (isPlayerFailed(status)) {
-    return true;
-  }
-  if (status.includes('video rendering')) {
-    return false;
-  }
-  if (renderSize !== null) {
-    return false;
-  }
-  return true;
 }
 
 function isPlayerFailed(status: string): boolean {
@@ -302,30 +405,46 @@ const styles = StyleSheet.create({
     width: '100%',
     height: '100%',
   },
+  videoGrid: {flex: 1, backgroundColor: exampleTheme.videoBackground},
+  mosaic: {flex: 1, position: 'relative'},
+  videoLaneFill: {position: 'absolute', left: 0, right: 0, top: 0, bottom: 0},
+  videoLanePrimaryCompact: {position: 'absolute', left: 0, right: 0, top: 0, bottom: '33.333%'},
+  videoLanePrimaryWide: {position: 'absolute', left: 0, right: '33.333%', top: 0, bottom: 0},
+  videoLaneSecondaryCompactSingle: {position: 'absolute', left: 0, right: 0, top: '66.667%', bottom: 0},
+  videoLaneSecondaryCompactLeading: {position: 'absolute', left: 0, width: '50%', top: '66.667%', bottom: 0},
+  videoLaneSecondaryCompactTrailing: {position: 'absolute', left: '50%', right: 0, top: '66.667%', bottom: 0},
+  videoLaneSecondaryWideSingle: {position: 'absolute', left: '66.667%', right: 0, top: 0, bottom: 0},
+  videoLaneSecondaryWideLeading: {position: 'absolute', left: '66.667%', right: 0, top: 0, height: '50%'},
+  videoLaneSecondaryWideTrailing: {position: 'absolute', left: '66.667%', right: 0, top: '50%', bottom: 0},
+  videoLaneParked: {position: 'absolute', left: -2, top: -2, width: 1, height: 1, opacity: 0},
+  videoTile: {flex: 1, position: 'relative', overflow: 'hidden', backgroundColor: '#252525', borderWidth: 2, borderColor: 'transparent'},
+  videoTileContent: {flex: 1, position: 'relative'},
+  videoTileSelected: {borderColor: '#659287'},
+  videoLaneOverlay: {position: 'absolute', left: 0, right: 0, top: 0, bottom: 0, alignItems: 'center', justifyContent: 'center', backgroundColor: '#252525'},
+  videoLaneStatus: {color: '#CCFFFFFF', fontSize: 13},
+  videoLaneLabel: {position: 'absolute', left: 8, top: 8, zIndex: 1, elevation: 1, color: '#FFFFFF', backgroundColor: '#75000000', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4, fontSize: 11},
+  maximizeButton: {position: 'absolute', right: 8, zIndex: 11, elevation: 11, minWidth: Platform.OS === 'ios' ? 44 : 48, minHeight: Platform.OS === 'ios' ? 44 : 48, alignItems: 'center', justifyContent: 'center', backgroundColor: '#75000000', borderRadius: 10, paddingHorizontal: 8, paddingVertical: 4},
+  maximizeButtonText: {color: '#FFFFFF', fontSize: 11},
   stageControls: {
     position: 'absolute',
-    right: 20,
+    left: 12,
+    right: 12,
     zIndex: 10,
     elevation: 10,
     alignItems: 'flex-end',
+    padding: Platform.OS === 'ios' ? 4 : 8,
+    borderRadius: Platform.OS === 'ios' ? 12 : 20,
+    backgroundColor: Platform.OS === 'ios' ? 'rgba(37,37,37,0.72)' : 'rgba(37,37,37,0.92)',
   },
   stageControlRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
+    width: '100%',
+    maxWidth: 620,
+    alignSelf: 'center',
     justifyContent: 'flex-end',
     alignItems: 'center',
-    gap: 12,
+    gap: Platform.OS === 'ios' ? 6 : 8,
   },
-  mediaAction: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: '#D9E5E2',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  mediaActionDimmed: {opacity: 0.55},
-  mediaActionSymbol: {color: '#659287', fontSize: 18, fontWeight: '700'},
   streamMessageBubbleWrap: {
     position: 'absolute',
     right: 20,

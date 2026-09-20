@@ -1,4 +1,4 @@
-import {StyleSheet} from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 import {exampleTheme} from './ExampleUi';
 
 export const commandPanelStyles = StyleSheet.create({
@@ -12,15 +12,14 @@ export const commandPanelStyles = StyleSheet.create({
     right: 0,
     bottom: 0,
     left: 0,
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(0,0,0,0.34)',
   },
   sheet: {
-    height: '50%',
-    borderTopLeftRadius: 16,
-    borderTopRightRadius: 16,
     backgroundColor: exampleTheme.background,
     overflow: 'hidden',
   },
+  sheetCompact: {maxHeight: '82%', borderTopLeftRadius: 22, borderTopRightRadius: 22},
+  sheetWide: {width: '94%', maxWidth: 620, maxHeight: '78%', alignSelf: 'center', marginBottom: 40, borderRadius: 22},
   header: {
     minHeight: 56,
     flexDirection: 'row',
@@ -35,9 +34,9 @@ export const commandPanelStyles = StyleSheet.create({
     fontWeight: '600',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: Platform.OS === 'ios' ? 44 : 48,
+    height: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: Platform.OS === 'ios' ? 22 : 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -112,6 +111,7 @@ export const commandPanelStyles = StyleSheet.create({
   },
   modeButton: {
     minWidth: 58,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 10,
@@ -152,7 +152,7 @@ export const commandPanelStyles = StyleSheet.create({
     gap: 8,
   },
   presetChip: {
-    minHeight: 32,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: exampleTheme.inputBorder,
@@ -174,7 +174,7 @@ export const commandPanelStyles = StyleSheet.create({
   },
   sendButton: {
     minWidth: 96,
-    minHeight: 40,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     borderRadius: 20,
     backgroundColor: exampleTheme.primary,
     flexDirection: 'row',

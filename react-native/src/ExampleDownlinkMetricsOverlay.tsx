@@ -1,5 +1,5 @@
 import React, {useMemo, useState} from 'react';
-import {Alert, Pressable, StyleSheet, Text, View} from 'react-native';
+import {Alert, Platform, Pressable, StyleSheet, Text, View} from 'react-native';
 import {automationTestId, exampleTheme} from './ExampleUi';
 import {
   downlinkMetricsOverlayRows,
@@ -32,7 +32,7 @@ export const downlinkMetricsExplanationContent =
     '面板按秒刷新；还没有有效数据时显示“--”。';
 
 export function DownlinkMetricsOverlay({metrics}: {metrics: DownlinkMetricsOverlayModel}) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => downlinkMetricsOverlayRows(metrics), [metrics]);
   if (!expanded) {
     return (
@@ -45,7 +45,9 @@ export function DownlinkMetricsOverlay({metrics}: {metrics: DownlinkMetricsOverl
           onPress={() => setExpanded(true)}
           style={styles.collapsedButton}>
           <Text style={styles.collapsedIcon}>▥</Text>
-          <Text style={styles.collapsedText}>即时统计</Text>
+          <Text numberOfLines={1} style={styles.collapsedText}>
+            即时统计 · {rows[4]?.value ?? '--'} · {rows[1]?.value ?? '--'}
+          </Text>
         </Pressable>
       </View>
     );
@@ -129,9 +131,9 @@ const styles = StyleSheet.create({
     lineHeight: 13,
   },
   helpButton: {
-    width: 22,
-    height: 22,
-    borderRadius: 11,
+    minWidth: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: Platform.OS === 'ios' ? 22 : 24,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -142,8 +144,9 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   collapseButton: {
-    height: 18,
-    borderRadius: 12,
+    minWidth: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: Platform.OS === 'ios' ? 22 : 24,
     backgroundColor: '#4F86D9',
     flexDirection: 'row',
     alignItems: 'center',
@@ -160,7 +163,7 @@ const styles = StyleSheet.create({
   },
   collapseText: {
     color: '#FFFFFF',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
     lineHeight: 12,
   },
@@ -173,13 +176,13 @@ const styles = StyleSheet.create({
   },
   metricLabel: {
     color: '#659287',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '900',
     lineHeight: 12,
   },
   metricValue: {
     color: 'rgba(17,17,17,0.80)',
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '600',
     lineHeight: 12,
   },
@@ -187,8 +190,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   collapsedButton: {
-    height: 26,
-    borderRadius: 18,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    maxWidth: 620,
+    borderRadius: 22,
     backgroundColor: '#FFFFFF',
     flexDirection: 'row',
     alignItems: 'center',
@@ -208,7 +212,8 @@ const styles = StyleSheet.create({
   },
   collapsedText: {
     color: 'rgba(17,17,17,0.87)',
-    fontSize: 10,
+    flexShrink: 1,
+    fontSize: 12,
     fontWeight: '800',
     lineHeight: 12,
   },

@@ -13,7 +13,9 @@ export type ExampleConfig = {
   tokenServerAddress: string;
   tiCloudStorageToken: string;
   audioStreamId: string;
-  videoStreamId: string;
+  videoStreamIds: string[];
+  tiCloudStorageAudioChannelId: string;
+  tiCloudStorageVideoChannelIds: string[];
   videoDecoderPreference: VideoDecoderPreference;
   outputBufferPolicy: OutputBufferPolicy;
   consoleLogEnabled: boolean;
@@ -37,7 +39,9 @@ export const initialConfig: ExampleConfig = {
   tokenServerAddress: '',
   tiCloudStorageToken: '',
   audioStreamId: String(DEFAULT_DOWNLINK_AUDIO_STREAM_ID),
-  videoStreamId: String(DEFAULT_DOWNLINK_VIDEO_STREAM_ID),
+  videoStreamIds: [String(DEFAULT_DOWNLINK_VIDEO_STREAM_ID)],
+  tiCloudStorageAudioChannelId: String(DEFAULT_DOWNLINK_AUDIO_STREAM_ID),
+  tiCloudStorageVideoChannelIds: [String(DEFAULT_DOWNLINK_VIDEO_STREAM_ID)],
   videoDecoderPreference: 'auto',
   outputBufferPolicy: 'automatic',
   consoleLogEnabled: false,
@@ -56,11 +60,52 @@ export type ExampleScanPayload = Readonly<{
   endpoint?: string;
 }>;
 
-export function parseStreamIds(config: ExampleConfig): {audio: number; video: number} {
-  return {
-    audio: Number.parseInt(config.audioStreamId, 10) || DEFAULT_DOWNLINK_AUDIO_STREAM_ID,
-    video: Number.parseInt(config.videoStreamId, 10) || DEFAULT_DOWNLINK_VIDEO_STREAM_ID,
-  };
+export type MediaSelection = Readonly<{audio: number | null; videos: readonly number[]}>;
+
+export function parseStreamIds(config: ExampleConfig): MediaSelection {
+  return parseMediaSelection(config.audioStreamId, config.videoStreamIds, 15, 'Stream');
+}
+
+export function parseCloudStorageChannelIds(config: ExampleConfig): MediaSelection {
+  return parseMediaSelection(
+    config.tiCloudStorageAudioChannelId,
+    config.tiCloudStorageVideoChannelIds,
+    255,
+    'Channel',
+    true,
+  );
+}
+
+function parseMediaSelection(
+  audioText: string,
+  videoTexts: readonly string[],
+  maximum: number,
+  label: string,
+  allowAudioVideoMatch = false,
+): MediaSelection {
+  const audio = parseOptionalId(audioText, maximum, `Audio ${label} ID`);
+  if (videoTexts.length > 3) throw new Error('最多选择三路视频');
+  const videos = videoTexts
+    .filter((value) => value.trim().length > 0)
+    .map((value, index) => parseRequiredId(value, maximum, `Video ${label} ${index + 1} ID`));
+  if (new Set(videos).size !== videos.length) throw new Error(`Video ${label} IDs 不能重复`);
+  if (!allowAudioVideoMatch && audio !== null && videos.includes(audio)) {
+    throw new Error(`Audio 与 Video ${label} IDs 不能相同`);
+  }
+  return {audio, videos};
+}
+
+function parseOptionalId(value: string, maximum: number, label: string): number | null {
+  return value.trim().length === 0 ? null : parseRequiredId(value, maximum, label);
+}
+
+function parseRequiredId(value: string, maximum: number, label: string): number {
+  const normalized = value.trim();
+  const parsed = Number(normalized);
+  if (normalized.length === 0 || !Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
+    throw new Error(`${label} 必须是 0..${maximum} 的整数`);
+  }
+  return parsed;
 }
 
 export function parseLocalAudioStreamId(config: ExampleConfig): number {

@@ -1,4 +1,4 @@
-import {StyleSheet} from 'react-native';
+import {Platform, StyleSheet} from 'react-native';
 
 export const exampleTheme = {
   background: '#FFF8E8',
@@ -30,6 +30,9 @@ export const uiStyles = StyleSheet.create({
     paddingTop: 0,
     paddingBottom: 32,
   },
+  configureBodyWide: {
+    maxWidth: 960,
+  },
   header: {
     minHeight: 42,
     flexDirection: 'row',
@@ -60,7 +63,8 @@ export const uiStyles = StyleSheet.create({
     fontWeight: '700',
   },
   headerAction: {
-    minHeight: 40,
+    minWidth: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: exampleTheme.primary,
@@ -74,9 +78,9 @@ export const uiStyles = StyleSheet.create({
     fontWeight: '500',
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: Platform.OS === 'ios' ? 44 : 48,
+    height: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: Platform.OS === 'ios' ? 22 : 24,
     backgroundColor: exampleTheme.surface,
     alignItems: 'center',
     justifyContent: 'center',
@@ -99,6 +103,20 @@ export const uiStyles = StyleSheet.create({
     paddingTop: 6,
     paddingBottom: 6,
   },
+  secureInputRow: {flexDirection: 'row', alignItems: 'stretch', gap: 8},
+  secureInput: {flex: 1, minWidth: 0},
+  secureToggleButton: {
+    minWidth: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    paddingHorizontal: 10,
+    borderRadius: Platform.OS === 'ios' ? 10 : 20,
+    borderWidth: 1,
+    borderColor: exampleTheme.inputBorder,
+    backgroundColor: exampleTheme.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  secureToggleText: {color: exampleTheme.primary, fontSize: 12, fontWeight: '600'},
   inputLabel: {
     color: exampleTheme.textSecondary,
     fontSize: 13,
@@ -116,6 +134,8 @@ export const uiStyles = StyleSheet.create({
     textAlignVertical: 'top',
   },
   choice: {
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    justifyContent: 'center',
     borderRadius: 18,
     borderWidth: 1,
     borderColor: exampleTheme.inputBorder,
@@ -177,7 +197,7 @@ export const uiStyles = StyleSheet.create({
   },
   compactOutlineButton: {
     minWidth: 84,
-    minHeight: 28,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
     borderRadius: 10,
     borderColor: exampleTheme.primary,
     backgroundColor: 'transparent',
@@ -206,6 +226,18 @@ export const uiStyles = StyleSheet.create({
     paddingHorizontal: 18,
     paddingVertical: 16,
   },
+  playbackStageControlButton: {
+    height: Platform.OS === 'ios' ? 44 : 48,
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: Platform.OS === 'ios' ? 10 : 24,
+    paddingHorizontal: Platform.OS === 'ios' ? 12 : 16,
+    paddingVertical: 0,
+  },
+  compactPlaybackStageControlButton: {
+    flex: 1,
+    minWidth: 0,
+    paddingHorizontal: 4,
+  },
   stageControlDanger: {
     backgroundColor: '#F87171',
   },
@@ -225,6 +257,37 @@ export const uiStyles = StyleSheet.create({
   },
   stageControlSurfaceText: {
     color: exampleTheme.primary,
+  },
+  rawDumpStageControl: {
+    position: 'absolute',
+    left: 12,
+    top: '50%',
+    transform: [{translateY: -28}],
+    zIndex: 12,
+    elevation: 12,
+    alignItems: 'flex-start',
+  },
+  rawDumpButton: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: exampleTheme.primary,
+    paddingHorizontal: 5,
+  },
+  rawDumpButtonCapturing: {
+    backgroundColor: exampleTheme.warning,
+  },
+  rawDumpButtonDisabled: {
+    opacity: 0.52,
+  },
+  rawDumpButtonText: {
+    color: exampleTheme.foreground,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   textLink: {
     minHeight: 36,
@@ -269,6 +332,9 @@ export const uiStyles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
   },
+  scannerLayout: {gap: 16},
+  scannerLayoutWide: {flexDirection: 'row', alignItems: 'flex-start'},
+  scannerColumn: {flex: 1, minWidth: 0, gap: 12},
   scannerFrame: {
     aspectRatio: 1,
     borderRadius: 30,
@@ -303,6 +369,21 @@ export const uiStyles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  scannerPermissionButton: {
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: exampleTheme.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  scannerHelpButton: {
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scannerPermissionText: {color: exampleTheme.primary, fontSize: 13, fontWeight: '700'},
   videoStage: {
     flex: 1,
     backgroundColor: exampleTheme.videoBackground,

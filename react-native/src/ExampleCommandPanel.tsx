@@ -1,5 +1,6 @@
-import React, {useMemo, useState} from 'react';
+import React, {useCallback, useEffect, useMemo, useRef, useState} from 'react';
 import {
+  AccessibilityInfo,
   ActivityIndicator,
   KeyboardAvoidingView,
   Modal,
@@ -8,7 +9,9 @@ import {
   ScrollView,
   Text,
   TextInput,
+  useWindowDimensions,
   View,
+  findNodeHandle,
 } from 'react-native';
 import {TiRtc} from 'tirtc-react-native';
 import {useSafeAreaInsets} from 'react-native-safe-area-context';
@@ -33,6 +36,7 @@ export function CommandPanelSheet({
   events,
   onClose,
   onSendCommand,
+  returnFocusRef,
 }: {
   visible: boolean;
   title: string;
@@ -40,14 +44,70 @@ export function CommandPanelSheet({
   events: readonly CommandPanelEvent[];
   onClose: () => void;
   onSendCommand: (commandId: number, payload: Uint8Array) => Promise<number> | number;
+  returnFocusRef: React.RefObject<View | null>;
 }) {
   const [commandIdText, setCommandIdText] = useState('0x00000000');
   const [payloadText, setPayloadText] = useState('');
   const [payloadMode, setPayloadMode] = useState<CommandPayloadMode>('hex');
   const [inputError, setInputError] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const visibleRef = useRef(visible);
+  const restoreAfterDismissRef = useRef(false);
+  const androidRestoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
+  const wide = window.width >= 600;
   const panelEvents = useMemo(() => trimCommandEvents(events).reverse(), [events]);
+  const restoreTriggerFocus = useCallback(() => {
+    const trigger = returnFocusRef.current;
+    const handle = findNodeHandle(trigger);
+    if (handle !== null) {
+      if (Platform.OS === 'android') {
+        trigger?.setNativeProps({hasTVPreferredFocus: true});
+        requestAnimationFrame(() => trigger?.setNativeProps({hasTVPreferredFocus: false}));
+      } else {
+        trigger?.focus?.();
+      }
+      AccessibilityInfo.setAccessibilityFocus(handle);
+      return true;
+    }
+    return false;
+  }, [returnFocusRef]);
+  const consumePendingFocusRestore = useCallback(() => {
+    if (!restoreAfterDismissRef.current || visibleRef.current) return;
+    if (restoreTriggerFocus()) restoreAfterDismissRef.current = false;
+  }, [restoreTriggerFocus]);
+  const close = useCallback(() => {
+    visibleRef.current = false;
+    restoreAfterDismissRef.current = true;
+    onClose();
+    if (Platform.OS === 'android') {
+      if (androidRestoreTimerRef.current !== null) clearTimeout(androidRestoreTimerRef.current);
+      let attempts = 0;
+      const restoreAfterNativeDismiss = () => {
+        androidRestoreTimerRef.current = null;
+        consumePendingFocusRestore();
+        attempts += 1;
+        if (restoreAfterDismissRef.current && !visibleRef.current && attempts < 5) {
+          androidRestoreTimerRef.current = setTimeout(restoreAfterNativeDismiss, 50);
+        }
+      };
+      androidRestoreTimerRef.current = setTimeout(restoreAfterNativeDismiss, 400);
+    }
+  }, [consumePendingFocusRestore, onClose]);
+
+  useEffect(() => {
+    visibleRef.current = visible;
+    if (visible) {
+      restoreAfterDismissRef.current = false;
+      if (androidRestoreTimerRef.current !== null) clearTimeout(androidRestoreTimerRef.current);
+      androidRestoreTimerRef.current = null;
+    }
+  }, [visible]);
+
+  useEffect(() => () => {
+    if (androidRestoreTimerRef.current !== null) clearTimeout(androidRestoreTimerRef.current);
+  }, []);
 
   const applyPreset = (preset: CommandPreset) => {
     if (sending) {
@@ -80,15 +140,16 @@ export function CommandPanelSheet({
   };
 
   return (
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.root}>
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={close} onDismiss={consumePendingFocusRestore}>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.root} onAccessibilityEscape={close}>
         <Pressable
-          accessible={false}
-          importantForAccessibility="no-hide-descendants"
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="TiRTC Command Panel Cancel"
           style={styles.backdrop}
-          onPress={onClose}
+          onPress={close}
         />
-        <View style={[styles.sheet, {paddingBottom: insets.bottom}]}>
+        <View testID={wide ? 'command-panel-wide' : 'command-panel-compact'} style={[styles.sheet, wide ? styles.sheetWide : styles.sheetCompact, {paddingBottom: insets.bottom}]}>
           <View style={styles.header}>
             <Text style={styles.title}>{title}</Text>
             <Pressable
@@ -96,7 +157,7 @@ export function CommandPanelSheet({
               accessibilityRole="button"
               accessibilityLabel="TiRTC Command Panel Close"
               testID={automationTestId('TiRTC Command Panel Close')}
-              onPress={onClose}
+              onPress={close}
               style={styles.closeButton}>
               <Text style={styles.closeText}>×</Text>
             </Pressable>

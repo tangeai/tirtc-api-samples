@@ -1,5 +1,5 @@
 import React, {useState} from 'react';
-import {ScrollView} from 'react-native';
+import {ScrollView, StyleSheet, useWindowDimensions, View} from 'react-native';
 import {
   BackHeader,
   ConfigureShell,
@@ -47,6 +47,8 @@ export function SettingsScreen({
   onChange: ExampleConfigChange;
   onBack: () => void;
 }) {
+  const window = useWindowDimensions();
+  const wide = window.width >= 840;
   const [sheet, setSheet] = useState<PreferenceSheetState | null>(null);
   const [streamDialogVisible, setStreamDialogVisible] = useState(false);
   const [streamDraft, setStreamDraft] = useState(config.localAudioStreamId);
@@ -97,23 +99,22 @@ export function SettingsScreen({
             accessibilityLabel="TiRTC Settings Back"
             onBack={onBack}
           />
-          <ClientSettingsSection
-            config={config}
-            openSheet={openSheet}
-            onChange={onChange}
-          />
-          <LocalAudioSettingsSection
-            config={config}
-            openSheet={openSheet}
-            onChange={onChange}
-            onOpenStreamDialog={openStreamDialog}
-            onSelectCodec={selectLocalAudioCodec}
-            onSelectSampleRate={selectLocalAudioSampleRate}
-          />
-          <GeneralSettingsSection
-            config={config}
-            onChange={onChange}
-          />
+          <View testID={wide ? 'settings-layout-wide' : 'settings-layout-compact'} style={[settingsLayout.grid, wide ? settingsLayout.gridWide : null]}>
+            <View style={settingsLayout.column}>
+              <ClientSettingsSection config={config} openSheet={openSheet} onChange={onChange} />
+              <GeneralSettingsSection config={config} onChange={onChange} />
+            </View>
+            <View style={settingsLayout.column}>
+              <LocalAudioSettingsSection
+                config={config}
+                openSheet={openSheet}
+                onChange={onChange}
+                onOpenStreamDialog={openStreamDialog}
+                onSelectCodec={selectLocalAudioCodec}
+                onSelectSampleRate={selectLocalAudioSampleRate}
+              />
+            </View>
+          </View>
         </ConfigureShell>
       </ScrollView>
       <PreferenceSheet
@@ -273,3 +274,9 @@ type OpenPreferenceSheet = (
   options: readonly PreferenceOption[],
   onSelect: (value: string) => void,
 ) => void;
+
+const settingsLayout = StyleSheet.create({
+  grid: {gap: 16},
+  gridWide: {flexDirection: 'row', alignItems: 'flex-start'},
+  column: {flex: 1, minWidth: 0, gap: 16},
+});

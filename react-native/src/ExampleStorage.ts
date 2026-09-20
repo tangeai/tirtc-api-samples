@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {ExampleConfig} from './ExampleTypes';
 import {initialConfig} from './ExampleTypes';
 
-const STORAGE_KEY = 'tirtc.reactNativeExample.config.v1';
+const STORAGE_KEY = 'tirtc.reactNativeExample.config.v2';
 
 type StoredConfig = Pick<
   ExampleConfig,
@@ -11,7 +11,9 @@ type StoredConfig = Pick<
   | 'remoteId'
   | 'tokenServerAddress'
   | 'audioStreamId'
-  | 'videoStreamId'
+  | 'videoStreamIds'
+  | 'tiCloudStorageAudioChannelId'
+  | 'tiCloudStorageVideoChannelIds'
   | 'videoDecoderPreference'
   | 'outputBufferPolicy'
   | 'consoleLogEnabled'
@@ -43,7 +45,9 @@ export async function saveStoredConfig(config: ExampleConfig): Promise<void> {
     remoteId: config.remoteId,
     tokenServerAddress: config.tokenServerAddress,
     audioStreamId: config.audioStreamId,
-    videoStreamId: config.videoStreamId,
+    videoStreamIds: config.videoStreamIds,
+    tiCloudStorageAudioChannelId: config.tiCloudStorageAudioChannelId,
+    tiCloudStorageVideoChannelIds: config.tiCloudStorageVideoChannelIds,
     videoDecoderPreference: config.videoDecoderPreference,
     outputBufferPolicy: config.outputBufferPolicy,
     consoleLogEnabled: config.consoleLogEnabled,
@@ -73,7 +77,15 @@ function sanitizeStoredConfig(decoded: Partial<StoredConfig>): Partial<ExampleCo
     remoteId: stringOrDefault(decoded.remoteId),
     tokenServerAddress: stringOrDefault(decoded.tokenServerAddress),
     audioStreamId: stringOrDefault(decoded.audioStreamId, initialConfig.audioStreamId),
-    videoStreamId: stringOrDefault(decoded.videoStreamId, initialConfig.videoStreamId),
+    videoStreamIds: stringArrayOrDefault(decoded.videoStreamIds, initialConfig.videoStreamIds),
+    tiCloudStorageAudioChannelId: stringOrDefault(
+      decoded.tiCloudStorageAudioChannelId,
+      initialConfig.tiCloudStorageAudioChannelId,
+    ),
+    tiCloudStorageVideoChannelIds: stringArrayOrDefault(
+      decoded.tiCloudStorageVideoChannelIds,
+      initialConfig.tiCloudStorageVideoChannelIds,
+    ),
     videoDecoderPreference: choiceOrDefault(
       decoded.videoDecoderPreference,
       ['auto', 'hardware', 'software'],
@@ -92,6 +104,12 @@ function sanitizeStoredConfig(decoded: Partial<StoredConfig>): Partial<ExampleCo
     localAudioAgcLevel: choiceOrDefault(decoded.localAudioAgcLevel, ['0', '1', '2', '3'], '0'),
     localAudioAnsLevel: choiceOrDefault(decoded.localAudioAnsLevel, ['0', '1', '2', '3'], '0'),
   };
+}
+
+function stringArrayOrDefault(value: unknown, fallback: readonly string[]): string[] {
+  return Array.isArray(value) && value.length <= 3 && value.every((item) => typeof item === 'string')
+    ? [...value]
+    : [...fallback];
 }
 
 function stringOrDefault(value: unknown, fallback = ''): string {
