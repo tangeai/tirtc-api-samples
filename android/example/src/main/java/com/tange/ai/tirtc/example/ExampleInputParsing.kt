@@ -1,8 +1,8 @@
 package com.tange.ai.tirtc.example
 
 import org.json.JSONObject
-import java.nio.charset.StandardCharsets
 import java.net.URI
+import java.nio.charset.StandardCharsets
 
 internal fun parseClientQrPayload(
     payload: String,
@@ -80,11 +80,9 @@ internal fun parseCloudStorageQrPayload(
     }
 }
 
-private fun validRtcEndpoint(value: String): Boolean =
-    value.isEmpty() || validHttpEndpoint(value, httpsOnly = false)
+private fun validRtcEndpoint(value: String): Boolean = value.isEmpty() || validHttpEndpoint(value, httpsOnly = false)
 
-private fun validCloudStorageEndpoint(value: String): Boolean =
-    value.isEmpty() || validHttpEndpoint(value, httpsOnly = true)
+private fun validCloudStorageEndpoint(value: String): Boolean = value.isEmpty() || validHttpEndpoint(value, httpsOnly = true)
 
 private fun validHttpEndpoint(
     value: String,

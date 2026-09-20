@@ -14,6 +14,7 @@ internal fun AppCompatActivity.showExampleSettingsPage(
             text = "Console log"
             isChecked = settings.consoleLogEnabled
             setTextColor(ExampleTheme.textPrimary)
+            minHeight = dp(ExampleTheme.minimumTouchTargetDp)
         }
     val decoder = spinner(DecoderPreference.values().map { it.label }, settings.decoderPreference.ordinal)
     val buffer =
@@ -30,6 +31,7 @@ internal fun AppCompatActivity.showExampleSettingsPage(
             text = "AEC"
             isChecked = settings.localAudioAecEnabled
             setTextColor(ExampleTheme.textPrimary)
+            minHeight = dp(ExampleTheme.minimumTouchTargetDp)
         }
     val localAudioAgc =
         spinner(
@@ -44,18 +46,28 @@ internal fun AppCompatActivity.showExampleSettingsPage(
     setContentView(
         page {
             navigationHeader("偏好设置", onBack)
-            addView(sectionTitle("Client"))
-            addView(spinnerBlock("Decoder preference", decoder))
-            addView(spinnerBlock("Output buffer policy", buffer))
-            addView(sectionTitle("Client localAudio"))
-            addView(spinnerBlock("audio codec", localAudioCodec))
-            addView(spinnerBlock("audio sample rate", localAudioSampleRate))
-            addViewWithMargin(fieldBlock("localAudio stream id", localAudioStreamId), bottom = 16)
-            addView(surface { addView(localAudioAec) })
-            addView(spinnerBlock("AGC", localAudioAgc))
-            addView(spinnerBlock("ANS", localAudioAns))
-            addView(sectionTitle("Logging"))
-            addView(surface { addView(console) })
+            addViewWithMargin(
+                responsiveFormSections(
+                    listOf(
+                        formSection("播放") {
+                            addViewWithMargin(fieldBlock("Decoder preference", decoder), bottom = 12)
+                            addView(fieldBlock("Output buffer policy", buffer))
+                        },
+                        formSection("本地音频") {
+                            addViewWithMargin(fieldBlock("audio codec", localAudioCodec), bottom = 12)
+                            addViewWithMargin(fieldBlock("audio sample rate", localAudioSampleRate), bottom = 12)
+                            addViewWithMargin(fieldBlock("localAudio stream id", localAudioStreamId), bottom = 12)
+                            addView(localAudioAec)
+                        },
+                        formSection("音频处理") {
+                            addViewWithMargin(fieldBlock("AGC", localAudioAgc), bottom = 12)
+                            addView(fieldBlock("ANS", localAudioAns))
+                        },
+                        formSection("日志") { addView(console) },
+                    ),
+                ),
+                bottom = 20,
+            )
             addView(
                 primaryButton("保存") {
                     onSave(

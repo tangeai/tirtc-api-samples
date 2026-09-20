@@ -10,13 +10,20 @@ import com.tange.ai.tirtc.TiRtcAudioSampleRate
 
 internal fun ExampleSettings.localAudioOptions(): TiRtcAudioInputOptions {
     return TiRtcAudioInputOptions(
-        codec = localAudioCodec,
         sampleRate = localAudioSampleRate,
         channels = TiRtcAudioChannelCount.MONO,
         aecMode = if (localAudioAecEnabled) TiRtcAudioAecMode.ENABLED else TiRtcAudioAecMode.DISABLED,
         agcLevel = localAudioAgcLevel.toAudioAgcLevel(),
         ansLevel = localAudioAnsLevel.toAudioAnsLevel(),
-    )
+    ).apply {
+        media = when (localAudioCodec) {
+            TiRtcAudioCodec.PCM -> 1
+            TiRtcAudioCodec.G711A -> 2
+            TiRtcAudioCodec.AAC -> 3
+            TiRtcAudioCodec.OPUS -> 4
+            TiRtcAudioCodec.AMR -> 5
+        }
+    }
 }
 
 internal fun localAudioCodecFromIndex(position: Int): TiRtcAudioCodec {

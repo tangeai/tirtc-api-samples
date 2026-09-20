@@ -19,16 +19,34 @@ import android.widget.Spinner
 import android.widget.TextView
 
 internal fun Context.page(content: LinearLayout.() -> Unit): ScrollView {
+    val horizontalPadding = if (resources.configuration.screenWidthDp >= ExampleTheme.formColumnsBreakpointDp) 24 else 16
     val root =
         LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), statusBarInset() + dp(18), dp(24), dp(32))
+            setPadding(dp(horizontalPadding), statusBarInset() + dp(18), dp(horizontalPadding), dp(32))
             setBackgroundColor(ExampleTheme.background)
             content()
         }
     return ScrollView(this).apply {
         setBackgroundColor(ExampleTheme.background)
-        addView(root)
+        isFillViewport = true
+        addView(
+            FrameLayout(context).apply {
+                addView(
+                    root,
+                    FrameLayout.LayoutParams(
+                        if (resources.configuration.screenWidthDp >= ExampleTheme.formColumnsBreakpointDp) {
+                            dp(minOf(ExampleTheme.contentMaxWidthDp, resources.configuration.screenWidthDp))
+                        } else {
+                            match()
+                        },
+                        wrap(),
+                        Gravity.TOP or Gravity.CENTER_HORIZONTAL,
+                    ),
+                )
+            },
+            ViewGroup.LayoutParams(match(), wrap()),
+        )
     }
 }
 
@@ -64,7 +82,8 @@ internal fun LinearLayout.header(
     val row =
         LinearLayout(context).apply {
             gravity = Gravity.CENTER_VERTICAL
-            orientation = LinearLayout.HORIZONTAL
+            val stacked = resources.configuration.fontScale >= 1.5f
+            orientation = if (stacked) LinearLayout.VERTICAL else LinearLayout.HORIZONTAL
             addView(
                 LinearLayout(context).apply {
                     orientation = LinearLayout.VERTICAL
@@ -84,7 +103,7 @@ internal fun LinearLayout.header(
                         },
                     )
                 },
-                LinearLayout.LayoutParams(0, wrap(), 1f),
+                if (stacked) LinearLayout.LayoutParams(match(), wrap()) else LinearLayout.LayoutParams(0, wrap(), 1f),
             )
             addView(context.chipButton(primaryAction.first, primaryAction.second), context.chipLayoutParams())
             if (secondaryAction != null) {
@@ -124,9 +143,13 @@ internal fun Context.productTabs(
     LinearLayout(this).apply {
         orientation = LinearLayout.HORIZONTAL
         setPadding(dp(3), dp(3), dp(3), dp(3))
-        minimumHeight = dp(44)
+        minimumHeight = dp(ExampleTheme.minimumTouchTargetDp)
         background = rounded(0x1A659287, radius = 22, strokeColor = 0x1A659287)
-        fun tab(label: String, product: ConfigureProduct): TextView =
+
+        fun tab(
+            label: String,
+            product: ConfigureProduct,
+        ): TextView =
             TextView(context).apply {
                 text = label
                 gravity = Gravity.CENTER
@@ -145,9 +168,9 @@ internal fun Context.productTabs(
         rtc.id = R.id.tab_rtc
         val cloudStorage = tab("云录像", ConfigureProduct.CLOUD_STORAGE)
         cloudStorage.id = R.id.tab_cloud_storage
-        addView(rtc, LinearLayout.LayoutParams(0, dp(38), 1f))
+        addView(rtc, LinearLayout.LayoutParams(0, dp(ExampleTheme.minimumTouchTargetDp), 1f))
         addView(space(dp(3)))
-        addView(cloudStorage, LinearLayout.LayoutParams(0, dp(38), 1f))
+        addView(cloudStorage, LinearLayout.LayoutParams(0, dp(ExampleTheme.minimumTouchTargetDp), 1f))
     }
 
 internal fun Context.cloudStoragePlayerTopBar(
@@ -171,7 +194,11 @@ internal fun Context.cloudStoragePlayerTopBar(
             LinearLayout.LayoutParams(0, wrap(), 1f),
         )
         addView(
-            appBarActionButton("选择录像", onSelectRecording).apply { id = R.id.cloud_storage_recordings_button },
+            appBarActionButton("选择录像", onSelectRecording).apply {
+                id = R.id.cloud_storage_recordings_button
+                isFocusable = true
+                isFocusableInTouchMode = true
+            },
             appBarActionLayoutParams(),
         )
         addView(
@@ -183,7 +210,7 @@ internal fun Context.cloudStoragePlayerTopBar(
 internal fun Context.playerTopBar(
     remoteId: String,
     onBack: () -> Unit,
-    onCommand: () -> Unit,
+    onCommand: (View) -> Unit,
     onUploadLogs: () -> Unit,
 ): View {
     return LinearLayout(this).apply {
@@ -203,7 +230,15 @@ internal fun Context.playerTopBar(
             },
             LinearLayout.LayoutParams(0, wrap(), 1f),
         )
-        addView(appBarActionButton("发送命令", onCommand), appBarActionLayoutParams())
+        addView(
+            appBarActionButton("发送命令") {}.apply {
+                id = R.id.player_command_button
+                isFocusable = true
+                isFocusableInTouchMode = true
+                setOnClickListener(onCommand)
+            },
+            appBarActionLayoutParams(),
+        )
         addView(appBarActionButton("上传日志", onUploadLogs), appBarActionLayoutParams())
     }
 }
@@ -216,11 +251,13 @@ internal fun Context.playerBottomControls(
     localAudioButton: TextView,
     outputVolumeButton: TextView,
     downlinkButton: TextView,
+    moreButton: TextView,
 ): View {
+    val wide = resources.configuration.expandPlaybackSecondaryActions()
     return LinearLayout(this).apply {
         gravity = Gravity.END
         orientation = LinearLayout.VERTICAL
-        setPadding(dp(20), dp(16), dp(20), dp(24))
+        setPadding(dp(12), dp(8), dp(12), dp(12))
         addView(
             bubble,
             LinearLayout.LayoutParams(wrap(), wrap()).apply {
@@ -230,33 +267,66 @@ internal fun Context.playerBottomControls(
         addViewWithMargin(
             LinearLayout(context).apply {
                 gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                orientation = LinearLayout.VERTICAL
-                addView(
-                    LinearLayout(context).apply {
-                        gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                        orientation = LinearLayout.HORIZONTAL
-                        addView(recordingButton, context.mediaButtonLayoutParams())
-                        addView(snapshotButton, context.mediaButtonLayoutParams())
-                        addView(galleryButton, context.mediaButtonLayoutParams())
-                    },
-                )
-                addViewWithMargin(
-                    LinearLayout(context).apply {
-                        gravity = Gravity.END or Gravity.CENTER_VERTICAL
-                        orientation = LinearLayout.HORIZONTAL
-                        addView(outputVolumeButton, context.compactButtonLayoutParams())
-                        addView(localAudioButton, context.compactButtonLayoutParams())
-                        addView(downlinkButton, context.compactButtonLayoutParams())
-                    },
-                    top = 12,
-                    bottom = 0,
-                )
+                orientation = LinearLayout.HORIZONTAL
+                setPadding(dp(6), dp(6), dp(6), dp(6))
+                background = rounded(ExampleTheme.controlSurface, ExampleTheme.radiusLarge, ExampleTheme.divider)
+                addView(downlinkButton, context.controlButtonLayoutParams())
+                addView(outputVolumeButton, context.controlButtonLayoutParams())
+                addView(localAudioButton, context.controlButtonLayoutParams())
+                if (wide) {
+                    addView(recordingButton, context.mediaButtonLayoutParams())
+                    addView(snapshotButton, context.mediaButtonLayoutParams())
+                    addView(galleryButton, context.mediaButtonLayoutParams())
+                }
+                addView(moreButton, context.controlButtonLayoutParams())
             },
-            top = 12,
+            top = 8,
             bottom = 0,
         )
     }
 }
+
+internal fun Context.cloudStoragePlayerControls(
+    time: TextView,
+    seek: android.widget.SeekBar,
+    recording: TextView,
+    snapshot: TextView,
+    gallery: TextView,
+    mute: TextView,
+    speed: TextView,
+    pause: TextView,
+    more: TextView,
+): View =
+    LinearLayout(this).apply {
+        val wide = resources.configuration.screenWidthDp >= ExampleTheme.compactBreakpointDp
+        orientation = if (wide) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        gravity = Gravity.CENTER_VERTICAL
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = rounded(ExampleTheme.controlSurface, ExampleTheme.radiusLarge, ExampleTheme.divider)
+        val timeline =
+            FrameLayout(context).apply {
+                addView(seek, FrameLayout.LayoutParams(match(), dp(48), Gravity.CENTER_VERTICAL))
+                time.textSize = 10f
+                time.gravity = Gravity.TOP or Gravity.CENTER_HORIZONTAL
+                time.setBackgroundColor(0xCCFAFAF8.toInt())
+                addView(time, FrameLayout.LayoutParams(wrap(), wrap(), Gravity.TOP or Gravity.CENTER_HORIZONTAL))
+            }
+        addView(
+            timeline,
+            if (wide) LinearLayout.LayoutParams(0, dp(64), 1f) else LinearLayout.LayoutParams(match(), dp(48)),
+        )
+        val actions = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+        actions.addView(pause, LinearLayout.LayoutParams(0, dp(48), 1f))
+        actions.addView(mute, LinearLayout.LayoutParams(0, dp(48), 1f))
+        actions.addView(speed, LinearLayout.LayoutParams(0, dp(48), 1f))
+        if (resources.configuration.expandPlaybackSecondaryActions()) {
+            actions.addView(recording, LinearLayout.LayoutParams(0, dp(48), 1f))
+            actions.addView(snapshot, LinearLayout.LayoutParams(0, dp(48), 1f))
+            actions.addView(gallery, LinearLayout.LayoutParams(0, dp(48), 1f))
+        }
+        actions.addView(more, LinearLayout.LayoutParams(0, dp(48), 1f))
+        addView(actions, if (wide) LinearLayout.LayoutParams(dp(420), dp(48)) else LinearLayout.LayoutParams(match(), dp(48)))
+    }
 
 internal fun Context.mediaIconButton(
     iconResource: Int,
@@ -273,7 +343,10 @@ internal fun Context.mediaIconButton(
     }
 
 private fun Context.mediaButtonLayoutParams(): LinearLayout.LayoutParams =
-    LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(12) }
+    LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(6) }
+
+private fun Context.controlButtonLayoutParams(): LinearLayout.LayoutParams =
+    LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(4) }
 
 internal fun Context.appBarActionButton(
     text: String,
@@ -320,28 +393,49 @@ internal fun Context.videoPanel(label: String): FrameLayout {
     }
 }
 
+internal fun Context.addPlayerEmptyVideoState(
+    stage: FrameLayout,
+    audioStreamId: Int?,
+): TextView =
+    TextView(this).apply {
+        id = R.id.player_empty_video_state
+        text = if (audioStreamId == null) "未选择媒体流" else "仅音频播放"
+        contentDescription = text
+        gravity = Gravity.CENTER
+        setTextColor(ExampleTheme.foreground)
+        textSize = 16f
+        stage.addView(this, FrameLayout.LayoutParams(match(), match()))
+    }
+
 internal fun Context.qrGuide(text: String): View {
     return surface {
-        addView(sectionTitle("二维码内容格式"))
+        val details = body(text).apply {
+            id = R.id.qr_guide_details
+            visibility = View.GONE
+            contentDescription = "二维码格式说明：$text"
+        }
         addView(
-            TextView(context).apply {
-                this.text = text
-                setTextColor(ExampleTheme.textSecondary)
-                textSize = 14f
-                setPadding(0, dp(2), 0, dp(2))
+            appBarActionButton("查看二维码格式帮助") {
+                details.visibility = if (details.visibility == View.VISIBLE) View.GONE else View.VISIBLE
+            }.apply {
+                id = R.id.qr_guide_disclosure
+                contentDescription = "展开或收起二维码格式帮助"
             },
+            LinearLayout.LayoutParams(match(), dp(ExampleTheme.minimumTouchTargetDp)),
         )
+        addView(details)
     }
 }
 
 internal fun Context.scannerPanel(scannerView: View): FrameLayout {
     val side = (resources.displayMetrics.widthPixels - dp(48)).coerceAtMost(dp(390))
     return FrameLayout(this).apply {
+        id = R.id.qr_scanner_panel
         layoutParams =
             LinearLayout.LayoutParams(match(), side).apply {
                 bottomMargin = dp(14)
             }
-        background = rounded(ExampleTheme.videoBackground, radius = 30, strokeColor = ExampleTheme.inputBorder)
+        background = rounded(ExampleTheme.videoBackground, radius = ExampleTheme.radiusLarge, strokeColor = ExampleTheme.inputBorder)
         clipToOutline = true
         addView(scannerView, FrameLayout.LayoutParams(match(), match()))
         addView(
@@ -363,12 +457,45 @@ internal fun Context.scannerPanel(scannerView: View): FrameLayout {
 
 internal fun Context.fieldBlock(
     label: String,
-    editText: EditText,
+    control: View,
 ): View {
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         addView(inputLabel(label))
-        addView(editText)
+        addView(control)
+    }
+}
+
+internal fun Context.formSection(
+    title: String,
+    content: LinearLayout.() -> Unit,
+): LinearLayout =
+    surface {
+        addView(sectionTitle(title).apply { textSize = 15f })
+        content()
+    }
+
+internal fun Context.responsiveFormSections(sections: List<View>): View {
+    val wide = resources.configuration.screenWidthDp >= ExampleTheme.formColumnsBreakpointDp
+    if (!wide) {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            sections.forEachIndexed { index, section ->
+                addView(section, LinearLayout.LayoutParams(match(), wrap()).apply { bottomMargin = if (index == sections.lastIndex) 0 else dp(12) })
+            }
+        }
+    }
+    val left = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    val right = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+    sections.forEachIndexed { index, section ->
+        val column = if (index % 2 == 0) left else right
+        column.addView(section, LinearLayout.LayoutParams(match(), wrap()).apply { bottomMargin = dp(12) })
+    }
+    return LinearLayout(this).apply {
+        orientation = LinearLayout.HORIZONTAL
+        addView(left, LinearLayout.LayoutParams(0, wrap(), 1f))
+        addView(space(dp(16)))
+        addView(right, LinearLayout.LayoutParams(0, wrap(), 1f))
     }
 }
 
@@ -421,7 +548,7 @@ internal fun Context.editText(
                 multiLine -> InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
                 else -> InputType.TYPE_CLASS_TEXT
             }
-        background = rounded(ExampleTheme.surface, radius = 20, strokeColor = 0x00000000)
+        background = rounded(ExampleTheme.surface, radius = ExampleTheme.radiusMedium, strokeColor = ExampleTheme.inputBorder)
     }
 }
 
@@ -450,7 +577,7 @@ internal fun Context.surface(content: LinearLayout.() -> Unit): LinearLayout {
     return LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         setPadding(dp(18), dp(14), dp(18), dp(14))
-        background = rounded(ExampleTheme.surface, radius = 24, strokeColor = ExampleTheme.inputBorder)
+        background = rounded(ExampleTheme.surface, radius = ExampleTheme.radiusLarge, strokeColor = ExampleTheme.inputBorder)
         content()
     }
 }
@@ -492,6 +619,65 @@ internal fun Context.compactFilledButton(
     }
 }
 
+internal fun Context.playbackControlButton(
+    compactText: String,
+    description: String,
+    wideText: String = description,
+    emphasized: Boolean = false,
+    action: () -> Unit,
+): TextView =
+    TextView(this).apply {
+        val wide = resources.configuration.expandPlaybackLabels()
+        text = if (wide) wideText else compactText
+        contentDescription = description
+        gravity = Gravity.CENTER
+        minHeight = dp(ExampleTheme.minimumTouchTargetDp)
+        minimumWidth = 0
+        setTextColor(if (emphasized) ExampleTheme.foreground else ExampleTheme.primary)
+        textSize = 12f
+        typeface = Typeface.DEFAULT_BOLD
+        background =
+            rounded(
+                if (emphasized) ExampleTheme.primary else ExampleTheme.controlSurface,
+                radius = ExampleTheme.radiusMedium,
+                strokeColor = if (emphasized) ExampleTheme.primary else ExampleTheme.divider,
+            )
+        setPadding(dp(6), 0, dp(6), 0)
+        setOnClickListener { action() }
+    }
+
+internal fun Context.playbackMoreButton(action: () -> Unit): TextView =
+    playbackControlButton("⋯", "更多", action = action).apply {
+        isFocusable = true
+        isFocusableInTouchMode = true
+    }
+
+internal fun TextView.updatePlaybackControl(
+    compactText: String,
+    wideText: String,
+    description: String,
+) {
+    text = if (resources.configuration.expandPlaybackLabels()) wideText else compactText
+    contentDescription = description
+}
+
+internal fun Context.playbackStatusSurface(status: TextView): View =
+    LinearLayout(this).apply {
+        orientation = LinearLayout.VERTICAL
+        setPadding(dp(12), dp(8), dp(12), dp(8))
+        background = rounded(0xE6FAFAF8.toInt(), ExampleTheme.radiusMedium, ExampleTheme.divider)
+        status.maxLines = 2
+        status.ellipsize = TextUtils.TruncateAt.END
+        status.textSize = 12f
+        addView(status, LinearLayout.LayoutParams(match(), wrap()))
+    }
+
+internal fun android.content.res.Configuration.expandPlaybackSecondaryActions(): Boolean =
+    screenWidthDp >= ExampleTheme.secondaryActionsBreakpointDp && fontScale <= 1.3f
+
+internal fun android.content.res.Configuration.expandPlaybackLabels(): Boolean =
+    screenWidthDp >= ExampleTheme.secondaryActionsBreakpointDp && fontScale <= 1.3f
+
 internal fun Context.outlinedButton(
     text: String,
     action: () -> Unit,
@@ -517,7 +703,7 @@ internal fun Context.chipButton(
         this.text = text
         gravity = Gravity.CENTER
         textSize = 13f
-        minHeight = dp(38)
+        minHeight = dp(ExampleTheme.minimumTouchTargetDp)
         minWidth = dp(76)
         typeface = Typeface.DEFAULT_BOLD
         setPadding(dp(14), 0, dp(14), 0)
@@ -607,13 +793,13 @@ private fun Context.compactButtonLayoutParams(): LinearLayout.LayoutParams {
 }
 
 private fun Context.appBarBackLayoutParams(): LinearLayout.LayoutParams {
-    return LinearLayout.LayoutParams(dp(44), dp(44)).apply {
+    return LinearLayout.LayoutParams(dp(ExampleTheme.minimumTouchTargetDp), dp(ExampleTheme.minimumTouchTargetDp)).apply {
         rightMargin = dp(8)
     }
 }
 
 private fun Context.appBarActionLayoutParams(): LinearLayout.LayoutParams {
-    return LinearLayout.LayoutParams(wrap(), dp(36)).apply {
+    return LinearLayout.LayoutParams(wrap(), dp(ExampleTheme.minimumTouchTargetDp)).apply {
         leftMargin = dp(8)
     }
 }

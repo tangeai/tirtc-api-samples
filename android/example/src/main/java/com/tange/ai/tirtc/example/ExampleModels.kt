@@ -9,8 +9,8 @@ data class ClientConfiguration(
     val appId: String,
     val endpoint: String,
     val remoteId: String,
-    val audioStreamId: Int,
-    val videoStreamId: Int,
+    val audioStreamId: Int?,
+    val videoStreamIds: List<Int>,
     val token: String,
     val tokenSource: DemoTokenSource = DemoTokenSource.ONE_TIME,
     val tokenIssuerBaseUrl: String = "",
@@ -21,8 +21,8 @@ data class CloudStorageConfiguration(
     val appId: String = "",
     val endpoint: String = "",
     val token: String = "",
-    val audioChannelId: Int = 10,
-    val videoChannelId: Int = 11,
+    val audioChannelId: Int? = 10,
+    val videoChannelIds: List<Int> = listOf(11),
 )
 
 enum class ConfigureProduct { RTC, CLOUD_STORAGE }

@@ -29,11 +29,12 @@ internal class DownlinkMetricsPanel(
     private val startup = metricLine("启动耗时")
     private val stutter = metricLine("卡顿统计")
     private val rows = listOf(avParameters, videoReceive, audioReceive, latency, startup, stutter)
+    private val summary = TextView(context)
 
     init {
         orientation = VERTICAL
         setPadding(context.dp(12), context.dp(8), context.dp(12), context.dp(8))
-        background = rounded(Color.WHITE, context.dp(20))
+        background = rounded(ExampleTheme.controlSurface, context.dp(ExampleTheme.radiusLarge))
         elevation = context.dp(8).toFloat()
         addView(
             LinearLayout(context).apply {
@@ -51,33 +52,51 @@ internal class DownlinkMetricsPanel(
                 addView(
                     TextView(context).apply {
                         text = "?"
+                        contentDescription = "指标说明"
                         gravity = Gravity.CENTER
                         setTextColor(ExampleTheme.primary)
                         textSize = 15f
                         setOnClickListener { onShowExplanation() }
                     },
-                    LayoutParams(context.dp(22), context.dp(22)),
+                    LayoutParams(context.dp(ExampleTheme.minimumTouchTargetDp), context.dp(ExampleTheme.minimumTouchTargetDp)),
                 )
                 addView(
                     TextView(context).apply {
-                        text = "⌃ 收起"
+                        text = "展开"
+                        contentDescription = "展开即时统计"
                         gravity = Gravity.CENTER
                         setTextColor(Color.WHITE)
                         textSize = 10f
                         typeface = Typeface.DEFAULT_BOLD
-                        background = rounded(Color.rgb(79, 134, 217), context.dp(12))
+                        background = rounded(ExampleTheme.primary, context.dp(ExampleTheme.radiusMedium))
                         setPadding(context.dp(8), 0, context.dp(8), 0)
                         setOnClickListener {
                             val show = rows.first().root.visibility != View.VISIBLE
                             rows.forEach { it.root.visibility = if (show) View.VISIBLE else View.GONE }
-                            text = if (show) "⌃ 收起" else "▮ 即时统计"
+                            summary.visibility = if (show) View.GONE else View.VISIBLE
+                            text = if (show) "收起" else "展开"
+                            contentDescription = if (show) "收起即时统计" else "展开即时统计"
                         }
                     },
-                    LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(20)).apply { leftMargin = context.dp(6) },
+                    LayoutParams(LayoutParams.WRAP_CONTENT, context.dp(ExampleTheme.minimumTouchTargetDp)).apply {
+                        leftMargin = context.dp(6)
+                    },
                 )
             },
         )
-        rows.forEach(::addMetric)
+        addView(
+            summary.apply {
+                text = "等待指标"
+                setTextColor(ExampleTheme.textPrimary)
+                textSize = 12f
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            },
+        )
+        rows.forEach {
+            it.root.visibility = View.GONE
+            addMetric(it)
+        }
     }
 
     fun render(
@@ -111,6 +130,9 @@ internal class DownlinkMetricsPanel(
             "最长 ${formatDuration(videoMetrics?.stutter?.stutterPeakMs)} · " +
             "音频 ${formatCount(audioMetrics?.stutter?.stutterCount)} / " +
             "最长 ${formatDuration(audioMetrics?.stutter?.stutterPeakMs)}"
+        summary.text =
+            "${displayVideoSize(videoDebug)} · ${formatKbps(videoMetrics?.videoInputBitrateKbps)} · " +
+                "延迟 ${formatDuration(videoMetrics?.estimatedOutputLatencyMs)} · 卡顿 ${formatCount(videoMetrics?.stutter?.stutterCount)}"
     }
 
     private fun addMetric(metric: MetricLine) {
@@ -125,7 +147,7 @@ internal class DownlinkMetricsPanel(
             TextView(context).apply {
                 text = "--"
                 setTextColor(Color.rgb(17, 17, 17))
-                textSize = 10f
+                textSize = 12f
                 this.maxLines = maxLines
             }
         val root =
@@ -136,7 +158,7 @@ internal class DownlinkMetricsPanel(
                     TextView(context).apply {
                         text = "$label："
                         setTextColor(ExampleTheme.primary)
-                        textSize = 10f
+                        textSize = 12f
                         typeface = Typeface.DEFAULT_BOLD
                     },
                 )
