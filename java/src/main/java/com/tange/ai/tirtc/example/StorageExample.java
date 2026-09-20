@@ -13,7 +13,8 @@ import static com.tange.ai.tirtc.example.RtcExample.*;
 public final class StorageExample {
     public static void main(String[] args) throws Exception {
         Map<String,String> flags=flags(args);
-        if(flags.containsKey("help")) { System.out.println("--endpoint --cache-dir --output-dir --start-ms --end-ms --audio-channel-id --video-channel-id; credentials/device use TI_CLOUD_STORAGE_* environment"); return; }
+        applyRawDumpCase(flags, true);
+        if(flags.containsKey("help")) { System.out.println("--endpoint --cache-dir --output-dir --start-ms --end-ms --audio-channel-id --video-channel-id [--raw-dump --raw-dump-seconds 10 --raw-dump-copy-to ABSOLUTE_ZIP] [--upload-logs] [--case-id ti-cloud-storage.raw-dump.smoke-upload|ti-cloud-storage.raw-dump.integration-recovery]; credentials/device use TI_CLOUD_STORAGE_* environment"); return; }
         Path output=Paths.get(required(flags,"output-dir")).toAbsolutePath(); Files.createDirectories(output);
         String device=env("TI_CLOUD_STORAGE_DEVICE_ID");
         Instant start=Instant.ofEpochMilli(Long.parseLong(required(flags,"start-ms")));
@@ -44,6 +45,15 @@ public final class StorageExample {
                      EncodedVideoOutput encodedVideo=new EncodedVideoOutput(replay,videoId,frames.encodedVideo());
                      EncodedAudioOutput encodedAudio=new EncodedAudioOutput(replay,audioId,frames.encodedAudio())) {
                     replay.play(selected.startTime(),selected.endTime());
+                    com.tange.ai.tirtc.RawDump rawDump=null;
+                    long rawDumpStarted=0;
+                    boolean rawDumpEnabled=flags.containsKey("raw-dump")||flags.containsKey("raw-dump-seconds");
+                    int rawDumpSeconds=Integer.parseInt(flags.getOrDefault("raw-dump-seconds","10"));
+                    if(rawDumpSeconds<=0||rawDumpSeconds>300) throw new IllegalArgumentException("--raw-dump-seconds must be 1..300");
+                    if(rawDumpEnabled) {
+                        rawDump=replay.startRawDump(new com.tange.ai.tirtc.storage.RawDumpOptions(new int[]{audioId},new int[]{videoId}));
+                        rawDumpStarted=System.nanoTime();
+                    }
                     await(() -> frames.all() && replay.currentTime().isPresent(),frames,"replay media and playback position");
                     replay.pause(); check(replay.currentTime().isPresent(),"paused replay position");
                     replay.resume();
@@ -53,6 +63,28 @@ public final class StorageExample {
                     await(() -> frames.v.get()>baseline,frames,"video after seek at half speed");
                     replay.setSpeed(ReplaySpeed.X1); check(replay.speed()==ReplaySpeed.X1,"normal speed restored");
                     result.setProperty("replayControls","true");
+                    if(rawDump!=null) {
+                        if("ti-cloud-storage.raw-dump.integration-recovery".equals(flags.get("case-id"))) {
+                            try { replay.startRawDump(new com.tange.ai.tirtc.storage.RawDumpOptions(new int[]{audioId},new int[]{videoId})); throw new IllegalStateException("duplicate raw dump start accepted"); }
+                            catch(TiRtcException expected) { check(expected.category()==ErrorCategory.IN_USE,"duplicate raw dump start category"); }
+                            replay.pause(); replay.resume(); replay.seek(selected.startTime());
+                        }
+                        long remaining=TimeUnit.SECONDS.toNanos(rawDumpSeconds)-(System.nanoTime()-rawDumpStarted);
+                        if(remaining>0) TimeUnit.NANOSECONDS.sleep(remaining);
+                        RawDumpArchive archive=rawDump.stop();
+                        check(Files.isRegularFile(archive.path())&&!archive.captureId().isEmpty()&&!archive.sha256().isEmpty(),"raw dump archive");
+                        result.setProperty("rawDumpCaptureId",archive.captureId());
+                        result.setProperty("rawDumpPath",archive.path().toString());
+                        result.setProperty("rawDumpSha256",archive.sha256());
+                        if(flags.containsKey("raw-dump-copy-to")) {
+                            Path copy=Paths.get(flags.get("raw-dump-copy-to"));
+                            check(copy.isAbsolute(),"--raw-dump-copy-to must be absolute");
+                            Files.createDirectories(copy.getParent()); Files.copy(archive.path(),copy,StandardCopyOption.REPLACE_EXISTING);
+                            result.setProperty("rawDumpCopyPath",copy.toString());
+                        }
+                        if("ti-cloud-storage.raw-dump.integration-recovery".equals(flags.get("case-id"))) check(rawDump.stop()==archive,"repeated raw dump stop changed result");
+                        rawDump.close();
+                    }
                     try (RecordingTask task=replay.startRecording(new com.tange.ai.tirtc.storage.StartRecordingOptions(videoId,audioId))) {
                         final int recordedBaseline=frames.v.get(), audioBaseline=frames.a.get();
                         replay.seek(selected.startTime());
@@ -67,6 +99,7 @@ public final class StorageExample {
                     replay.stop();
                 }
             }
+            if(flags.containsKey("upload-logs")) { check(!client.uploadLogs().isEmpty(),"log upload returned identifier"); result.setProperty("uploadLogs","true"); }
             ExportOptions fullOptions=new ExportOptions(selected.startTime(),selected.endTime(),videoId,audioId);
             try (ExportTask task=client.exportRecording(device,fullOptions)) {
                 ExportResult full=task.completion().toCompletableFuture().get(90,TimeUnit.SECONDS);

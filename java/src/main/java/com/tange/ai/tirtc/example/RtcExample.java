@@ -14,7 +14,8 @@ import java.util.function.BooleanSupplier;
 public final class RtcExample {
     public static void main(String[] args) throws Exception {
         Map<String,String> flags = flags(args);
-        if (flags.containsKey("help")) { System.out.println("--endpoint --remote-id --cache-dir --output-dir [--audio-stream-id 10 --video-stream-id 11] [--upload-logs]"); return; }
+        applyRawDumpCase(flags, false);
+        if (flags.containsKey("help")) { System.out.println("--endpoint --remote-id --cache-dir --output-dir [--audio-stream-id 10 --video-stream-id 11] [--raw-dump --raw-dump-seconds 10 --raw-dump-copy-to ABSOLUTE_ZIP] [--upload-logs] [--case-id smoke.raw-dump-upload|integration.raw-dump-recovery]"); return; }
         Path output = Paths.get(required(flags,"output-dir")).toAbsolutePath(); Files.createDirectories(output);
         Properties result = new Properties();
         int audioId = Integer.parseInt(flags.getOrDefault("audio-stream-id","10"));
@@ -35,7 +36,37 @@ public final class RtcExample {
                 connection.connect(required(flags,"remote-id")).get(90,TimeUnit.SECONDS);
                 result.setProperty("connected","true");
                 connection.subscribeAudio(audioId); connection.subscribeVideo(videoId);
+                RawDump rawDump=null;
+                long rawDumpStarted=0;
+                boolean rawDumpEnabled=flags.containsKey("raw-dump")||flags.containsKey("raw-dump-seconds");
+                int rawDumpSeconds=Integer.parseInt(flags.getOrDefault("raw-dump-seconds","10"));
+                if(rawDumpSeconds<=0||rawDumpSeconds>300) throw new IllegalArgumentException("--raw-dump-seconds must be 1..300");
+                if(rawDumpEnabled) {
+                    rawDump=connection.startRawDump(new RawDumpOptions(new int[]{audioId},new int[]{videoId}));
+                    rawDumpStarted=System.nanoTime();
+                }
                 await(() -> frames.all(),frames,"four media outputs");
+                if(rawDump!=null) {
+                    if("integration.raw-dump-recovery".equals(flags.get("case-id"))) {
+                        try { connection.startRawDump(new RawDumpOptions(new int[]{audioId},new int[]{videoId})); throw new IllegalStateException("duplicate raw dump start accepted"); }
+                        catch(TiRtcException expected) { check(expected.category()==ErrorCategory.IN_USE,"duplicate raw dump start category"); }
+                    }
+                    long remaining=TimeUnit.SECONDS.toNanos(rawDumpSeconds)-(System.nanoTime()-rawDumpStarted);
+                    if(remaining>0) TimeUnit.NANOSECONDS.sleep(remaining);
+                    RawDumpArchive archive=rawDump.stop();
+                    check(Files.isRegularFile(archive.path())&&!archive.captureId().isEmpty()&&!archive.sha256().isEmpty(),"raw dump archive");
+                    result.setProperty("rawDumpCaptureId",archive.captureId());
+                    result.setProperty("rawDumpPath",archive.path().toString());
+                    result.setProperty("rawDumpSha256",archive.sha256());
+                    if(flags.containsKey("raw-dump-copy-to")) {
+                        Path copy=Paths.get(flags.get("raw-dump-copy-to"));
+                        check(copy.isAbsolute(),"--raw-dump-copy-to must be absolute");
+                        Files.createDirectories(copy.getParent()); Files.copy(archive.path(),copy,StandardCopyOption.REPLACE_EXISTING);
+                        result.setProperty("rawDumpCopyPath",copy.toString());
+                    }
+                    if("integration.raw-dump-recovery".equals(flags.get("case-id"))) check(rawDump.stop()==archive,"repeated raw dump stop changed result");
+                    rawDump.close();
+                }
                 connection.sendCommand(0x2001,"java-client-command".getBytes("UTF-8"));
                 connection.sendStreamMessage(videoId,Duration.ofMillis(System.currentTimeMillis() & 0xffffffffL),"java-client-message".getBytes("UTF-8"));
                 int beforeKey = frames.keys.get(); connection.requestVideoKeyframe(videoId);
@@ -60,10 +91,17 @@ public final class RtcExample {
         for(int i=0;i<args.length;i++) {
             if(!args[i].startsWith("--")) throw new IllegalArgumentException("expected named option");
             String name=args[i].substring(2);
-            if(name.equals("help")||name.equals("upload-logs")) flags.put(name,"true");
+            if(name.equals("help")||name.equals("upload-logs")||name.equals("raw-dump")) flags.put(name,"true");
             else { if(++i==args.length) throw new IllegalArgumentException("missing option value"); flags.put(name,args[i]); }
         }
         return flags;
+    }
+    static void applyRawDumpCase(Map<String,String> flags,boolean cloud) {
+        String id=flags.get("case-id"); if(id==null) return;
+        String smoke=cloud?"ti-cloud-storage.raw-dump.smoke-upload":"smoke.raw-dump-upload";
+        String integration=cloud?"ti-cloud-storage.raw-dump.integration-recovery":"integration.raw-dump-recovery";
+        if(!id.equals(smoke)&&!id.equals(integration)) throw new IllegalArgumentException("unknown --case-id "+id);
+        flags.put("raw-dump","true"); flags.put("upload-logs","true");
     }
     static String required(Map<String,String> flags,String name) { String value=flags.get(name); if(value==null||value.isEmpty()) throw new IllegalArgumentException("missing --"+name); return value; }
     static String env(String name) { String value=System.getenv(name); if(value==null||value.isEmpty()) throw new IllegalArgumentException("missing "+name); return value; }
