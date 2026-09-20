@@ -6,6 +6,7 @@ export async function saveMediaFileToGallery(
   context: common.UIAbilityContext,
   sourcePath: string,
   mediaKind: string,
+  targetId: number,
 ): Promise<boolean> {
   if (!sourcePath.startsWith('/') || (mediaKind !== 'snapshot' && mediaKind !== 'recording')) {
     return false;
@@ -13,7 +14,7 @@ export async function saveMediaFileToGallery(
   const extension = mediaKind === 'snapshot' ? 'jpg' : 'mp4';
   const photoType = mediaKind === 'snapshot' ? photoAccessHelper.PhotoType.IMAGE : photoAccessHelper.PhotoType.VIDEO;
   const creationConfig: photoAccessHelper.PhotoCreationConfig = {
-    title: `TiCloudStorage-${Date.now()}`,
+    title: `TiRTC-${mediaKind}-${targetId}-${Date.now()}`,
     fileNameExtension: extension,
     photoType,
     subtype: photoAccessHelper.PhotoSubtype.DEFAULT,

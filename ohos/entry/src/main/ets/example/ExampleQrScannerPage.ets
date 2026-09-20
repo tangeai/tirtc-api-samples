@@ -5,6 +5,7 @@ export struct QrScannerPage {
   @Prop cloudStorageMode: boolean = false;
   @Prop payloadText: string = '';
   @Prop errorText: string = '';
+  @State private formatHelpExpanded: boolean = false;
   onBack: () => void = () => {};
   onPayloadChanged: (value: string) => void = () => {};
   onApplyPayload: () => void = () => {};
@@ -14,8 +15,8 @@ export struct QrScannerPage {
       Column() {
         Row() {
           Button('<')
-            .width(42)
-            .height(36)
+            .width(44)
+            .height(44)
             .fontSize(18)
             .fontColor('#659287')
             .backgroundColor('#00FFFFFF')
@@ -27,30 +28,26 @@ export struct QrScannerPage {
                 this.onBack();
               });
             })
-          Text('扫描二维码')
+          Text('导入二维码内容')
             .fontSize(22)
             .fontWeight(FontWeight.Bold)
             .fontColor('#767676')
             .layoutWeight(1)
         }
         .width('100%')
-        .height(42)
+        .height(44)
         Blank().height(18)
-        Text(this.cloudStorageMode ?
-          '扫描云录像 Token，或包含 app_id、token 和可选 endpoint 的配置 JSON。' :
-          '将 TiRTC DevTools CLI 生成的二维码完整放入方框内，系统会自动填充一次性连接 Token。')
+        Text('当前 OHOS Example 未接入相机扫码。请复制二维码内容并在下方手动粘贴。')
           .fontSize(14)
           .fontColor('#666666')
           .lineHeight(20)
           .width('100%')
         Blank().height(20)
-        this.scanArea()
+        this.scannerUnavailableCard()
         Blank().height(20)
         this.manualPayloadField()
         Blank().height(16)
-        if (!this.cloudStorageMode) {
-          this.guideCard()
-        }
+        this.formatHelp()
         if (this.errorText.length > 0) {
           Blank().height(12)
           Text(this.errorText)
@@ -74,34 +71,32 @@ export struct QrScannerPage {
   }
 
   @Builder
-  private scanArea() {
-    Stack({ alignContent: Alignment.Top }) {
-      Column() {
-        Blank().height(44)
-        Text('等待二维码内容')
-          .fontSize(14)
-          .fontColor('#B3B3B3')
-        Blank()
-      }
-      .width('100%')
-      .height('100%')
-      Row() {
-        Text('对准二维码')
-          .fontSize(12)
-          .fontWeight(FontWeight.Bold)
-          .fontColor('#FFFFFF')
-          .padding({ left: 14, right: 14, top: 6, bottom: 6 })
-          .backgroundColor('#66000000')
-          .border({ width: 1, color: '#22FFFFFF', radius: 16 })
-      }
-      .width('100%')
-      .justifyContent(FlexAlign.Center)
-      .padding({ top: 14 })
+  private scannerUnavailableCard() {
+    Column({ space: 8 }) {
+      Text('相机扫码不可用')
+        .fontSize(16)
+        .fontWeight(FontWeight.Bold)
+        .fontColor('#767676')
+      Text('此示例没有申请相机权限，也不会显示虚构的取景框。')
+        .fontSize(13)
+        .fontColor('#848282')
+        .textAlign(TextAlign.Center)
+      Button('扫码功能未接入')
+        .id('tirtc_example_qr_scanner_disabled_action')
+        .accessibilityText('扫码功能未接入，请手动粘贴')
+        .height(44)
+        .fontSize(13)
+        .fontColor('#848282')
+        .backgroundColor('#EEE8DC')
+        .borderRadius(22)
+        .enabled(false)
     }
+    .id('tirtc_example_qr_scanner_unavailable')
     .width('100%')
-    .aspectRatio(1)
-    .backgroundColor('#252525')
-    .border({ width: 0, radius: 30 })
+    .padding({ left: 18, right: 18, top: 24, bottom: 24 })
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+    .alignItems(HorizontalAlign.Center)
   }
 
   @Builder
@@ -111,6 +106,7 @@ export struct QrScannerPage {
         placeholder: this.cloudStorageMode ? '粘贴云录像 Token 或配置 JSON' : '粘贴二维码内容，可为 JSON payload 或纯 v1. Token',
         text: this.payloadText,
       })
+        .id('tirtc_example_qr_manual_payload_field')
         .height(120)
         .fontSize(13)
         .fontColor('#666666')
@@ -121,6 +117,7 @@ export struct QrScannerPage {
         .onChange(this.onPayloadChanged)
       Blank().height(12)
       Button('应用二维码内容')
+        .id('tirtc_example_qr_apply_payload_button')
         .width('100%')
         .height(48)
         .fontSize(15)
@@ -141,30 +138,28 @@ export struct QrScannerPage {
   }
 
   @Builder
-  private guideCard() {
+  private formatHelp() {
     Column() {
-      Text('二维码内容格式')
-        .fontSize(16)
-        .fontWeight(FontWeight.Bold)
-        .fontColor('#767676')
+      Button(this.formatHelpExpanded ? '收起内容格式' : '查看内容格式')
+        .id('tirtc_example_qr_format_help_button')
+        .height(44)
+        .fontSize(14)
+        .fontColor('#659287')
+        .backgroundColor('#00FFFFFF')
         .width('100%')
-      Blank().height(8)
-      Text('二维码可以是包含 app_id、remote_id、token 和可选 endpoint 的 JSON，也可以是纯 v1 Token。')
-        .fontSize(13)
-        .fontColor('#666666')
-        .lineHeight(19)
-        .width('100%')
-      Blank().height(10)
-      Text('{"app_id":"demo","remote_id":"device","endpoint":"https://example.com","token":"v1.example"}')
-        .fontSize(11)
-        .fontColor('#848282')
-        .lineHeight(16)
-        .width('100%')
-      Blank().height(6)
-      Text('v1.example-token')
-        .fontSize(11)
-        .fontColor('#848282')
-        .width('100%')
+        .onClick((): void => {
+          this.formatHelpExpanded = !this.formatHelpExpanded;
+        })
+      if (this.formatHelpExpanded) {
+        Text(this.cloudStorageMode ?
+          '可粘贴纯 APP Token，或包含 app_id、token 和可选 endpoint 的 JSON。' :
+          '可粘贴纯 v1 Token，或包含 app_id、remote_id、token 和可选 endpoint 的 JSON。')
+          .fontSize(13)
+          .fontColor('#666666')
+          .lineHeight(19)
+          .width('100%')
+          .padding({ top: 8 })
+      }
     }
     .width('100%')
     .padding({ left: 18, right: 18, top: 16, bottom: 16 })

@@ -5,6 +5,7 @@ import {
   TiCloudStorageRecordingRange,
   TiCloudStorageReplaySpeed,
   TiCloudStorageVideoOutputView,
+  TI_CLOUD_STORAGE_ERROR_IN_USE,
   TI_CLOUD_STORAGE_ERROR_OK,
 } from 'tirtc/Index';
 import {
@@ -19,6 +20,12 @@ import { TiCloudStorageExampleFlow, TiCloudStorageExampleFlowListener } from './
 
 const NOTICE_AUTO_HIDE_MS: number = 3000;
 const VIDEO_OUTPUT_MOUNT_OBSERVE_MS: number = 700;
+const FLOW_CLEANUP_RETRY_DELAY_MS: number = 250;
+
+function parseCloudAreaDimension(value: Length): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' ? Number.parseFloat(value) : 0;
+}
 
 function observeCloudStorageVideoOutputMount(): Promise<void> {
   return new Promise<void>((resolve: () => void): void => {
@@ -67,8 +74,8 @@ export struct TiCloudStorageExamplePage {
   @Prop appId: string = '';
   @Prop endpoint: string = '';
   @Prop token: string = '';
-  @Prop audioChannelId: number = DEFAULT_AUDIO_STREAM_ID;
-  @Prop videoChannelId: number = DEFAULT_VIDEO_STREAM_ID;
+  @Prop audioChannelId: number | null = DEFAULT_AUDIO_STREAM_ID;
+  @Prop videoChannelIds: Array<number> = [DEFAULT_VIDEO_STREAM_ID];
   @Prop consoleLogEnabled: boolean = false;
   onBack: () => void = () => {};
   @State private notice: string = '';
@@ -80,6 +87,9 @@ export struct TiCloudStorageExamplePage {
   @State private selectedIndex: number = -1;
   @State private currentTimeMs: number = 0;
   @State private replayState: string = 'idle';
+  @State private videoStates: Array<string> = ['idle'];
+  @State private selectedVideoChannelId: number = DEFAULT_VIDEO_STREAM_ID;
+  @State private maximizedVideoChannelId: number = -1;
   @State private paused: boolean = false;
   @State private muted: boolean = false;
   @State private speedIndex: number = 3;
@@ -88,14 +98,18 @@ export struct TiCloudStorageExamplePage {
   @State private latestMediaKind: string = '';
   @State private exportProgress: number = -1;
   @State private uploadingLogs: boolean = false;
+  @State private rawDumpCapturing: boolean = false;
+  @State private rawDumpBusy: boolean = false;
+  @State private rawDumpUploadPending: boolean = false;
   @State private dateText: string = currentCloudStorageDateText();
   @State private visibleMonth: string = currentCloudStorageDateText().slice(0, 7);
   @State private recordingDays: Array<string> = [];
   @State private monthLoading: boolean = false;
   @State private monthFailed: boolean = false;
   @State private queryFailed: boolean = false;
+  @State private stageWidth: number = 0;
   private flow?: TiCloudStorageExampleFlow;
-  private closing?: Promise<void>;
+  private closing?: Promise<boolean>;
   private active: boolean = false;
   private generation: number = 0;
   private dayQueryGeneration: number = 0;
@@ -112,7 +126,7 @@ export struct TiCloudStorageExamplePage {
     this.active = false;
     this.generation += 1;
     this.stopNoticeTimer();
-    void this.closeFlow();
+    void this.closeFlowUntilReleased();
   }
 
   build() {
@@ -121,10 +135,12 @@ export struct TiCloudStorageExamplePage {
         this.topBar()
         Stack() {
           Stack({ alignContent: Alignment.Center }) {
-            if (this.flowReady && this.flow !== undefined) {
-              TiCloudStorageVideoOutputView({
-                output: this.flow!.videoOutput,
-              })
+            if (this.videoChannelIds.length === 0) {
+              Text(this.audioChannelId === null ? '未配置音视频' : '仅音频回放')
+                .fontSize(14)
+                .fontColor('#CCFFFFFF')
+            } else if (this.flowReady && this.flow !== undefined) {
+              this.videoMosaic()
             }
           }
           .width('100%')
@@ -164,17 +180,13 @@ export struct TiCloudStorageExamplePage {
                   .fontColor('#FFFFFF')
                   .padding({ left: 16, right: 16, top: 10, bottom: 10 })
                   .backgroundColor('#666666')
-                  .borderRadius(18)
+                  .borderRadius(16)
                   .constraintSize({ maxWidth: '80%' })
               }
               .width('100%')
               .margin({ top: 16 })
             }
             Blank()
-            if (this.selectedRange() !== undefined) {
-              this.seekPanel()
-              Blank().height(12)
-            }
             this.controls()
           }
           .width('100%')
@@ -184,11 +196,36 @@ export struct TiCloudStorageExamplePage {
             angle: 180,
             colors: [['#33000000', 0.0], ['#00000000', 0.45], ['#66000000', 1.0]],
           })
+          .hitTestBehavior(HitTestMode.Transparent)
+          Row() {
+            Column({ space: 5 }) {
+              Button(this.rawDumpCapturing ? '结束上传' : (this.rawDumpUploadPending ? '重试上传' : '抓数据'))
+                .id('tirtc_example_ti_cloud_storage_raw_dump_button')
+                .accessibilityText(this.rawDumpCapturing ? '停止云录像诊断抓取' : '开始云录像诊断抓取')
+                .width(56)
+                .height(56)
+                .fontSize(11)
+                .fontColor('#FFFFFF')
+                .backgroundColor(this.rawDumpCapturing ? '#E68A35' : '#659287')
+                .borderRadius(28)
+                .enabled(this.canControl() && !this.rawDumpBusy && !this.uploadingLogs)
+                .onClick((): void => {
+                  void this.toggleRawDump();
+                })
+            }
+            .alignItems(HorizontalAlign.Start)
+            Blank()
+          }
+          .width('100%')
+          .padding({ left: 12 })
         }
         .width('100%')
         .layoutWeight(1)
         .backgroundColor('#252525')
         .id('tirtc_example_ti_cloud_storage_video_stage')
+        .onAreaChange((oldArea: Area, newArea: Area): void => {
+          this.stageWidth = parseCloudAreaDimension(newArea.width);
+        })
       }
       .width('100%')
       .height('100%')
@@ -205,12 +242,139 @@ export struct TiCloudStorageExamplePage {
   }
 
   @Builder
+  private videoMosaic() {
+    if (this.selectedVideoChannelId === this.videoChannelIds[1]) {
+      this.videoMosaicForPrimary(1)
+    } else if (this.selectedVideoChannelId === this.videoChannelIds[2]) {
+      this.videoMosaicForPrimary(2)
+    } else {
+      this.videoMosaicForPrimary(0)
+    }
+  }
+
+  @Builder
+  private videoMosaicForPrimary(primaryIndex: number) {
+    if (this.videoChannelIds.length === 1) {
+      this.videoLane(0)
+    } else if (this.videoChannelIds.length === 2) {
+      if (this.stageWidth >= 600) {
+        Row({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+          Column() { this.videoLane(primaryIndex) }.layoutWeight(1).height('100%')
+          Column() { this.videoLane(this.otherVideoIndexes(primaryIndex)[0]) }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 0 : 1)
+            .visibility(this.maximizedVideoChannelId >= 0 ? Visibility.None : Visibility.Visible)
+            .height('100%')
+        }.width('100%').height('100%')
+      } else {
+        Column({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+          Column() { this.videoLane(primaryIndex) }.layoutWeight(1).width('100%')
+          Row() { this.videoLane(this.otherVideoIndexes(primaryIndex)[0]) }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 0 : 1)
+            .visibility(this.maximizedVideoChannelId >= 0 ? Visibility.None : Visibility.Visible)
+            .width('100%')
+        }.width('100%').height('100%')
+      }
+    } else {
+      if (this.stageWidth >= 600) {
+        Row({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+          Column() { this.videoLane(primaryIndex) }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 1 : 2).height('100%')
+          Column({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+            this.videoLane(this.otherVideoIndexes(primaryIndex)[0])
+            this.videoLane(this.otherVideoIndexes(primaryIndex)[1])
+          }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 0 : 1)
+            .visibility(this.maximizedVideoChannelId >= 0 ? Visibility.None : Visibility.Visible)
+            .height('100%')
+        }.width('100%').height('100%')
+      } else {
+        Column({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+          Column() { this.videoLane(primaryIndex) }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 1 : 2).width('100%')
+          Row({ space: this.maximizedVideoChannelId >= 0 ? 0 : 4 }) {
+            this.videoLane(this.otherVideoIndexes(primaryIndex)[0])
+            this.videoLane(this.otherVideoIndexes(primaryIndex)[1])
+          }
+            .layoutWeight(this.maximizedVideoChannelId >= 0 ? 0 : 1)
+            .visibility(this.maximizedVideoChannelId >= 0 ? Visibility.None : Visibility.Visible)
+            .width('100%')
+        }.width('100%').height('100%')
+      }
+    }
+  }
+
+  @Builder
+  private videoLane(index: number) {
+    Stack({ alignContent: Alignment.Center }) {
+      TiCloudStorageVideoOutputView({ output: this.flow!.videoOutputs[index] })
+      if (this.videoStates[index] !== 'rendering') {
+        Text(this.videoStates[index] === 'failed' ? '播放失败' :
+          this.videoStates[index] === 'completed' ? '播放完成' : '等待视频')
+          .fontSize(13)
+          .fontColor('#FFFFFF')
+      }
+      Column() {
+        Row() {
+          Button(`视频 ${index + 1} · Channel ${this.videoChannelIds[index]}`)
+            .id(`tirtc_example_ti_cloud_storage_video_lane_${this.videoChannelIds[index]}`)
+            .accessibilityText(`视频 ${index + 1}，Channel ${this.videoChannelIds[index]}，点击选择或切换最大化`)
+            .height(44)
+            .fontSize(11).fontColor('#FFFFFF')
+            .padding({ left: 12, right: 12 })
+            .backgroundColor('#75000000').borderRadius(8)
+            .onClick((): void => this.activateVideoLane(this.videoChannelIds[index]))
+          if (this.selectedVideoChannelId === this.videoChannelIds[index]) {
+            Button(this.maximizedVideoChannelId === this.videoChannelIds[index] ? '恢复宫格' : '最大化')
+              .id(this.maximizedVideoChannelId === this.videoChannelIds[index] ?
+                `tirtc_example_ti_cloud_storage_video_lane_restore_${this.videoChannelIds[index]}` :
+                `tirtc_example_ti_cloud_storage_video_lane_maximize_${this.videoChannelIds[index]}`)
+              .accessibilityText(this.maximizedVideoChannelId === this.videoChannelIds[index] ?
+                `恢复 Channel ${this.videoChannelIds[index]} 宫格` :
+                `最大化 Channel ${this.videoChannelIds[index]}`)
+              .height(44).fontSize(11).fontColor('#FFFFFF')
+              .padding({ left: 12, right: 12 })
+              .backgroundColor('#75659287').borderRadius(8)
+              .onClick((): void => {
+                this.maximizedVideoChannelId =
+                  this.maximizedVideoChannelId === this.videoChannelIds[index] ? -1 : this.videoChannelIds[index];
+              })
+          }
+          Blank()
+        }.width('100%')
+        Blank()
+      }
+      .width('100%').height('100%').padding(8)
+    }
+    .id(`tirtc_example_ti_cloud_storage_video_lane_surface_${this.videoChannelIds[index]}`)
+    .layoutWeight(1).width('100%').height('100%')
+    .border({ width: this.selectedVideoChannelId === this.videoChannelIds[index] ? 2 : 0, color: '#659287' })
+  }
+
+  private otherVideoIndexes(primary: number): Array<number> {
+    const indexes: Array<number> = [];
+    for (let index = 0; index < Math.min(3, this.videoChannelIds.length); index += 1) {
+      if (index !== primary) indexes.push(index);
+    }
+    return indexes;
+  }
+
+  private activateVideoLane(channelId: number): void {
+    if (this.selectedVideoChannelId !== channelId) {
+      this.maximizedVideoChannelId = -1;
+      this.selectVideoChannel(channelId);
+      return;
+    }
+    this.maximizedVideoChannelId = this.maximizedVideoChannelId === channelId ? -1 : channelId;
+  }
+
+  @Builder
   private topBar() {
     Row() {
       Button('<')
         .id('tirtc_example_ti_cloud_storage_back_button')
-        .width(42)
-        .height(36)
+        .accessibilityText('返回')
+        .width(48)
+        .height(48)
         .fontSize(18)
         .fontColor('#659287')
         .backgroundColor('#00FFFFFF')
@@ -226,36 +390,42 @@ export struct TiCloudStorageExamplePage {
         .layoutWeight(1)
       Button('选择录像')
         .id('tirtc_example_ti_cloud_storage_choose_button')
-        .height(36)
+        .height(48)
         .fontSize(12)
         .fontColor(this.flowReady ? '#659287' : '#777777')
         .backgroundColor('#00FFFFFF')
-        .border({ width: 1, color: this.flowReady ? '#659287' : '#777777', radius: 10 })
+        .border({ width: 1, color: this.flowReady ? '#659287' : '#777777', radius: 12 })
         .enabled(this.flowReady)
         .onClick((): void => {
           this.calendarVisible = this.ranges.length === 0;
           this.sheetVisible = true;
         })
       Blank().width(8)
-      Button(this.uploadingLogs ? '上传中' : '上传日志')
-        .id('tirtc_example_ti_cloud_storage_log_upload_button')
-        .height(36)
+      Button('更多')
+        .id('tirtc_example_ti_cloud_storage_more_button')
+        .accessibilityText('更多操作')
+        .width(48)
+        .height(48)
         .fontSize(12)
-        .fontColor(this.flowReady && !this.uploadingLogs ? '#659287' : '#777777')
+        .fontColor('#659287')
         .backgroundColor('#00FFFFFF')
-        .border({
-          width: 1,
-          color: this.flowReady && !this.uploadingLogs ? '#659287' : '#777777',
-          radius: 10,
-        })
+        .bindMenu(this.topBarMenu)
+    }
+    .width('100%')
+    .padding({ left: 8, right: 16, top: PLAYER_TOP_PADDING })
+    .backgroundColor('#FFF8E8')
+  }
+
+  @Builder
+  private topBarMenu() {
+    Menu() {
+      MenuItem({ content: this.uploadingLogs ? '上传中' : '上传日志' })
+        .id('tirtc_example_ti_cloud_storage_log_upload_button')
         .enabled(this.flowReady && !this.uploadingLogs)
         .onClick((): void => {
           void this.uploadLogs();
         })
     }
-    .width('100%')
-    .padding({ left: 8, right: 16, top: PLAYER_TOP_PADDING })
-    .backgroundColor('#FFF8E8')
   }
 
   @Builder
@@ -286,66 +456,25 @@ export struct TiCloudStorageExamplePage {
     .width('100%')
     .padding({ left: 14, right: 14, top: 8, bottom: 8 })
     .backgroundColor('#75000000')
-    .border({ width: 1, color: '#33FFFFFF', radius: 24 })
+    .border({ width: 1, color: '#33FFFFFF', radius: 16 })
   }
 
   @Builder
   private controls() {
-    Column({ space: 12 }) {
-      Row({ space: 12 }) {
-        Blank()
-        Button(this.recording ? '◉' : '●')
-          .id('tirtc_example_ti_cloud_storage_recording_button')
-          .accessibilityText(this.recording ? '停止本地保存' : '开始本地保存')
-          .width(48)
-          .height(48)
-          .fontSize(18)
-          .fontColor('#659287')
-          .backgroundColor('#D9E5E2')
-          .borderRadius(24)
-          .enabled(this.canControl() && !this.mediaBusy)
-          .onClick((): void => {
-            void this.toggleRecording();
-          })
-        Button('▣')
-          .id('tirtc_example_ti_cloud_storage_snapshot_button')
-          .accessibilityText('截图')
-          .width(48)
-          .height(48)
-          .fontSize(18)
-          .fontColor('#659287')
-          .backgroundColor('#D9E5E2')
-          .borderRadius(24)
-          .enabled(this.replayState === 'rendering' && !this.mediaBusy)
-          .onClick((): void => {
-            void this.takeSnapshot();
-          })
-        Button('▤')
-          .id('tirtc_example_ti_cloud_storage_gallery_button')
-          .accessibilityText('保存到系统相册')
-          .width(48)
-          .height(48)
-          .fontSize(18)
-          .fontColor('#659287')
-          .backgroundColor('#D9E5E2')
-          .borderRadius(24)
-          .enabled(this.latestMediaKind.length > 0 && !this.mediaBusy)
-          .onClick((): void => {
-            void this.saveLatestToGallery();
-          })
+    Column({ space: 8 }) {
+      if (this.selectedRange() !== undefined) {
+        this.seekPanel()
       }
-      .width('100%')
       Row({ space: 10 }) {
-        Blank()
         Button(this.muted ? '恢复声音' : '静音')
           .id('tirtc_example_ti_cloud_storage_mute_button')
-          .height(50)
+          .height(52)
           .fontSize(13)
           .fontWeight(FontWeight.Medium)
           .fontColor(this.muted ? '#FFFFFF' : '#659287')
           .backgroundColor(this.muted ? '#F59E0B' : '#FFFFFF')
-          .borderRadius(25)
-          .enabled(this.canControl() && this.speedIndex === 3)
+          .borderRadius(12)
+          .enabled(this.canControl() && this.speedIndex === 3 && this.audioChannelId !== null)
           .onClick((): void => {
             this.toggleMuted();
           })
@@ -361,11 +490,11 @@ export struct TiCloudStorageExamplePage {
           .id('tirtc_example_ti_cloud_storage_speed_selector')
           .selected(this.speedIndex)
           .value(this.speedLabel())
-          .height(50)
+          .height(52)
           .font({ size: 13, weight: FontWeight.Medium })
           .fontColor('#659287')
           .backgroundColor('#FFFFFF')
-          .borderRadius(25)
+          .borderRadius(12)
           .padding({ left: 14, right: 14 })
           .enabled(this.canControl())
           .onSelect((index: number): void => {
@@ -374,19 +503,57 @@ export struct TiCloudStorageExamplePage {
         Button(this.paused ? '继续播放' : '暂停播放')
           .id('tirtc_example_ti_cloud_storage_pause_button')
           .height(56)
+          .layoutWeight(1)
           .fontSize(16)
           .fontWeight(FontWeight.Medium)
           .fontColor('#FFFFFF')
           .backgroundColor('#659287')
-          .borderRadius(28)
+          .borderRadius(16)
           .enabled(this.canControl())
           .onClick((): void => {
             this.togglePause();
           })
+        Button('媒体')
+          .id('tirtc_example_ti_cloud_storage_media_more_button')
+          .accessibilityText('媒体操作')
+          .width(52)
+          .height(52)
+          .fontSize(13)
+          .fontColor('#659287')
+          .backgroundColor('#FFFFFF')
+          .borderRadius(12)
+          .bindMenu(this.mediaMenu)
       }
       .width('100%')
     }
     .width('100%')
+  }
+
+  @Builder
+  private mediaMenu() {
+    Menu() {
+      MenuItem({ content: this.recording ? '停止本地保存' : '开始本地保存' })
+        .id('tirtc_example_ti_cloud_storage_recording_button')
+        .accessibilityText(this.recording ? '停止本地保存' : '开始本地保存')
+        .enabled(this.canControl() && !this.mediaBusy && this.selectedVideoChannelId >= 0)
+        .onClick((): void => {
+          void this.toggleRecording();
+        })
+      MenuItem({ content: '截图' })
+        .id('tirtc_example_ti_cloud_storage_snapshot_button')
+        .accessibilityText('截图')
+        .enabled(this.replayState === 'rendering' && !this.mediaBusy && this.selectedVideoChannelId >= 0)
+        .onClick((): void => {
+          void this.takeSnapshot();
+        })
+      MenuItem({ content: '保存到系统相册' })
+        .id('tirtc_example_ti_cloud_storage_gallery_button')
+        .accessibilityText('保存到系统相册')
+        .enabled(this.latestMediaKind.length > 0 && !this.mediaBusy)
+        .onClick((): void => {
+          void this.saveLatestToGallery();
+        })
+    }
   }
 
   @Builder
@@ -395,7 +562,7 @@ export struct TiCloudStorageExamplePage {
       Row() {
         Button('上个月')
           .id('tirtc_example_ti_cloud_storage_previous_month_button')
-          .height(36)
+          .height(44)
           .fontSize(12)
           .fontColor('#659287')
           .backgroundColor('#00FFFFFF')
@@ -411,7 +578,7 @@ export struct TiCloudStorageExamplePage {
           .textAlign(TextAlign.Center)
         Button('下个月')
           .id('tirtc_example_ti_cloud_storage_next_month_button')
-          .height(36)
+          .height(44)
           .fontSize(12)
           .fontColor('#659287')
           .backgroundColor('#00FFFFFF')
@@ -444,6 +611,7 @@ export struct TiCloudStorageExamplePage {
               .id(date.length === 0 ? `tirtc_example_ti_cloud_storage_calendar_blank_${index}` :
                 `tirtc_example_ti_cloud_storage_calendar_day_${date}`)
               .height(46)
+              .accessibilityText(this.calendarDayAccessibilityLabel(date))
               .fontSize(10)
               .fontColor(this.dateText === date ? '#FFFFFF' : '#666666')
               .backgroundColor(this.dateText === date ? '#659287' : '#24659287')
@@ -462,9 +630,14 @@ export struct TiCloudStorageExamplePage {
       .rowsGap(2)
       .width('100%')
       if (this.monthLoading) {
-        Text('正在加载月份…').fontSize(12).fontColor('#848282')
+        Text('正在加载月份…')
+          .id('tirtc_example_ti_cloud_storage_month_loading')
+          .fontSize(12)
+          .fontColor('#848282')
       } else if (this.monthFailed) {
         Button('月份加载失败，重试')
+          .id('tirtc_example_ti_cloud_storage_month_error_retry')
+          .height(44)
           .fontSize(12)
           .fontColor('#B42318')
           .backgroundColor('#00FFFFFF')
@@ -514,7 +687,7 @@ export struct TiCloudStorageExamplePage {
                 .layoutWeight(1)
               Button('重新选择日期')
                 .id('tirtc_example_ti_cloud_storage_reselect_date_button')
-                .height(36)
+                .height(44)
                 .fontSize(12)
                 .fontColor('#659287')
                 .backgroundColor('#00FFFFFF')
@@ -539,6 +712,7 @@ export struct TiCloudStorageExamplePage {
                       .fontColor('#848282')
                       .margin({ top: 12 })
                   }
+                  .id('tirtc_example_ti_cloud_storage_query_loading')
                   .width('100%')
                   .padding(24)
                 } else if (this.queryFailed) {
@@ -561,6 +735,7 @@ export struct TiCloudStorageExamplePage {
                         void this.querySelectedDay();
                       })
                   }
+                  .id('tirtc_example_ti_cloud_storage_query_error')
                   .width('100%')
                   .padding(24)
                 } else if (this.ranges.length === 0) {
@@ -570,7 +745,7 @@ export struct TiCloudStorageExamplePage {
                       .fontColor('#848282')
                     Button('重新查询')
                       .id('tirtc_example_ti_cloud_storage_query_empty_retry_button')
-                      .height(40)
+                      .height(44)
                       .fontSize(12)
                       .fontWeight(FontWeight.Medium)
                       .fontColor('#659287')
@@ -583,6 +758,7 @@ export struct TiCloudStorageExamplePage {
                         void this.querySelectedDay();
                       })
                   }
+                  .id('tirtc_example_ti_cloud_storage_query_empty')
                   .width('100%')
                   .padding(24)
                 } else {
@@ -602,7 +778,8 @@ export struct TiCloudStorageExamplePage {
                         .layoutWeight(1)
                         Button(this.exportProgress >= 0 ? `${Math.round(this.exportProgress * 100)}%` : '下载')
                           .id(`tirtc_example_ti_cloud_storage_export_${range.startTimeMs}`)
-                          .height(40)
+                          .height(44)
+                          .accessibilityText(this.exportProgress >= 0 ? '录像导出中' : '下载录像段')
                           .fontSize(12)
                           .fontWeight(FontWeight.Medium)
                           .fontColor('#659287')
@@ -637,6 +814,7 @@ export struct TiCloudStorageExamplePage {
         }
       }
       .width('100%')
+      .constraintSize({ maxWidth: 720 })
       .height('88%')
       .padding({ left: 0, right: 0, top: 6, bottom: 12 })
       .backgroundColor('#FFF8E8')
@@ -654,9 +832,7 @@ export struct TiCloudStorageExamplePage {
   }
 
   private async initialize(generation: number): Promise<void> {
-    if (this.closing !== undefined) {
-      await this.closing;
-    }
+    if (this.closing !== undefined || this.flow !== undefined) await this.closeFlowUntilReleased();
     if (!this.isCurrent(generation)) return;
     const context = getContext(this) as common.UIAbilityContext;
     const initCode = await TiCloudStorage.init({
@@ -678,13 +854,17 @@ export struct TiCloudStorageExamplePage {
         if (!this.isCurrent(generation)) return;
         this.replayState = state;
       },
+      onVideoState: (channelId: number, state: string): void => {
+        if (!this.isCurrent(generation)) return;
+        const index = this.videoChannelIds.indexOf(channelId);
+        if (index < 0) return;
+        const next = this.videoStates.slice();
+        next[index] = state;
+        this.videoStates = next;
+      },
       onTimeChanged: (timeMs: number): void => {
         if (!this.isCurrent(generation)) return;
         this.currentTimeMs = timeMs;
-      },
-      onCompleted: (): void => {
-        if (!this.isCurrent(generation)) return;
-        this.replayState = 'completed';
       },
       onError: (code: number): void => {
         if (!this.isCurrent(generation)) return;
@@ -694,14 +874,28 @@ export struct TiCloudStorageExamplePage {
         if (!this.isCurrent(generation)) return;
         this.exportProgress = progress;
       },
+      onExportProgressDetail: (progress): void => {
+        if (!this.isCurrent(generation)) return;
+        this.exportProgress = progress.fraction;
+      },
+      onRecordingGap: (gap): void => {
+        if (!this.isCurrent(generation)) return;
+        this.setNotice(`录像缺口 · ${gap.range.startTimeMs}-${gap.range.endTimeMs}`);
+      },
+      onExportReport: (report): void => {
+        if (!this.isCurrent(generation)) return;
+        this.setNotice(`导出覆盖 ${report.coveredDurationMs}ms · 缺口 ${report.gaps.length}`);
+      },
       onMediaChanged: (kind: string): void => {
         if (!this.isCurrent(generation)) return;
         this.latestMediaKind = kind;
       },
     };
-    this.flow = new TiCloudStorageExampleFlow(this.token, listener);
+    this.videoStates = this.videoChannelIds.map((): string => 'idle');
+    this.selectedVideoChannelId = this.videoChannelIds.length > 0 ? this.videoChannelIds[0] : -1;
+    this.flow = new TiCloudStorageExampleFlow(this.token, this.videoChannelIds, listener);
     if (!this.isCurrent(generation)) {
-      await this.closeFlow();
+      await this.closeFlowUntilReleased();
       return;
     }
     this.flowReady = true;
@@ -781,18 +975,28 @@ export struct TiCloudStorageExamplePage {
 
   private calendarDayLabel(date: string): string {
     if (date.length === 0) return '';
+    const statusDot = this.recordingDays.indexOf(date) >= 0 ? '●' : '○';
+    return `${Number(date.slice(-2))}\n${statusDot}`;
+  }
+
+  private calendarDayAccessibilityLabel(date: string): string {
+    if (date.length === 0) return '日历空白';
     const state = this.recordingDays.indexOf(date) >= 0 ? '有录像' : '无录像';
-    return `${Number(date.slice(-2))}\n${state}`;
+    return `${date}，${state}`;
   }
 
   private async playRange(index: number): Promise<void> {
     const flow = this.flow;
     const range = this.ranges[index];
     if (flow === undefined || range === undefined) return;
+    if (this.audioChannelId === null && this.videoChannelIds.length === 0) {
+      this.setNotice('请至少选择一路音频或视频后再播放。');
+      return;
+    }
     this.sheetVisible = false;
     await observeCloudStorageVideoOutputMount();
     if (this.flow !== flow || this.ranges[index] !== range) return;
-    const code = flow.play(range, this.videoChannelId, this.audioChannelId);
+    const code = flow.play(range, this.audioChannelId);
     if (code === TI_CLOUD_STORAGE_ERROR_OK) {
       this.selectedIndex = index;
       this.currentTimeMs = range.startTimeMs;
@@ -852,7 +1056,8 @@ export struct TiCloudStorageExamplePage {
     const flow = this.flow;
     if (flow === undefined || this.mediaBusy) return;
     if (!this.recording) {
-      const code = flow.startRecording(this.videoChannelId, this.audioChannelId);
+      if (this.selectedVideoChannelId < 0) return;
+      const code = flow.startRecording(this.selectedVideoChannelId, this.audioChannelId);
       if (code === TI_CLOUD_STORAGE_ERROR_OK) {
         this.recording = true;
         this.setNotice('已开始本地保存');
@@ -885,7 +1090,8 @@ export struct TiCloudStorageExamplePage {
     if (flow === undefined || range === undefined || this.exportProgress >= 0) return;
     this.exportProgress = 0;
     this.setNotice('正在下载录像…');
-    const code = await flow.exportRecording(range, this.videoChannelId, this.audioChannelId);
+    if (this.selectedVideoChannelId < 0) return;
+    const code = await flow.exportRecording(range, this.selectedVideoChannelId, this.audioChannelId);
     this.exportProgress = -1;
     this.setNotice(code === TI_CLOUD_STORAGE_ERROR_OK ? '范围录像已下载' :
       `导出失败 · ${TiCloudStorage.errorToString(code)} (${code})`);
@@ -896,7 +1102,8 @@ export struct TiCloudStorageExamplePage {
     if (flow === undefined || this.mediaBusy || flow.latestMediaPath().length === 0) return;
     this.mediaBusy = true;
     const context = getContext(this) as common.UIAbilityContext;
-    const saved = await saveMediaFileToGallery(context, flow.latestMediaPath(), flow.latestMediaKind());
+    const saved = await saveMediaFileToGallery(
+      context, flow.latestMediaPath(), flow.latestMediaKind(), flow.latestMediaTarget());
     if (!saved) {
       this.mediaBusy = false;
       this.setNotice('保存到系统相册失败，源文件已保留。');
@@ -908,14 +1115,56 @@ export struct TiCloudStorageExamplePage {
       `相册已保存，但源文件删除失败 · ${TiCloudStorage.errorToString(deleted)} (${deleted})`);
   }
 
-  private async uploadLogs(): Promise<void> {
-    if (this.uploadingLogs) return;
+  private selectVideoChannel(channelId: number): void {
+    if (this.videoChannelIds.indexOf(channelId) < 0) return;
+    this.selectedVideoChannelId = channelId;
+    this.flow?.selectVideoChannel(channelId);
+  }
+
+  private async uploadLogs(): Promise<boolean> {
+    if (this.uploadingLogs) return false;
     this.uploadingLogs = true;
     this.setNotice('日志上传中');
-    const result = await TiRtcLogging.upload();
-    this.uploadingLogs = false;
-    this.setNotice(result.code === TI_CLOUD_STORAGE_ERROR_OK ? `日志上传成功 · ${result.logId ?? ''}` :
-      `日志上传失败 · ${result.code}`);
+    try {
+      const result = await TiRtcLogging.upload();
+      this.setNotice(result.code === TI_CLOUD_STORAGE_ERROR_OK ? `日志上传成功 · ${result.logId ?? ''}` :
+        `日志上传失败 · ${result.code}`);
+      if (result.code === TI_CLOUD_STORAGE_ERROR_OK) this.rawDumpUploadPending = false;
+      return result.code === TI_CLOUD_STORAGE_ERROR_OK;
+    } catch (_) {
+      this.setNotice('日志上传失败');
+      return false;
+    } finally {
+      this.uploadingLogs = false;
+    }
+  }
+
+  private async toggleRawDump(): Promise<void> {
+    const flow = this.flow;
+    if (flow === undefined || this.rawDumpBusy) return;
+    this.rawDumpBusy = true;
+    if (this.rawDumpUploadPending) {
+      const uploaded = await this.uploadLogs();
+      this.rawDumpBusy = false;
+      if (!uploaded) this.setNotice('诊断数据上传失败 · 点击重试上传');
+      return;
+    }
+    const result = await flow.toggleRawDump(this.audioChannelId);
+    this.rawDumpBusy = false;
+    if (result.code !== TI_CLOUD_STORAGE_ERROR_OK) {
+      this.rawDumpCapturing = result.capturing;
+      this.setNotice(`诊断抓取失败 · ${result.code}`);
+      return;
+    }
+    this.rawDumpCapturing = result.capturing;
+    if (result.capturing) {
+      this.setNotice('正在抓取诊断数据 · 再次点击结束并上传日志');
+    } else {
+      this.setNotice(`诊断抓取完成 · ${result.captureId}`);
+      this.rawDumpUploadPending = true;
+      const uploaded = await this.uploadLogs();
+      if (!uploaded) this.setNotice(`诊断数据上传失败 · ${result.captureId} · 点击重试上传`);
+    }
   }
 
   private seekTo(value: number): void {
@@ -951,35 +1200,52 @@ export struct TiCloudStorageExamplePage {
   private async backToCloudStorageEntry(): Promise<void> {
     this.active = false;
     this.generation += 1;
-    await this.closeFlow();
+    if (!await this.closeFlow()) {
+      this.active = true;
+      this.generation += 1;
+      this.setNotice('诊断数据仍在结束，请稍后重试。');
+      return;
+    }
     this.onBack();
   }
 
-  private closeFlow(): Promise<void> {
+  private closeFlow(): Promise<boolean> {
     if (this.closing !== undefined) return this.closing;
     const flow = this.flow;
-    this.flow = undefined;
     this.dayQueryGeneration += 1;
     this.monthQueryGeneration += 1;
-    this.flowReady = false;
-    this.sheetVisible = false;
-    this.querying = false;
-    this.monthLoading = false;
-    const started = (async (): Promise<void> => {
+    const started = (async (): Promise<boolean> => {
       if (flow !== undefined) {
-        await flow.dispose();
+        const code = await flow.dispose();
+        if (code === TI_CLOUD_STORAGE_ERROR_IN_USE) return false;
+        if (this.flow === flow) this.flow = undefined;
         TiCloudStorage.shutdown();
       }
+      this.rawDumpCapturing = false;
+      this.rawDumpUploadPending = false;
+      this.flowReady = false;
+      this.sheetVisible = false;
+      this.querying = false;
+      this.monthLoading = false;
       this.recording = false;
       this.mediaBusy = false;
       this.exportProgress = -1;
       this.latestMediaKind = '';
+      return true;
     })();
     this.closing = started;
     void started.then((): void => {
       if (this.closing === started) this.closing = undefined;
     });
     return started;
+  }
+
+  private async closeFlowUntilReleased(): Promise<void> {
+    while (!await this.closeFlow()) {
+      await new Promise<void>((resolve): void => {
+        setTimeout(resolve, FLOW_CLEANUP_RETRY_DELAY_MS);
+      });
+    }
   }
 
   private isCurrent(generation: number): boolean {

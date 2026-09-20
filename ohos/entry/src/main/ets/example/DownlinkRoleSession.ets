@@ -18,10 +18,12 @@ import {
   TiRtcRecordingTask,
   TiRtcRecordingFile,
   TiRtcSnapshotFile,
+  TiRawDump,
   TiRtcOutputBufferStrategy,
   TiRtcVideoDecoderPreference,
   TiRtcVideoOutput,
   TiRtcVideoOutputState,
+  TI_CLOUD_STORAGE_ERROR_IN_USE,
 } from 'tirtc/Index';
 import {
   asciiBytes,
@@ -42,6 +44,8 @@ import {
 } from './DownlinkAsync';
 
 const MEDIA_CODEC_AUDIO_G711A = 1;
+const RAW_DUMP_STOP_RETRY_DELAY_MS = 50;
+const RAW_DUMP_STOP_RETRY_LIMIT = 20;
 const MEDIA_CODEC_AUDIO_AAC = 2;
 const MEDIA_CODEC_AUDIO_PCM = 3;
 const MEDIA_CODEC_AUDIO_OPUS = 4;
@@ -59,8 +63,8 @@ export interface DownlinkRoleStartOptions {
   appId: string;
   remoteId: string;
   token: string;
-  audioStreamId: number;
-  videoStreamId: number;
+  audioStreamId: number | null;
+  videoStreamIds: Array<number>;
   videoDecoderPreference: TiRtcVideoDecoderPreference;
   outputBufferStrategy: TiRtcOutputBufferStrategy;
   consoleLogEnabled: boolean;
@@ -73,7 +77,7 @@ export interface DownlinkRoleCallbacks {
   onLastErrorChanged?: (error: string) => void;
   onConnStateChanged?: (state: TiRtcConnState) => void;
   onAudioStateChanged?: (state: TiRtcAudioOutputState) => void;
-  onVideoStateChanged?: (state: TiRtcVideoOutputState) => void;
+  onVideoStateChanged?: (streamId: number, state: TiRtcVideoOutputState) => void;
   onMetricsChanged?: (value: string) => void;
   onRenderSizeChanged?: (width: number, height: number) => void;
   onCommandStatusChanged?: (value: string) => void;
@@ -96,11 +100,19 @@ export interface DownlinkLocalAudioOptions {
 export class DownlinkRoleSession {
   private conn: TiRtcConn = new TiRtcConn();
   private audioOutput: TiRtcAudioOutput = new TiRtcAudioOutput();
-  private videoOutput: TiRtcVideoOutput = new TiRtcVideoOutput();
+  private videoOutputs: Array<TiRtcVideoOutput> = [];
   private localAudioInput: TiRtcAudioInput = new TiRtcAudioInput();
   private callbacks: DownlinkRoleCallbacks = {};
-  private activeAudioStreamId: number = 10;
-  private activeVideoStreamId: number = 11;
+  private activeAudioStreamId: number | null = 10;
+  private activeVideoStreamIds: Array<number> = [11];
+  private selectedVideoStreamId: number | null = 11;
+  private audioOutputAvailable: boolean = false;
+  private audioOutputAttached: boolean = false;
+  private audioOutputSubscribed: boolean = false;
+  private readonly unavailableVideoStreamIds: Set<number> = new Set();
+  private readonly attachedVideoStreamIds: Set<number> = new Set();
+  private readonly subscribedVideoStreamIds: Set<number> = new Set();
+  private sessionGeneration: number = 0;
   private localAudioStreamId: number = -1;
   private commandSentAtMs: number = 0;
   private connectedAtMs: number = 0;
@@ -115,12 +127,27 @@ export class DownlinkRoleSession {
   private audioOutputMuteStartDurationMs: number = -1;
   private metricsRefreshTimer: number = -1;
   private recordingTask?: TiRtcRecordingTask;
+  private rawDump?: TiRawDump;
+  private rawDumpUploadPending: boolean = false;
   private latestRecordingFile?: TiRtcRecordingFile;
   private latestSnapshotFile?: TiRtcSnapshotFile;
+  private recordingTargetId: number | null = null;
+  private latestMediaTargetId: number = -1;
   private readonly ownedMediaFiles: Set<TiRtcRecordingFile | TiRtcSnapshotFile> = new Set();
 
-  videoOutputViewModel(): TiRtcVideoOutput {
-    return this.videoOutput;
+  videoOutputCount(): number {
+    return this.videoOutputs.length;
+  }
+
+  videoOutputAt(index: number): TiRtcVideoOutput {
+    return this.videoOutputs[index];
+  }
+
+  public selectVideoStream(streamId: number): void {
+    if (this.activeVideoStreamIds.indexOf(streamId) >= 0) {
+      this.selectedVideoStreamId = streamId;
+      this.refreshMetrics();
+    }
   }
 
   async start(options: DownlinkRoleStartOptions, callbacks: DownlinkRoleCallbacks): Promise<number> {
@@ -128,9 +155,20 @@ export class DownlinkRoleSession {
       return 0;
     }
     this.callbacks = callbacks;
+    const generation = ++this.sessionGeneration;
+    this.activeAudioStreamId = options.audioStreamId;
+    this.activeVideoStreamIds = options.videoStreamIds.slice();
+    this.selectedVideoStreamId = this.activeVideoStreamIds.length > 0 ? this.activeVideoStreamIds[0] : null;
+    this.videoOutputs = this.activeVideoStreamIds.map((): TiRtcVideoOutput => new TiRtcVideoOutput());
+    this.audioOutputAvailable = options.audioStreamId !== null;
+    this.audioOutputAttached = false;
+    this.audioOutputSubscribed = false;
+    this.unavailableVideoStreamIds.clear();
+    this.attachedVideoStreamIds.clear();
+    this.subscribedVideoStreamIds.clear();
     this.callbacks.onConnectingChanged?.(true);
     this.callbacks.onStatusChanged?.('连接中', '正在初始化 TiRTC runtime');
-    this.installCallbacks();
+    this.installCallbacks(generation);
     hilog.info(LOG_DOMAIN, LOG_TAG,
       'TIRTC_downlink_start_requested remote_id=%{public}s token_length=%{public}d token_prefix=%{public}s',
       options.remoteId,
@@ -148,29 +186,38 @@ export class DownlinkRoleSession {
       return code;
     }
 
-    this.activeAudioStreamId = options.audioStreamId;
-    this.activeVideoStreamId = options.videoStreamId;
     this.selectedDecoderPreference = options.videoDecoderPreference;
     this.resetVideoRenderSize();
 
-    code = this.audioOutput.configure({ bufferStrategy: options.outputBufferStrategy });
-    if (code !== 0) {
-      return await this.failStart(`音频配置失败 #${code}`, code, code);
+    if (options.audioStreamId !== null) {
+      code = this.audioOutput.configure({ bufferStrategy: options.outputBufferStrategy });
+      if (code !== 0) {
+        this.markAudioOutputUnavailable('configure', code);
+      } else {
+        code = this.audioOutput.attach({ connection: this.conn, streamId: options.audioStreamId });
+        if (code === 0) {
+          this.audioOutputAttached = true;
+        } else {
+          this.markAudioOutputUnavailable('attach', code);
+        }
+      }
     }
-    code = this.videoOutput.setOptions({
-      decoderPreference: options.videoDecoderPreference,
-      bufferStrategy: options.outputBufferStrategy,
-    });
-    if (code !== 0) {
-      return await this.failStart(`视频设置失败 #${code}`, code, code);
-    }
-    code = this.audioOutput.attach({ connection: this.conn, streamId: options.audioStreamId });
-    if (code !== 0) {
-      return await this.failStart(`音频输出失败 #${code}`, code, code);
-    }
-    code = this.videoOutput.attach({ connection: this.conn, streamId: options.videoStreamId });
-    if (code !== 0) {
-      return await this.failStart(`视频输出失败 #${code}`, code, code);
+    for (let index = 0; index < this.videoOutputs.length; index += 1) {
+      const output = this.videoOutputs[index];
+      const streamId = this.activeVideoStreamIds[index];
+      code = output.setOptions({
+        decoderPreference: options.videoDecoderPreference,
+        bufferStrategy: options.outputBufferStrategy,
+      });
+      if (code === 0) code = output.attach({ connection: this.conn, streamId });
+      if (code !== 0) {
+        this.unavailableVideoStreamIds.add(streamId);
+        this.callbacks.onVideoStateChanged?.(streamId, TiRtcVideoOutputState.failed);
+        hilog.warn(LOG_DOMAIN, LOG_TAG,
+          'TIRTC_downlink_video_lane_attach_failed stream_id=%{public}d code=%{public}d', streamId, code);
+      } else {
+        this.attachedVideoStreamIds.add(streamId);
+      }
     }
     code = this.conn.connect({
       remoteId: options.remoteId,
@@ -184,26 +231,36 @@ export class DownlinkRoleSession {
       return await this.failStart('连接超时', null, 6001);
     }
     this.connectedAtMs = Date.now();
-    const audioSubscribeCode = this.conn.subscribeAudio({ streamId: options.audioStreamId });
-    const videoSubscribeCode = this.conn.subscribeVideo({ streamId: options.videoStreamId });
-    hilog.info(LOG_DOMAIN, LOG_TAG,
-      'TIRTC_downlink_subscribe_done audio_code=%{public}d video_code=%{public}d audio_stream_id=%{public}d video_stream_id=%{public}d',
-      audioSubscribeCode, videoSubscribeCode, options.audioStreamId, options.videoStreamId);
-    if (audioSubscribeCode !== 0 || videoSubscribeCode !== 0) {
-      const subscribeCode = audioSubscribeCode !== 0 ? audioSubscribeCode : videoSubscribeCode;
-      return await this.failStart(
-        `订阅失败：音频 #${audioSubscribeCode}，视频 #${videoSubscribeCode}`,
-        subscribeCode,
-        subscribeCode,
-      );
+    const audioSubscribeCode = options.audioStreamId === null || !this.audioOutputAvailable ? 0 :
+      this.conn.subscribeAudio({ streamId: options.audioStreamId });
+    if (audioSubscribeCode !== 0) {
+      this.markAudioOutputUnavailable('subscribe', audioSubscribeCode);
+    } else if (options.audioStreamId !== null && this.audioOutputAvailable) {
+      this.audioOutputSubscribed = true;
     }
-    const hasRenderSize = await waitVideoRenderSize(this.videoOutput, VIDEO_SIZE_WAIT_TIMEOUT_MS,
-      (width: number, height: number): void => {
-        this.applyVideoRenderSize(width, height);
-      },
-      (): boolean => this.videoRenderWidth > 0 && this.videoRenderHeight > 0);
-    if (!hasRenderSize) {
-      return await this.failStart('视频尺寸未就绪', null, 6001);
+    for (const streamId of this.activeVideoStreamIds) {
+      if (this.unavailableVideoStreamIds.has(streamId)) continue;
+      const videoSubscribeCode = this.conn.subscribeVideo({ streamId });
+      if (videoSubscribeCode !== 0) {
+        this.unavailableVideoStreamIds.add(streamId);
+        this.callbacks.onVideoStateChanged?.(streamId, TiRtcVideoOutputState.failed);
+        hilog.warn(LOG_DOMAIN, LOG_TAG,
+          'TIRTC_downlink_video_lane_subscribe_failed stream_id=%{public}d code=%{public}d',
+          streamId, videoSubscribeCode);
+      } else {
+        this.subscribedVideoStreamIds.add(streamId);
+      }
+    }
+    const selectedOutput = this.selectedVideoOutput();
+    if (selectedOutput !== undefined) {
+      const hasRenderSize = await waitVideoRenderSize(selectedOutput, VIDEO_SIZE_WAIT_TIMEOUT_MS,
+        (width: number, height: number): void => {
+          this.applyVideoRenderSize(width, height);
+        },
+        (): boolean => this.videoRenderWidth > 0 && this.videoRenderHeight > 0);
+      if (!hasRenderSize) {
+        hilog.warn(LOG_DOMAIN, LOG_TAG, 'TIRTC_downlink_selected_video_size_not_ready');
+      }
     }
 
     this.running = true;
@@ -214,18 +271,34 @@ export class DownlinkRoleSession {
     this.refreshMetrics();
     this.startMetricsRefresh();
     hilog.info(LOG_DOMAIN, LOG_TAG,
-      'TIRTC_downlink_start_done remote_id=%{public}s audio_stream_id=%{public}d video_stream_id=%{public}d',
-      options.remoteId, options.audioStreamId, options.videoStreamId);
+      'TIRTC_downlink_start_done remote_id=%{public}s audio_enabled=%{public}s video_count=%{public}d',
+      options.remoteId, options.audioStreamId === null ? 'false' : 'true', options.videoStreamIds.length);
     return 0;
   }
 
-  async stop(reason: string): Promise<void> {
+  async stop(reason: string): Promise<boolean> {
     if (!this.running && this.conn.state === TiRtcConnState.idle) {
       this.stopMetricsRefresh();
-      return;
+      return true;
+    }
+    this.sessionGeneration += 1;
+    this.callbacks.onConnectingChanged?.(false);
+    if (this.rawDump !== undefined) {
+      const rawDump = this.rawDump;
+      let result = await rawDump.stop();
+      for (let attempt = 0;
+        !result.success && result.code === TI_CLOUD_STORAGE_ERROR_IN_USE && attempt < RAW_DUMP_STOP_RETRY_LIMIT;
+        attempt += 1) {
+        await new Promise<void>((resolve): void => {
+          setTimeout(resolve, RAW_DUMP_STOP_RETRY_DELAY_MS);
+        });
+        result = await rawDump.stop();
+      }
+      if (!result.success && result.code === TI_CLOUD_STORAGE_ERROR_IN_USE) return false;
+      if (result.success) this.rawDumpUploadPending = true;
+      this.rawDump = undefined;
     }
     this.stopMetricsRefresh();
-    this.callbacks.onConnectingChanged?.(false);
     this.callbacks.onPlayingChanged?.(false);
     if (this.recordingTask !== undefined) {
       const recordingResult = await this.recordingTask.stop();
@@ -236,14 +309,28 @@ export class DownlinkRoleSession {
     }
     await this.deleteLatestMediaFiles();
     const localAudioDisposeCode = await this.releaseLocalAudioInput();
-    const videoDetachCode = this.videoOutput.detach();
+    let videoDetachCode = 0;
+    for (let index = 0; index < this.videoOutputs.length; index += 1) {
+      if (!this.attachedVideoStreamIds.has(this.activeVideoStreamIds[index])) continue;
+      const laneCode = this.videoOutputs[index].detach();
+      if (videoDetachCode === 0 && laneCode !== 0) videoDetachCode = laneCode;
+    }
     this.resetVideoRenderSize();
-    const audioDetachCode = this.audioOutput.detach();
-    const videoUnsubscribeCode = this.conn.unsubscribeVideo({ streamId: this.activeVideoStreamId });
-    const audioUnsubscribeCode = this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
+    const audioDetachCode = !this.audioOutputAttached ? 0 : this.audioOutput.detach();
+    let videoUnsubscribeCode = 0;
+    for (const streamId of this.subscribedVideoStreamIds) {
+      const laneCode = this.conn.unsubscribeVideo({ streamId });
+      if (videoUnsubscribeCode === 0 && laneCode !== 0) videoUnsubscribeCode = laneCode;
+    }
+    const audioUnsubscribeCode = !this.audioOutputSubscribed || this.activeAudioStreamId === null ? 0 :
+      this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
     const disconnectCode = this.conn.disconnect();
-    const videoDisposeCode = this.videoOutput.dispose();
-    const audioDisposeCode = this.audioOutput.dispose();
+    let videoDisposeCode = 0;
+    for (const output of this.videoOutputs) {
+      const laneCode = output.dispose();
+      if (videoDisposeCode === 0 && laneCode !== 0) videoDisposeCode = laneCode;
+    }
+    const audioDisposeCode = this.activeAudioStreamId === null ? 0 : this.audioOutput.dispose();
     const connDisposeCode = this.conn.dispose();
     if (localAudioDisposeCode !== 0 || videoDisposeCode !== 0 || audioDisposeCode !== 0 ||
       connDisposeCode !== 0) {
@@ -254,12 +341,12 @@ export class DownlinkRoleSession {
       hilog.error(LOG_DOMAIN, LOG_TAG,
         'TIRTC_downlink_dispose_failed reason=%{public}s local_audio=%{public}d video=%{public}d audio=%{public}d conn=%{public}d',
         reason, localAudioDisposeCode, videoDisposeCode, audioDisposeCode, connDisposeCode);
-      return;
+      return true;
     }
     const shutdownCode = TiRtc.shutdown();
     if (shutdownCode !== 0) {
       this.fail(`停止失败 #${shutdownCode}`, shutdownCode);
-      return;
+      return true;
     }
     this.resetObjects();
     this.callbacks.onStatusChanged?.(reason === 'manual_stop' ? '已停止' : '加载中', 'Downlink stopped.');
@@ -267,6 +354,7 @@ export class DownlinkRoleSession {
       'TIRTC_downlink_stop_done reason=%{public}s video_detach=%{public}d audio_detach=%{public}d video_unsubscribe=%{public}d audio_unsubscribe=%{public}d disconnect=%{public}d local_audio_dispose=%{public}d video_dispose=%{public}d audio_dispose=%{public}d conn_dispose=%{public}d shutdown=%{public}d',
       reason, videoDetachCode, audioDetachCode, videoUnsubscribeCode, audioUnsubscribeCode, disconnectCode,
       localAudioDisposeCode, videoDisposeCode, audioDisposeCode, connDisposeCode, shutdownCode);
+    return true;
   }
 
   public async toggleRecording(): Promise<string> {
@@ -278,31 +366,69 @@ export class DownlinkRoleSession {
         this.latestRecordingFile = result.data;
         this.latestSnapshotFile = undefined;
         this.ownedMediaFiles.add(result.data);
+        this.latestMediaTargetId = this.recordingTargetId ?? -1;
       }
+      this.recordingTargetId = null;
       return result.success ? `本地保存完成 · ${result.data?.path ?? ''}` : `本地保存失败 #${result.code ?? 0}`;
     }
-    const result = this.conn.startRecording({
-      videoStreamId: this.activeVideoStreamId,
-      audioStreamId: this.activeAudioStreamId,
-    });
+    const streamId = this.selectedVideoStreamId;
+    if (streamId === null) return '未选择视频流';
+    const result = this.activeAudioStreamId === null || !this.audioOutputAvailable ?
+      this.conn.startRecording({ videoStreamId: streamId }) :
+      this.conn.startRecording({ videoStreamId: streamId, audioStreamId: this.activeAudioStreamId });
     if (!result.success || result.data === null) {
       return `开始本地保存失败 #${result.code ?? 0}`;
     }
     this.recordingTask = result.data;
-    return '正在本地保存';
+    this.recordingTargetId = streamId;
+    return `正在本地保存 · Stream ${streamId}`;
   }
 
   public isRecording(): boolean {
     return this.recordingTask !== undefined;
   }
 
+  public async toggleRawDump(uplinkAudioStreamId: number): Promise<string> {
+    if (this.rawDumpUploadPending) {
+      const uploaded = await this.uploadLogs();
+      return uploaded ? '诊断数据上传成功' : '诊断数据上传失败 · 点击重试上传';
+    }
+    if (this.rawDump !== undefined) {
+      const result = await this.rawDump.stop();
+      if (!result.success || result.data === null) return `诊断抓取停止失败 #${result.code ?? 0}`;
+      this.rawDump = undefined;
+      this.rawDumpUploadPending = true;
+      const uploaded = await this.uploadLogs();
+      return uploaded ? `诊断数据上传成功 · ${result.data.captureId}` :
+        `诊断数据上传失败 · ${result.data.captureId} · 点击重试上传`;
+    }
+    const result = await this.conn.startRawDump({
+      audioStreamIds: this.activeAudioStreamId === null ? [] : [this.activeAudioStreamId],
+      videoStreamIds: this.activeVideoStreamIds,
+      uplinkAudioStreamIds: [uplinkAudioStreamId],
+    });
+    if (!result.success || result.data === null) return `诊断抓取失败 #${result.code ?? 0}`;
+    this.rawDump = result.data;
+    return '正在抓取诊断数据 · 再次点击结束并上传日志';
+  }
+
+  public isRawDumpCapturing(): boolean {
+    return this.rawDump !== undefined;
+  }
+
+  public isRawDumpUploadPending(): boolean { return this.rawDumpUploadPending; }
+
   public async takeSnapshot(): Promise<string> {
-    const result = await this.videoOutput.takeSnapshot();
+    const output = this.selectedVideoOutput();
+    if (output === undefined) return '';
+    const targetId = this.selectedVideoStreamId ?? -1;
+    const result = await output.takeSnapshot();
     if (result.success && result.data !== null) {
       await this.deleteLatestMediaFiles();
       this.latestSnapshotFile = result.data;
       this.latestRecordingFile = undefined;
       this.ownedMediaFiles.add(result.data);
+      this.latestMediaTargetId = targetId;
       return result.data.path;
     }
     return '';
@@ -318,6 +444,10 @@ export class DownlinkRoleSession {
     return '';
   }
 
+  public latestMediaTarget(): number {
+    return this.latestMediaTargetId;
+  }
+
   private async deleteLatestMediaFiles(): Promise<void> {
     for (const file of this.ownedMediaFiles) {
       if (await file.delete() === 0) this.ownedMediaFiles.delete(file);
@@ -328,10 +458,11 @@ export class DownlinkRoleSession {
     if (this.latestSnapshotFile !== undefined && !this.ownedMediaFiles.has(this.latestSnapshotFile)) {
       this.latestSnapshotFile = undefined;
     }
+    if (this.latestRecordingFile === undefined && this.latestSnapshotFile === undefined) this.latestMediaTargetId = -1;
   }
 
   toggleAudioOutputVolume(): number {
-    if (!this.running) {
+    if (!this.running || this.activeAudioStreamId === null || !this.audioOutputAvailable) {
       return 6026;
     }
     const targetVolume = this.audioOutputMuted ? 100 : 0;
@@ -395,45 +526,52 @@ export class DownlinkRoleSession {
     this.commandSentAtMs = Date.now();
     const commandCode = this.conn.sendCommand({ commandId, data: payload });
     const epochSeconds = Math.floor(Date.now() / 1000);
+    const targetStreamId = this.activeVideoStreamIds.length > 0 ?
+      this.activeVideoStreamIds[0] : this.activeAudioStreamId;
+    if (targetStreamId === null) return commandCode;
     const streamCode = this.conn.sendStreamMessage({
-      streamId: this.activeVideoStreamId,
+      streamId: targetStreamId,
       timestampMs: 0,
       data: asciiBytes(`${epochSeconds}`),
     });
     hilog.info(LOG_DOMAIN, LOG_TAG,
       'TIRTC_downlink_command_sent command_code=%{public}d stream_code=%{public}d command_id=%{public}d payload_bytes=%{public}d video_stream_id=%{public}d',
-      commandCode, streamCode, commandId, payload.byteLength, this.activeVideoStreamId);
+      commandCode, streamCode, commandId, payload.byteLength, targetStreamId);
     return commandCode !== 0 ? commandCode : streamCode;
   }
 
-  uploadLogs(): void {
+  async uploadLogs(): Promise<boolean> {
     this.callbacks.onLogUploadStatusChanged?.('log_upload=上传中');
     const startedAtMs = Date.now();
-    TiRtcLogging.upload()
-      .then((result): void => {
-        const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-        this.callbacks.onLogUploadStatusChanged?.(
-          result.code === 0 ? 'log_upload=已上传' : `log_upload=失败 #${result.code}`);
-        hilog.info(LOG_DOMAIN, LOG_TAG,
-          'TIRTC_downlink_log_upload_done code=%{public}d elapsed_ms=%{public}d log_id_present=%{public}s',
-          result.code, elapsedMs, result.logId === undefined || result.logId.length === 0 ? 'false' : 'true');
-      })
-      .catch((error: Error): void => {
-        const elapsedMs = Math.max(0, Date.now() - startedAtMs);
-        this.callbacks.onLogUploadStatusChanged?.('log_upload=异常');
-        hilog.warn(LOG_DOMAIN, LOG_TAG,
-          'TIRTC_downlink_log_upload_failed elapsed_ms=%{public}d message=%{public}s',
-          elapsedMs, error.message);
-      });
+    try {
+      const result = await TiRtcLogging.upload();
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      this.callbacks.onLogUploadStatusChanged?.(
+        result.code === 0 ? 'log_upload=已上传' : `log_upload=失败 #${result.code}`);
+      hilog.info(LOG_DOMAIN, LOG_TAG,
+        'TIRTC_downlink_log_upload_done code=%{public}d elapsed_ms=%{public}d log_id_present=%{public}s',
+        result.code, elapsedMs, result.logId === undefined || result.logId.length === 0 ? 'false' : 'true');
+      if (result.code === 0) this.rawDumpUploadPending = false;
+      return result.code === 0;
+    } catch (error) {
+      const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      this.callbacks.onLogUploadStatusChanged?.('log_upload=异常');
+      hilog.warn(LOG_DOMAIN, LOG_TAG,
+        'TIRTC_downlink_log_upload_failed elapsed_ms=%{public}d message=%{public}s',
+        elapsedMs, `${error}`);
+      return false;
+    }
   }
 
-  private installCallbacks(): void {
+  private installCallbacks(generation: number): void {
     this.conn.onStateChanged = (state: TiRtcConnState, errorCode: number) => {
+      if (generation !== this.sessionGeneration) return;
       this.callbacks.onConnStateChanged?.(state);
       hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_connection_state state=%{public}d error=%{public}d',
         state, errorCode);
     };
     this.conn.onCommand = (command: number, payload: Uint8Array) => {
+      if (generation !== this.sessionGeneration) return;
       const matched = command === SAMPLE_COMMAND_ID && bytesEqual(payload, asciiBytes(SAMPLE_COMMAND_PAYLOAD));
       const elapsedMs = this.commandSentAtMs > 0 ? Date.now() - this.commandSentAtMs : 0;
       this.callbacks.onCommandStatusChanged?.(
@@ -443,7 +581,9 @@ export class DownlinkRoleSession {
         command, payload.byteLength, matched ? 'true' : 'false', elapsedMs);
     };
     this.conn.onStreamMessage = (streamId: number, timestampMs: number, payload: Uint8Array) => {
-      const received = streamId === this.activeVideoStreamId && payload.byteLength > 0;
+      if (generation !== this.sessionGeneration) return;
+      const received = (this.activeVideoStreamIds.indexOf(streamId) >= 0 || streamId === this.activeAudioStreamId) &&
+        payload.byteLength > 0;
       const elapsedMs = this.connectedAtMs > 0 ? Date.now() - this.connectedAtMs : 0;
       this.callbacks.onStreamMessageStatusChanged?.(
         received ? `stream_message=收到 ${payload.byteLength}B` : 'stream_message=未匹配');
@@ -452,38 +592,55 @@ export class DownlinkRoleSession {
         streamId, timestampMs, payload.byteLength, asciiPayload(payload), received ? 'true' : 'false',
         STREAM_MESSAGE_TIMEOUT_MS, elapsedMs);
     };
-    this.audioOutput.onStateChanged = (state: TiRtcAudioOutputState) => {
-      this.callbacks.onAudioStateChanged?.(state);
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_audio_state state=%{public}d', state);
-    };
-    this.videoOutput.onStateChanged = (state: TiRtcVideoOutputState) => {
-      this.callbacks.onVideoStateChanged?.(state);
-      if (state === TiRtcVideoOutputState.rendering) {
-        this.refreshMetrics();
-        const debug = this.videoOutput.getDebugSnapshot();
-        if (debug.code === 0 && debug.snapshot !== undefined) {
-          hilog.info(LOG_DOMAIN, LOG_TAG,
-            'TIRTC_video_debug_snapshot codec=%{public}d bitstream=%{public}d width=%{public}d height=%{public}d decoder_preference=%{public}d resolved_decoder_backend=%{public}d',
-            debug.snapshot.codec,
-            debug.snapshot.bitstreamFormat,
-            debug.snapshot.width,
-            debug.snapshot.height,
-            debug.snapshot.decoderPreference,
-            debug.snapshot.resolvedDecoderBackend);
+    if (this.activeAudioStreamId !== null) {
+      this.audioOutput.onStateChanged = (state: TiRtcAudioOutputState) => {
+        if (generation !== this.sessionGeneration) return;
+        if (state === TiRtcAudioOutputState.failed) this.markAudioOutputUnavailable('runtime-state', -1);
+        this.callbacks.onAudioStateChanged?.(state);
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_audio_state state=%{public}d', state);
+      };
+      this.audioOutput.onError = (code: number) => {
+        if (generation !== this.sessionGeneration) return;
+        this.markAudioOutputUnavailable('runtime', code);
+      };
+    }
+    for (let index = 0; index < this.videoOutputs.length; index += 1) {
+      const output = this.videoOutputs[index];
+      const streamId = this.activeVideoStreamIds[index];
+      output.onStateChanged = (state: TiRtcVideoOutputState) => {
+        if (generation !== this.sessionGeneration || this.videoOutputs[index] !== output) return;
+        if (state === TiRtcVideoOutputState.failed) this.unavailableVideoStreamIds.add(streamId);
+        this.callbacks.onVideoStateChanged?.(streamId, state);
+        if (state === TiRtcVideoOutputState.rendering && streamId === this.selectedVideoStreamId) {
+          this.refreshMetrics();
+          const debug = output.getDebugSnapshot();
+          if (debug.code === 0 && debug.snapshot !== undefined) {
+            hilog.info(LOG_DOMAIN, LOG_TAG,
+              'TIRTC_video_debug_snapshot stream_id=%{public}d codec=%{public}d bitstream=%{public}d width=%{public}d height=%{public}d decoder_preference=%{public}d resolved_decoder_backend=%{public}d',
+              streamId, debug.snapshot.codec, debug.snapshot.bitstreamFormat,
+              debug.snapshot.width, debug.snapshot.height, debug.snapshot.decoderPreference,
+              debug.snapshot.resolvedDecoderBackend);
+          }
         }
-      }
-      hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_video_state state=%{public}d', state);
-    };
-    this.videoOutput.onRenderSizeChanged = (size) => {
-      this.applyVideoRenderSize(size.width, size.height);
-    };
-    this.videoOutput.onError = (code: number) => {
-      hilog.error(LOG_DOMAIN, LOG_TAG, 'TIRTC_video_error code=%{public}d', code);
-    };
+        hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_video_state stream_id=%{public}d state=%{public}d', streamId, state);
+      };
+      output.onRenderSizeChanged = (size) => {
+        if (generation !== this.sessionGeneration || this.videoOutputs[index] !== output) return;
+        if (streamId === this.selectedVideoStreamId) this.applyVideoRenderSize(size.width, size.height);
+      };
+      output.onError = (code: number) => {
+        if (generation !== this.sessionGeneration || this.videoOutputs[index] !== output) return;
+        this.unavailableVideoStreamIds.add(streamId);
+        this.callbacks.onVideoStateChanged?.(streamId, TiRtcVideoOutputState.failed);
+        hilog.error(LOG_DOMAIN, LOG_TAG, 'TIRTC_video_error stream_id=%{public}d code=%{public}d', streamId, code);
+      };
+    }
     this.localAudioInput.onStateChanged = (state: TiRtcInputState): void => {
+      if (generation !== this.sessionGeneration) return;
       hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_downlink_local_audio_state state=%{public}d', state);
     };
     this.localAudioInput.onError = (code: number, message?: string): void => {
+      if (generation !== this.sessionGeneration) return;
       hilog.warn(LOG_DOMAIN, LOG_TAG,
         'TIRTC_downlink_local_audio_error code=%{public}d message=%{public}s',
         code, message ?? '');
@@ -505,7 +662,10 @@ export class DownlinkRoleSession {
     }
     if (!this.localAudioAttached) {
       const optionsCode = await this.localAudioInput.setOptions({
-        codec: options.codec,
+        media: options.codec === TiRtcAudioCodec.pcm ? 1 :
+          options.codec === TiRtcAudioCodec.g711a ? 2 :
+          options.codec === TiRtcAudioCodec.aac ? 3 :
+          options.codec === TiRtcAudioCodec.opus ? 4 : 5,
         sampleRate: options.sampleRate,
         channels: options.channels,
         aecMode: options.aecMode,
@@ -579,14 +739,15 @@ export class DownlinkRoleSession {
   private refreshMetrics(): void {
     const connMetrics = this.conn.getMetricsSnapshot();
     const audioMetrics = this.audioOutput.getMetricsSnapshot();
-    const videoMetrics = this.videoOutput.getMetricsSnapshot();
+    const selectedVideo = this.selectedVideoOutput();
+    const videoMetrics = selectedVideo?.getMetricsSnapshot();
     const audioDebug = this.audioOutput.getDebugSnapshot();
-    const videoDebug = this.videoOutput.getDebugSnapshot();
+    const videoDebug = selectedVideo?.getDebugSnapshot();
     const conn = connMetrics.code === 0 ? connMetrics.snapshot : undefined;
-    const audio = audioMetrics.code === 0 ? audioMetrics.snapshot : undefined;
-    const video = videoMetrics.code === 0 ? videoMetrics.snapshot : undefined;
-    const audioInfo = audioDebug.code === 0 ? audioDebug.snapshot : undefined;
-    const videoInfo = videoDebug.code === 0 ? videoDebug.snapshot : undefined;
+    const audio = this.audioOutputAvailable && audioMetrics.code === 0 ? audioMetrics.snapshot : undefined;
+    const video = videoMetrics !== undefined && videoMetrics.code === 0 ? videoMetrics.snapshot : undefined;
+    const audioInfo = this.audioOutputAvailable && audioDebug.code === 0 ? audioDebug.snapshot : undefined;
+    const videoInfo = videoDebug !== undefined && videoDebug.code === 0 ? videoDebug.snapshot : undefined;
     const connectDurationMs = conn?.connectDurationMs ?? -1;
     const firstFrameDurationMs = video?.startup.timeToFirstOutputMs ?? -1;
     const lines: string[] = [
@@ -594,7 +755,9 @@ export class DownlinkRoleSession {
         `${this.formatVideoCodec(videoInfo?.codec)} · ${this.formatAudioCodec(audioInfo?.codec)} · ` +
         `${this.formatVideoDecoder(videoInfo?.resolvedDecoderBackend)}`,
       `视频接收：码率 ${this.formatKbps(video?.videoInputBitrateKbps)} · 接收 ${this.formatRate(video?.videoInputFps, 'fps')}`,
-      `音频接收：码率 ${this.formatKbps(audio?.audioInputBitrateKbps)} · PPS ${this.formatRate(audio?.audioInputPacketRate, '/s')}`,
+      `音频接收：码率 ${this.formatKbps(audio?.audioInputBitrateKbps)} · ` +
+        `PPS ${this.formatRate(audio?.audioInputPacketRate, '/s')} · ` +
+        `输出 ${this.formatDuration(audio?.stutter.outputDurationMs)}`,
       `估算延迟：视频 ${this.formatDuration(video?.estimatedOutputLatencyMs)} · ` +
         `音频 ${this.formatDuration(audio?.estimatedOutputLatencyMs)}`,
       `启动耗时：${this.formatStartup(connectDurationMs, firstFrameDurationMs)}`,
@@ -733,14 +896,29 @@ export class DownlinkRoleSession {
   }
 
   private async releaseFailedStart(): Promise<void> {
-    const videoDetachCode = this.videoOutput.detach();
-    const audioDetachCode = this.audioOutput.detach();
-    const videoUnsubscribeCode = this.conn.unsubscribeVideo({ streamId: this.activeVideoStreamId });
-    const audioUnsubscribeCode = this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
+    this.sessionGeneration += 1;
+    let videoDetachCode = 0;
+    for (let index = 0; index < this.videoOutputs.length; index += 1) {
+      if (!this.attachedVideoStreamIds.has(this.activeVideoStreamIds[index])) continue;
+      const laneCode = this.videoOutputs[index].detach();
+      if (videoDetachCode === 0 && laneCode !== 0) videoDetachCode = laneCode;
+    }
+    const audioDetachCode = !this.audioOutputAttached ? 0 : this.audioOutput.detach();
+    let videoUnsubscribeCode = 0;
+    for (const streamId of this.subscribedVideoStreamIds) {
+      const laneCode = this.conn.unsubscribeVideo({ streamId });
+      if (videoUnsubscribeCode === 0 && laneCode !== 0) videoUnsubscribeCode = laneCode;
+    }
+    const audioUnsubscribeCode = !this.audioOutputSubscribed || this.activeAudioStreamId === null ? 0 :
+      this.conn.unsubscribeAudio({ streamId: this.activeAudioStreamId });
     const disconnectCode = this.conn.disconnect();
     const localAudioDisposeCode = await this.localAudioInput.dispose();
-    const videoDisposeCode = this.videoOutput.dispose();
-    const audioDisposeCode = this.audioOutput.dispose();
+    let videoDisposeCode = 0;
+    for (const output of this.videoOutputs) {
+      const laneCode = output.dispose();
+      if (videoDisposeCode === 0 && laneCode !== 0) videoDisposeCode = laneCode;
+    }
+    const audioDisposeCode = this.activeAudioStreamId === null ? 0 : this.audioOutput.dispose();
     const connDisposeCode = this.conn.dispose();
     const shutdownCode = TiRtc.shutdown();
     const released = localAudioDisposeCode === 0 && videoDisposeCode === 0 &&
@@ -785,12 +963,19 @@ export class DownlinkRoleSession {
     this.stopMetricsRefresh();
     this.conn = new TiRtcConn();
     this.audioOutput = new TiRtcAudioOutput();
-    this.videoOutput = new TiRtcVideoOutput();
+    this.videoOutputs = [];
     this.localAudioInput = new TiRtcAudioInput();
     this.commandSentAtMs = 0;
     this.connectedAtMs = 0;
-    this.activeAudioStreamId = 10;
-    this.activeVideoStreamId = 11;
+    this.activeAudioStreamId = null;
+    this.activeVideoStreamIds = [];
+    this.selectedVideoStreamId = null;
+    this.audioOutputAvailable = false;
+    this.audioOutputAttached = false;
+    this.audioOutputSubscribed = false;
+    this.unavailableVideoStreamIds.clear();
+    this.attachedVideoStreamIds.clear();
+    this.subscribedVideoStreamIds.clear();
     this.running = false;
     this.localAudioAttached = false;
     this.localAudioStarted = false;
@@ -801,12 +986,28 @@ export class DownlinkRoleSession {
     this.resetVideoRenderSize();
     this.callbacks.onConnStateChanged?.(TiRtcConnState.idle);
     this.callbacks.onAudioStateChanged?.(TiRtcAudioOutputState.idle);
-    this.callbacks.onVideoStateChanged?.(TiRtcVideoOutputState.idle);
+    for (const streamId of this.activeVideoStreamIds) {
+      this.callbacks.onVideoStateChanged?.(streamId, TiRtcVideoOutputState.idle);
+    }
     this.callbacks.onMetricsChanged?.('');
     this.callbacks.onCommandStatusChanged?.('');
     this.callbacks.onStreamMessageStatusChanged?.('');
     this.callbacks.onLogUploadStatusChanged?.('');
     this.callbacks.onLocalAudioStartedChanged?.(false);
     this.callbacks.onAudioOutputMutedChanged?.(false);
+  }
+
+  private selectedVideoOutput(): TiRtcVideoOutput | undefined {
+    if (this.selectedVideoStreamId === null ||
+      this.unavailableVideoStreamIds.has(this.selectedVideoStreamId)) return undefined;
+    const index = this.activeVideoStreamIds.indexOf(this.selectedVideoStreamId);
+    return index < 0 ? undefined : this.videoOutputs[index];
+  }
+
+  private markAudioOutputUnavailable(phase: string, code: number): void {
+    this.audioOutputAvailable = false;
+    this.callbacks.onAudioStateChanged?.(TiRtcAudioOutputState.failed);
+    hilog.warn(LOG_DOMAIN, LOG_TAG,
+      'TIRTC_downlink_audio_output_failed phase=%{public}s code=%{public}d', phase, code);
   }
 }

@@ -12,6 +12,7 @@ import {
   TiRtcConnState,
   TiRtcOutputBufferStrategy,
   TiRtcVideoDecoderPreference,
+  TiRtcVideoOutput,
   TiRtcVideoOutputState,
 } from 'tirtc/Index';
 import {
@@ -47,6 +48,34 @@ import {
   tryParseDemoCloudStorageScanPayload,
 } from './ExampleTokenAcquisition';
 
+const DOWNLINK_CLEANUP_RETRY_DELAY_MS = 250;
+
+function storedVideoIds(key: string): Array<string> {
+  if (!AppStorage.has(key)) return [`${DEFAULT_VIDEO_STREAM_ID}`];
+  const stored = appStorageString(key);
+  if (stored.length === 0) return [];
+  return stored.split(',').map((value: string): string => value.trim()).slice(0, 3);
+}
+
+function optionalId(value: string): number | null {
+  return value.trim().length === 0 ? null : Number(value.trim());
+}
+
+function validOptionalId(value: string, maximum: number): boolean {
+  const parsed = optionalId(value);
+  return parsed === null || (Number.isInteger(parsed) && parsed >= 0 && parsed <= maximum);
+}
+
+function parsedVideoIds(values: Array<string>, maximum: number): Array<number> | undefined {
+  if (values.length > 3) return undefined;
+  const parsed = values.filter((value: string): boolean => value.trim().length > 0)
+    .map((value: string): number => Number(value.trim()));
+  if (parsed.some((value: number): boolean => !Number.isInteger(value) || value < 0 || value > maximum)) {
+    return undefined;
+  }
+  return new Set<number>(parsed).size === parsed.length ? parsed : undefined;
+}
+
 @Component
 export struct ExampleApp {
   private downlinkSession: DownlinkRoleSession = new DownlinkRoleSession();
@@ -60,14 +89,16 @@ export struct ExampleApp {
   @State private cloudStorageEndpoint: string = appStorageString('ti_cloud_storage.endpoint');
   @State private cloudStorageToken: string = appStorageString('ti_cloud_storage.app_token');
   @State private cloudStorageAudioChannelId: string = appStorageString('ti_cloud_storage.audio_channel_id') || '10';
-  @State private cloudStorageVideoChannelId: string = appStorageString('ti_cloud_storage.video_channel_id') || '11';
+  @State private cloudStorageVideoChannelIds: Array<string> =
+    storedVideoIds('ti_cloud_storage.video_channel_ids');
   @State private tokenIssuerBaseUrl: string = appStorageString('tirtc.token_issuer_base_url');
   @State private tokenSource: DemoTokenSource = parseDemoTokenSource(appStorageString('tirtc.token_source'));
   @State private qrPayloadText: string = '';
   @State private qrErrorText: string = '';
   @State private qrForCloudStorage: boolean = false;
-  @State private audioStreamId: string = appStorageString('tirtc.audio_stream_id');
-  @State private videoStreamId: string = appStorageString('tirtc.video_stream_id');
+  @State private audioStreamId: string = appStorageString('tirtc.audio_stream_id') || '10';
+  @State private videoStreamIds: Array<string> = storedVideoIds('tirtc.video_stream_ids');
+  @State private configureProductIndex: number = 0;
   @State private videoDecoderPreference: TiRtcVideoDecoderPreference =
     parseVideoDecoderPreference(appStorageString('tirtc.video_decoder_preference'));
   @State private outputBufferStrategy: TiRtcOutputBufferStrategy =
@@ -88,10 +119,14 @@ export struct ExampleApp {
   @State private lastError: string = '';
   @State private connState: TiRtcConnState = TiRtcConnState.idle;
   @State private audioState: TiRtcAudioOutputState = TiRtcAudioOutputState.idle;
-  @State private videoState: TiRtcVideoOutputState = TiRtcVideoOutputState.idle;
+  @State private videoStates: Array<TiRtcVideoOutputState> = [TiRtcVideoOutputState.idle];
+  @State private selectedVideoStreamId: number = DEFAULT_VIDEO_STREAM_ID;
   @State private localAudioStarted: boolean = false;
   @State private audioOutputMuted: boolean = false;
   @State private recording: boolean = false;
+  @State private rawDumpCapturing: boolean = false;
+  @State private rawDumpBusy: boolean = false;
+  @State private rawDumpUploadPending: boolean = false;
   @State private mediaAvailable: boolean = false;
   @State private metricsLabel: string = '';
   @State private commandStatus: string = '';
@@ -99,9 +134,10 @@ export struct ExampleApp {
   @State private logUploadStatus: string = '';
   @State private downlinkRenderWidth: number = 0;
   @State private downlinkRenderHeight: number = 0;
+  private downlinkStopping?: Promise<boolean>;
 
   aboutToDisappear(): void {
-    void this.stopDownlink('page_disappear');
+    void this.stopDownlinkUntilReleased('page_disappear');
   }
 
   build() {
@@ -116,14 +152,15 @@ export struct ExampleApp {
         cloudStorageEndpoint: this.cloudStorageEndpoint,
         cloudStorageToken: this.cloudStorageToken,
         cloudStorageAudioChannelId: this.cloudStorageAudioChannelId,
-        cloudStorageVideoChannelId: this.cloudStorageVideoChannelId,
+        cloudStorageVideoChannelIds: this.cloudStorageVideoChannelIds,
         tokenIssuerBaseUrl: this.tokenIssuerBaseUrl,
         tokenSource: this.tokenSource,
         qrPayloadText: this.qrPayloadText,
         qrErrorText: this.qrErrorText,
         qrForCloudStorage: this.qrForCloudStorage,
         audioStreamId: this.audioStreamId,
-        videoStreamId: this.videoStreamId,
+        videoStreamIds: this.videoStreamIds,
+        configureProductIndex: this.configureProductIndex,
         videoDecoderPreference: this.videoDecoderPreference,
         outputBufferStrategy: this.outputBufferStrategy,
         audioInputCodec: this.audioInputCodec,
@@ -140,10 +177,14 @@ export struct ExampleApp {
         lastError: this.lastError,
         connState: this.connState,
         audioState: this.audioState,
-        videoState: this.videoState,
+        videoStates: this.videoStates,
+        selectedVideoStreamId: this.selectedVideoStreamId,
         localAudioStarted: this.localAudioStarted,
         audioOutputMuted: this.audioOutputMuted,
         recording: this.recording,
+        rawDumpCapturing: this.rawDumpCapturing,
+        rawDumpBusy: this.rawDumpBusy,
+        rawDumpUploadPending: this.rawDumpUploadPending,
         mediaAvailable: this.mediaAvailable,
         metricsLabel: this.metricsLabel,
         commandStatus: this.commandStatus,
@@ -151,11 +192,15 @@ export struct ExampleApp {
         logUploadStatus: this.logUploadStatus,
         downlinkRenderWidth: this.downlinkRenderWidth,
         downlinkRenderHeight: this.downlinkRenderHeight,
-        videoOutput: this.downlinkSession.videoOutputViewModel(),
+        videoOutputCount: this.downlinkSession.videoOutputCount(),
+        videoOutputAt: (index: number): TiRtcVideoOutput => this.downlinkSession.videoOutputAt(index),
         onOpenSettings: (): void => {
           hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_open_settings_requested');
           this.setSystemBarContentColor('#000000');
           this.view = ExampleView.settings;
+        },
+        onConfigureProductIndexChanged: (value: number): void => {
+          this.configureProductIndex = value;
         },
         onEndpointChanged: (value: string): void => {
           this.endpoint = value;
@@ -190,9 +235,23 @@ export struct ExampleApp {
           this.cloudStorageAudioChannelId = value;
           writeAppStorageString('ti_cloud_storage.audio_channel_id', value);
         },
-        onCloudStorageVideoChannelIdChanged: (value: string): void => {
-          this.cloudStorageVideoChannelId = value;
-          writeAppStorageString('ti_cloud_storage.video_channel_id', value);
+        onCloudStorageVideoChannelIdChanged: (index: number, value: string): void => {
+          const next = this.cloudStorageVideoChannelIds.slice();
+          next[index] = value;
+          this.cloudStorageVideoChannelIds = next;
+          writeAppStorageString('ti_cloud_storage.video_channel_ids', next.join(','));
+        },
+        onAddCloudStorageVideoChannelId: (): void => {
+          if (this.cloudStorageVideoChannelIds.length >= 3) return;
+          this.cloudStorageVideoChannelIds = this.cloudStorageVideoChannelIds.concat(['']);
+          writeAppStorageString(
+            'ti_cloud_storage.video_channel_ids', this.cloudStorageVideoChannelIds.join(','));
+        },
+        onRemoveCloudStorageVideoChannelId: (index: number): void => {
+          this.cloudStorageVideoChannelIds = this.cloudStorageVideoChannelIds.filter(
+            (_: string, itemIndex: number): boolean => itemIndex !== index);
+          writeAppStorageString(
+            'ti_cloud_storage.video_channel_ids', this.cloudStorageVideoChannelIds.join(','));
         },
         onTokenIssuerBaseUrlChanged: (value: string): void => {
           this.tokenIssuerBaseUrl = value;
@@ -204,12 +263,14 @@ export struct ExampleApp {
           writeAppStorageString('tirtc.token_source', demoTokenSourceStorageValue(value));
         },
         onOpenQrScanner: (): void => {
+          this.configureProductIndex = 0;
           this.qrForCloudStorage = false;
           this.qrPayloadText = '';
           this.qrErrorText = '';
           this.view = ExampleView.qrScanner;
         },
         onOpenCloudStorageQrScanner: (): void => {
+          this.configureProductIndex = 1;
           this.qrForCloudStorage = true;
           this.qrPayloadText = '';
           this.qrErrorText = '';
@@ -230,20 +291,32 @@ export struct ExampleApp {
           this.audioStreamId = value;
           writeAppStorageString('tirtc.audio_stream_id', value);
         },
-        onVideoStreamIdChanged: (value: string): void => {
-          this.videoStreamId = value;
-          writeAppStorageString('tirtc.video_stream_id', value);
+        onVideoStreamIdChanged: (index: number, value: string): void => {
+          const next = this.videoStreamIds.slice();
+          next[index] = value;
+          this.videoStreamIds = next;
+          writeAppStorageString('tirtc.video_stream_ids', next.join(','));
+        },
+        onAddVideoStreamId: (): void => {
+          if (this.videoStreamIds.length >= 3) return;
+          this.videoStreamIds = this.videoStreamIds.concat(['']);
+          writeAppStorageString('tirtc.video_stream_ids', this.videoStreamIds.join(','));
+        },
+        onRemoveVideoStreamId: (index: number): void => {
+          this.videoStreamIds = this.videoStreamIds.filter(
+            (_: string, itemIndex: number): boolean => itemIndex !== index);
+          writeAppStorageString('tirtc.video_stream_ids', this.videoStreamIds.join(','));
         },
         onOpenPlayer: (): void => {
           void this.openPlayer();
         },
         onOpenCloudStorage: (): void => {
-          const audioChannelId = parseStreamId(this.cloudStorageAudioChannelId, -1);
-          const videoChannelId = parseStreamId(this.cloudStorageVideoChannelId, -1);
+          const audioChannelId = optionalId(this.cloudStorageAudioChannelId);
+          const videoChannelIds = parsedVideoIds(this.cloudStorageVideoChannelIds, 255);
           if (this.cloudStorageAppId.trim().length === 0 || this.cloudStorageToken.length === 0 ||
-            this.cloudStorageToken !== this.cloudStorageToken.trim() || audioChannelId < 0 || audioChannelId > 255 ||
-            videoChannelId < 0 || videoChannelId > 255) {
-            this.lastError = '请补全云录像参数；Token 首尾不能有空白，Channel ID 必须为 0..255。';
+            this.cloudStorageToken !== this.cloudStorageToken.trim() ||
+            !validOptionalId(this.cloudStorageAudioChannelId, 255) || videoChannelIds === undefined) {
+            this.lastError = '请配置可选一路音频和最多三路不重复视频；Channel ID 必须为 0..255。';
             return;
           }
           this.lastError = '';
@@ -289,13 +362,18 @@ export struct ExampleApp {
           writeAppStorageString('tirtc.console_log_enabled', value ? 'true' : 'false');
         },
         onPlayerBack: (): void => {
-          this.stopDownlink('back_to_configure');
-          this.setSystemBarContentColor('#000000');
-          this.view = ExampleView.configure;
+          void this.stopDownlink('back_to_configure').then((stopped: boolean): void => {
+            if (!stopped) {
+              this.statusLabel = '诊断数据仍在结束，请稍后重试。';
+              return;
+            }
+            this.setSystemBarContentColor('#000000');
+            this.view = ExampleView.configure;
+          });
         },
         onPlayerToggle: (): void => {
           if (this.playing) {
-            this.stopDownlink('manual_stop');
+            void this.stopDownlink('manual_stop');
           } else {
             this.startDownlink();
           }
@@ -306,8 +384,15 @@ export struct ExampleApp {
         onPlayerAudioOutputVolumeToggle: (): void => {
           this.toggleDownlinkAudioOutputVolume();
         },
+        onPlayerVideoSelected: (streamId: number): void => {
+          this.selectedVideoStreamId = streamId;
+          this.downlinkSession.selectVideoStream(streamId);
+        },
         onPlayerRecordingToggle: (): void => {
           void this.toggleDownlinkRecording();
+        },
+        onPlayerRawDumpToggle: (): void => {
+          void this.toggleDownlinkRawDump();
         },
         onPlayerSnapshot: (): void => {
           void this.takeDownlinkSnapshot();
@@ -349,8 +434,8 @@ export struct ExampleApp {
       void this.startDownlink();
     }, 0);
     hilog.info(LOG_DOMAIN, LOG_TAG,
-      'TIRTC_open_player_ready remote_id=%{public}s audio_stream=%{public}s video_stream=%{public}s',
-      this.remoteId, this.audioStreamId, this.videoStreamId);
+      'TIRTC_open_player_ready remote_id=%{public}s audio_stream=%{public}s video_streams=%{public}s',
+      this.remoteId, this.audioStreamId, this.videoStreamIds.join(','));
   }
 
   private validateConfiguration(): boolean {
@@ -364,6 +449,13 @@ export struct ExampleApp {
     }
     if (this.tokenSource === DemoTokenSource.oneTime && this.token.trim().length === 0) {
       this.lastError = '请先补全一次性连接 Token。';
+      return false;
+    }
+    const audioStream = optionalId(this.audioStreamId);
+    const videoStreams = parsedVideoIds(this.videoStreamIds, 15);
+    if (!validOptionalId(this.audioStreamId, 15) || videoStreams === undefined ||
+      (audioStream !== null && videoStreams.indexOf(audioStream) >= 0)) {
+      this.lastError = '请配置可选一路音频和最多三路不重复视频；Stream ID 必须为 0..15。';
       return false;
     }
     this.lastError = '';
@@ -451,8 +543,10 @@ export struct ExampleApp {
       return;
     }
     const context = getContext(this) as common.UIAbilityContext;
-    const audioStream = parseStreamId(this.audioStreamId, DEFAULT_AUDIO_STREAM_ID);
-    const videoStream = parseStreamId(this.videoStreamId, DEFAULT_VIDEO_STREAM_ID);
+    const audioStream = optionalId(this.audioStreamId);
+    const videoStreams = parsedVideoIds(this.videoStreamIds, 15) ?? [];
+    this.videoStates = videoStreams.map((): TiRtcVideoOutputState => TiRtcVideoOutputState.idle);
+    this.selectedVideoStreamId = videoStreams.length > 0 ? videoStreams[0] : -1;
     await this.downlinkSession.start({
       context,
       endpoint: this.endpoint.trim(),
@@ -460,7 +554,7 @@ export struct ExampleApp {
       remoteId: this.remoteId.trim(),
       token: this.token.trim(),
       audioStreamId: audioStream,
-      videoStreamId: videoStream,
+      videoStreamIds: videoStreams,
       videoDecoderPreference: this.videoDecoderPreference,
       outputBufferStrategy: this.outputBufferStrategy,
       consoleLogEnabled: this.consoleLogEnabled,
@@ -484,8 +578,12 @@ export struct ExampleApp {
       onAudioStateChanged: (state: TiRtcAudioOutputState): void => {
         this.audioState = state;
       },
-      onVideoStateChanged: (state: TiRtcVideoOutputState): void => {
-        this.videoState = state;
+      onVideoStateChanged: (streamId: number, state: TiRtcVideoOutputState): void => {
+        const index = videoStreams.indexOf(streamId);
+        if (index < 0) return;
+        const next = this.videoStates.slice();
+        next[index] = state;
+        this.videoStates = next;
       },
       onMetricsChanged: (value: string): void => {
         this.metricsLabel = value;
@@ -512,12 +610,48 @@ export struct ExampleApp {
     });
   }
 
-  private async stopDownlink(reason: string): Promise<void> {
-    await this.downlinkSession.stop(reason);
-    this.recording = false;
-    this.mediaAvailable = false;
-    this.localAudioStarted = false;
-    this.audioOutputMuted = false;
+  private stopDownlink(reason: string): Promise<boolean> {
+    if (this.downlinkStopping !== undefined) return this.downlinkStopping;
+    const started = (async (): Promise<boolean> => {
+      const stopped = await this.downlinkSession.stop(reason);
+      if (!stopped) {
+        this.rawDumpCapturing = this.downlinkSession.isRawDumpCapturing();
+        this.rawDumpBusy = false;
+        return false;
+      }
+      this.recording = false;
+      this.mediaAvailable = false;
+      this.localAudioStarted = false;
+      this.audioOutputMuted = false;
+      this.rawDumpCapturing = false;
+      this.rawDumpBusy = false;
+      this.rawDumpUploadPending = this.downlinkSession.isRawDumpUploadPending();
+      return true;
+    })();
+    this.downlinkStopping = started;
+    void started.then((): void => {
+      if (this.downlinkStopping === started) this.downlinkStopping = undefined;
+    });
+    return started;
+  }
+
+  private async stopDownlinkUntilReleased(reason: string): Promise<void> {
+    while (!await this.stopDownlink(reason)) {
+      await new Promise<void>((resolve): void => {
+        setTimeout(resolve, DOWNLINK_CLEANUP_RETRY_DELAY_MS);
+      });
+    }
+  }
+
+  private async toggleDownlinkRawDump(): Promise<void> {
+    if (this.rawDumpBusy) return;
+    this.rawDumpBusy = true;
+    this.statusLabel = await this.downlinkSession.toggleRawDump(
+      parseStreamId(this.audioStreamId, DEFAULT_AUDIO_STREAM_ID),
+    );
+    this.rawDumpCapturing = this.downlinkSession.isRawDumpCapturing();
+    this.rawDumpUploadPending = this.downlinkSession.isRawDumpUploadPending();
+    this.rawDumpBusy = false;
   }
 
   private async toggleDownlinkRecording(): Promise<void> {
@@ -542,6 +676,7 @@ export struct ExampleApp {
       context,
       this.downlinkSession.latestMediaPath(),
       this.downlinkSession.latestMediaKind(),
+      this.downlinkSession.latestMediaTarget(),
     );
     this.statusLabel = saved ? '已保存到系统相册' : '保存到系统相册失败';
   }
@@ -590,7 +725,7 @@ export struct ExampleApp {
   }
 
   private uploadDownlinkLogs(): void {
-    this.downlinkSession.uploadLogs();
+    void this.downlinkSession.uploadLogs();
   }
 
   private resetPlayerEvidenceLabels(): void {

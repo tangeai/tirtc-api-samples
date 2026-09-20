@@ -20,6 +20,8 @@ const COMMAND_PANEL_SAMPLE_ID_LABEL = '0xffffffff';
 const COMMAND_PANEL_ECHO_ID_TEXT = '0xffffffff';
 const COMMAND_PANEL_MODE_HEX = 'hex';
 const COMMAND_PANEL_MODE_TEXT = 'text';
+const COMMAND_PANEL_ESCAPE_KEY_CODE: number = 2070;
+export const PLAYER_METRICS_DETAIL_FONT_SIZE: number = 12;
 
 @Component
 export struct PlayerTopBar {
@@ -36,8 +38,9 @@ export struct PlayerTopBar {
   build() {
     Row() {
       Button('<')
-        .width(42)
-        .height(36)
+        .accessibilityText('返回')
+        .width(48)
+        .height(48)
         .fontSize(18)
         .fontColor('#659287')
         .backgroundColor('#00FFFFFF')
@@ -64,11 +67,12 @@ export struct PlayerTopBar {
         .layoutWeight(1)
       Button('发送命令')
         .id(this.commandAnchor)
-        .height(36)
+        .defaultFocus(true)
+        .height(48)
         .fontSize(12)
         .fontColor(this.commandEnabled ? '#659287' : '#777777')
         .backgroundColor('#00FFFFFF')
-        .border({ width: 1, color: this.commandEnabled ? '#659287' : '#777777', radius: 10 })
+        .border({ width: 1, color: this.commandEnabled ? '#659287' : '#777777', radius: 12 })
         .enabled(this.commandEnabled)
         .onClick(() => {
           this.onSendCommand();
@@ -88,13 +92,25 @@ export struct PlayerTopBar {
           });
         })
       Blank().width(8)
-      Button('上传日志')
-        .id(this.logUploadAnchor)
-        .height(36)
+      Button('更多')
+        .id('tirtc_example_player_more_button')
+        .accessibilityText('更多操作')
+        .width(48)
+        .height(48)
         .fontSize(12)
-        .fontColor(this.logUploadEnabled ? '#659287' : '#777777')
+        .fontColor('#659287')
         .backgroundColor('#00FFFFFF')
-        .border({ width: 1, color: this.logUploadEnabled ? '#659287' : '#777777', radius: 10 })
+        .bindMenu(this.overflowMenu)
+    }
+    .width('100%')
+    .padding({ left: 8, right: 16, top: PLAYER_TOP_PADDING })
+  }
+
+  @Builder
+  private overflowMenu() {
+    Menu() {
+      MenuItem({ content: this.logUploadEnabled ? '上传日志' : '连接后可上传日志' })
+        .id(this.logUploadAnchor)
         .enabled(this.logUploadEnabled)
         .onClick(() => {
           this.onUploadLogs();
@@ -105,38 +121,29 @@ export struct PlayerTopBar {
         .onBlur(() => {
           this.onFocusedActionChanged(PLAYER_ACTION_NONE);
         })
-        .onKeyEvent((event: KeyEvent): boolean => {
-          if (!this.logUploadEnabled) {
-            return false;
-          }
-          return runOnActivationKey(event, () => {
-            this.onUploadLogs();
-          });
-        })
     }
-    .width('100%')
-    .padding({ left: 8, right: 16, top: PLAYER_TOP_PADDING })
   }
 }
 
 @Component
 export struct PlayerMetricsOverlay {
   @Prop metricsLabel: string = '';
-  @State private expanded: boolean = true;
+  @State private expanded: boolean = false;
   @State private explanationVisible: boolean = false;
 
   build() {
     if (!this.expanded) {
       Row() {
         Blank()
-        Button('▮ 即时统计')
+        Button(`即时统计 · ${this.metricValue('视频接收')} · ${this.metricValue('估算延迟')}`)
           .id('tirtc_example_downlink_metrics_stats_expand_action')
-          .height(26)
-          .fontSize(10)
+          .accessibilityText('展开即时统计详情')
+          .height(44)
+          .fontSize(11)
           .fontWeight(FontWeight.Bold)
           .fontColor('#111111')
           .backgroundColor('#FFFFFF')
-          .borderRadius(18)
+          .borderRadius(12)
           .shadow({ radius: 10, color: '#23000000', offsetX: 0, offsetY: 3 })
           .onClick(() => {
             this.expanded = true;
@@ -145,6 +152,7 @@ export struct PlayerMetricsOverlay {
       }
       .width('100%')
       .margin({ left: 18, right: 18, top: 18 })
+      .hitTestBehavior(HitTestMode.Transparent)
     } else {
       Column() {
         Row() {
@@ -154,8 +162,9 @@ export struct PlayerMetricsOverlay {
             .fontColor('#111111')
             .layoutWeight(1)
           Button('?')
-            .width(28)
-            .height(24)
+            .accessibilityText('即时统计说明')
+            .width(44)
+            .height(44)
             .fontSize(13)
             .fontColor('#659287')
             .backgroundColor('#00FFFFFF')
@@ -163,9 +172,10 @@ export struct PlayerMetricsOverlay {
               this.explanationVisible = !this.explanationVisible;
             })
           Blank().width(6)
-          Button('⌃ 收起')
+          Button('收起')
             .id('tirtc_example_downlink_metrics_stats_collapse_action')
-            .height(20)
+            .accessibilityText('收起即时统计详情')
+            .height(44)
             .fontSize(10)
             .fontWeight(FontWeight.Bold)
             .fontColor('#FFFFFF')
@@ -186,7 +196,7 @@ export struct PlayerMetricsOverlay {
         if (this.explanationVisible) {
           Blank().height(6)
           Text('连接耗时、首帧等待、卡顿统计时机、卡顿定义、接收、音频卡顿和估算延迟均来自 SDK 最近采样窗口。')
-            .fontSize(10)
+            .fontSize(PLAYER_METRICS_DETAIL_FONT_SIZE)
             .fontColor('#848282')
             .lineHeight(15)
             .maxLines(4)
@@ -195,10 +205,10 @@ export struct PlayerMetricsOverlay {
       }
       .id('tirtc_example_downlink_metrics_stats_panel')
       .width('100%')
-      .constraintSize({ maxWidth: 430 })
+      .constraintSize({ maxWidth: 520 })
       .padding({ left: 12, right: 12, top: 8, bottom: 8 })
       .backgroundColor('#FFFFFF')
-      .border({ width: 0, radius: 20 })
+      .border({ width: 0, radius: 16 })
       .shadow({ radius: 14, color: '#28000000', offsetX: 0, offsetY: 5 })
       .margin({ left: 18, right: 18, top: 18 })
     }
@@ -208,7 +218,7 @@ export struct PlayerMetricsOverlay {
   private metricLine(label: string, anchor: string) {
     Text(`${label}：${this.metricValue(label)}`)
       .id(anchor)
-      .fontSize(10)
+      .fontSize(PLAYER_METRICS_DETAIL_FONT_SIZE)
       .fontWeight(FontWeight.Medium)
       .fontColor('#111111')
       .maxLines(1)
@@ -245,7 +255,7 @@ export struct StreamMessageBubble {
       }
       .padding({ left: 16, right: 18, top: 9, bottom: 9 })
       .backgroundColor('#DEFFFFFF')
-      .border({ width: 0, radius: 22 })
+      .border({ width: 0, radius: 16 })
       .shadow({ radius: 14, color: '#1A000000', offsetX: 0, offsetY: 5 })
       .constraintSize({ maxWidth: '72%' })
       .id('tirtc_example_stream_message_bubble')
@@ -274,7 +284,7 @@ export struct LogUploadNotice {
         .fontColor('#FFFFFF')
         .padding({ left: 14, right: 14, top: 8, bottom: 8 })
         .backgroundColor('#88000000')
-        .border({ width: 1, color: '#22FFFFFF', radius: 18 })
+        .border({ width: 1, color: '#22FFFFFF', radius: 16 })
     }
   }
 
@@ -306,6 +316,7 @@ export struct CommandPanelSheet {
   @State private payloadMode: string = COMMAND_PANEL_MODE_TEXT;
   @State private payloadText: string = 'echo';
   @State private eventLines: string[] = [];
+  private returnFocusId: string = 'tirtc_example_player_command_button';
 
   build() {
     Column() {
@@ -317,12 +328,15 @@ export struct CommandPanelSheet {
           .layoutWeight(1)
         Button('×')
           .id('tirtc_example_command_panel_close_button')
-          .height(34)
+          .defaultFocus(true)
+          .accessibilityText('关闭命令面板并返回发送命令')
+          .width(44)
+          .height(44)
           .fontSize(18)
           .fontColor('#659287')
           .backgroundColor('#00FFFFFF')
           .onClick(() => {
-            this.onClose();
+            this.closeAndRestoreFocus();
           })
       }
       .width('100%')
@@ -345,7 +359,7 @@ export struct CommandPanelSheet {
           this.inputLabel('命令 ID')
           TextInput({ placeholder: '0xffffffff', text: this.commandIdText })
             .id('tirtc_example_command_panel_command_id_field')
-            .height(42)
+            .height(44)
             .fontSize(13)
             .fontColor('#666666')
             .backgroundColor('#FFFFFF')
@@ -383,7 +397,7 @@ export struct CommandPanelSheet {
             Blank().width(10)
             Button('Echo')
               .id('tirtc_example_command_panel_echo_preset')
-              .height(30)
+              .height(44)
               .fontSize(12)
               .fontColor('#659287')
               .backgroundColor('#FFFFFF')
@@ -437,10 +451,23 @@ export struct CommandPanelSheet {
     }
     .id('tirtc_example_command_panel_sheet')
     .width('100%')
+    .constraintSize({ maxWidth: 680 })
     .height('50%')
     .backgroundColor('#FFF8E8')
     .border({ width: 0, radius: 16 })
     .shadow({ radius: 18, color: '#24000000', offsetX: 0, offsetY: -3 })
+    .onKeyEvent((event: KeyEvent): boolean => {
+      if (event.type !== KeyType.Up || event.keyCode !== COMMAND_PANEL_ESCAPE_KEY_CODE) return false;
+      this.closeAndRestoreFocus();
+      return true;
+    })
+  }
+
+  private closeAndRestoreFocus(): void {
+    this.onClose();
+    setTimeout(() => {
+      focusControl.requestFocus(this.returnFocusId);
+    }, 0);
   }
 
   private visibleCommandStatus(): string {
@@ -470,7 +497,7 @@ export struct CommandPanelSheet {
   private payloadModeButton(label: string, value: string) {
     Button(label)
       .layoutWeight(1)
-      .height(34)
+      .height(44)
       .fontSize(12)
       .fontWeight(FontWeight.Bold)
       .fontColor(this.payloadMode === value ? '#FFFFFF' : '#659287')
@@ -584,7 +611,7 @@ export struct PlayerStageOverlay {
     .width('78%')
     .padding({ left: 18, right: 18, top: 18, bottom: 18 })
     .backgroundColor('#77000000')
-    .border({ width: 1, color: '#22FFFFFF', radius: 24 })
+    .border({ width: 1, color: '#22FFFFFF', radius: 16 })
     .alignSelf(ItemAlign.Center)
   }
 }
@@ -610,37 +637,16 @@ export struct PlayerBottomButton {
   onFocusedActionChanged: (action: string) => void = () => {};
 
   build() {
-    Column({ space: 12 }) {
-      Row({ space: 12 }) {
-        Blank()
-        Button(this.recording ? '◉' : '●')
-          .id('tirtc_example_player_recording_button')
-          .width(48).height(48).fontSize(18).fontColor('#659287')
-          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaEnabled)
-          .onClick(this.onRecordingAction)
-        Button('▣')
-          .id('tirtc_example_player_snapshot_button')
-          .width(48).height(48).fontSize(18).fontColor('#659287')
-          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaEnabled)
-          .onClick(this.onSnapshotAction)
-        Button('▧')
-          .id('tirtc_example_player_gallery_button')
-          .accessibilityText('保存到系统相册')
-          .width(48).height(48).fontSize(18).fontColor('#659287')
-          .backgroundColor('#D9E5E2').borderRadius(24).enabled(this.mediaAvailable)
-          .onClick(this.onSaveMediaAction)
-      }
-      .width('100%')
-      Row() {
+    Row({ space: 8 }) {
       Blank()
       Button(this.audioOutputMuted ? '恢复声音' : '静音')
         .id('tirtc_example_player_audio_volume_button')
-        .height(50)
+        .height(52)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.audioOutputMuted ? '#FFFFFF' : '#659287')
         .backgroundColor(this.audioOutputMuted ? '#F59E0B' : '#FFFFFF')
-        .borderRadius(25)
+        .borderRadius(12)
         .enabled(this.audioOutputVolumeEnabled)
         .onClick(() => {
           this.onAudioOutputVolumeAction();
@@ -659,15 +665,14 @@ export struct PlayerBottomButton {
             this.onAudioOutputVolumeAction();
           });
         })
-      Blank().width(10)
       Button(this.localAudioStarted ? '停止麦克风' : '启动麦克风')
         .id('tirtc_example_player_local_audio_button')
-        .height(50)
+        .height(52)
         .fontSize(13)
         .fontWeight(FontWeight.Medium)
         .fontColor(this.localAudioStarted ? '#FFFFFF' : '#659287')
         .backgroundColor(this.localAudioStarted ? '#F59E0B' : '#FFFFFF')
-        .borderRadius(25)
+        .borderRadius(12)
         .enabled(this.localAudioEnabled)
         .onClick(() => {
           this.onLocalAudioAction();
@@ -686,14 +691,14 @@ export struct PlayerBottomButton {
             this.onLocalAudioAction();
           });
         })
-      Blank().width(10)
       Button(this.label)
         .height(56)
+        .layoutWeight(1)
         .fontSize(16)
         .fontWeight(FontWeight.Medium)
         .fontColor('#FFFFFF')
         .backgroundColor(this.danger ? '#F87171' : '#659287')
-        .borderRadius(28)
+        .borderRadius(16)
         .enabled(this.actionEnabled)
         .onClick(() => {
           this.onAction();
@@ -713,10 +718,37 @@ export struct PlayerBottomButton {
             this.onAction();
           });
         })
-      }
-      .width('100%')
+      Button('媒体')
+        .id('tirtc_example_player_media_more_button')
+        .accessibilityText('媒体操作')
+        .width(52)
+        .height(52)
+        .fontSize(13)
+        .fontColor('#659287')
+        .backgroundColor('#FFFFFF')
+        .borderRadius(12)
+        .bindMenu(this.mediaMenu)
     }
     .width('100%')
     .padding({ left: 20, right: 20, bottom: PLAYER_BOTTOM_PADDING })
+  }
+
+  @Builder
+  private mediaMenu() {
+    Menu() {
+      MenuItem({ content: this.recording ? '停止录制' : '开始录制' })
+        .id('tirtc_example_player_recording_button')
+        .enabled(this.mediaEnabled)
+        .onClick(this.onRecordingAction)
+      MenuItem({ content: '截图' })
+        .id('tirtc_example_player_snapshot_button')
+        .enabled(this.mediaEnabled)
+        .onClick(this.onSnapshotAction)
+      MenuItem({ content: '保存到系统相册' })
+        .id('tirtc_example_player_gallery_button')
+        .accessibilityText('保存到系统相册')
+        .enabled(this.mediaAvailable)
+        .onClick(this.onSaveMediaAction)
+    }
   }
 }

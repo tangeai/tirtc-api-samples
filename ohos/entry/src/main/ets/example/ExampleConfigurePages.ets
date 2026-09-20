@@ -8,6 +8,13 @@ import { hilog } from '@kit.PerformanceAnalysisKit';
 import { runOnActivationKey } from './ExampleKeyboard';
 import { DemoTokenSource } from './ExampleTokenAcquisition';
 
+const CONFIGURE_WIDE_BREAKPOINT: number = 840;
+
+function configureAreaWidth(value: Length): number {
+  if (typeof value === 'number') return value;
+  return typeof value === 'string' ? Number.parseFloat(value) : 0;
+}
+
 @Component
 export struct ClientConfigurePage {
   @Prop endpoint: string = '';
@@ -18,15 +25,19 @@ export struct ClientConfigurePage {
   @Prop cloudStorageEndpoint: string = '';
   @Prop cloudStorageToken: string = '';
   @Prop cloudStorageAudioChannelId: string = '';
-  @Prop cloudStorageVideoChannelId: string = '';
+  @Prop cloudStorageVideoChannelIds: Array<string> = ['11'];
   @Prop tokenIssuerBaseUrl: string = '';
   @Prop tokenSource: DemoTokenSource = DemoTokenSource.issuer;
   @Prop audioStreamId: string = '';
-  @Prop videoStreamId: string = '';
+  @Prop videoStreamIds: Array<string> = ['11'];
   @Prop connecting: boolean = false;
   @Prop lastError: string = '';
-  @State private productIndex: number = 0;
+  @Prop productIndex: number = 0;
+  @State private visibleVideoStreamIds: Array<string> = ['11'];
+  @State private visibleCloudStorageVideoChannelIds: Array<string> = ['11'];
+  @State private pageWidth: number = 0;
   onOpenSettings: () => void = () => {};
+  onProductIndexChanged: (value: number) => void = () => {};
   onEndpointChanged: (value: string) => void = () => {};
   onAppIdChanged: (value: string) => void = () => {};
   onRemoteIdChanged: (value: string) => void = () => {};
@@ -35,15 +46,24 @@ export struct ClientConfigurePage {
   onCloudStorageEndpointChanged: (value: string) => void = () => {};
   onCloudStorageTokenChanged: (value: string) => void = () => {};
   onCloudStorageAudioChannelIdChanged: (value: string) => void = () => {};
-  onCloudStorageVideoChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageVideoChannelIdChanged: (index: number, value: string) => void = () => {};
+  onAddCloudStorageVideoChannelId: () => void = () => {};
+  onRemoveCloudStorageVideoChannelId: (index: number) => void = () => {};
   onTokenIssuerBaseUrlChanged: (value: string) => void = () => {};
   onTokenSourceChanged: (value: DemoTokenSource) => void = () => {};
   onOpenQrScanner: () => void = () => {};
   onOpenCloudStorageQrScanner: () => void = () => {};
   onAudioStreamIdChanged: (value: string) => void = () => {};
-  onVideoStreamIdChanged: (value: string) => void = () => {};
+  onVideoStreamIdChanged: (index: number, value: string) => void = () => {};
+  onAddVideoStreamId: () => void = () => {};
+  onRemoveVideoStreamId: (index: number) => void = () => {};
   onStartDownlink: () => void = () => {};
   onOpenCloudStorage: () => void = () => {};
+
+  aboutToAppear(): void {
+    this.visibleVideoStreamIds = this.videoStreamIds.slice();
+    this.visibleCloudStorageVideoChannelIds = this.cloudStorageVideoChannelIds.slice();
+  }
 
   build() {
     Scroll() {
@@ -64,6 +84,7 @@ export struct ClientConfigurePage {
           Button('偏好设置')
             .id('tirtc_example_settings_button')
             .type(ButtonType.Normal)
+            .height(44)
             .fontSize(13)
             .fontColor('#659287')
             .backgroundColor('#00FFFFFF')
@@ -79,15 +100,11 @@ export struct ClientConfigurePage {
             })
         }
         .width('100%')
-        .height(42)
+        .height(48)
         Blank().height(20)
         this.productTabs()
         Blank().height(20)
-        if (this.productIndex === 0) {
-          this.rtcConfiguration()
-        } else {
-          this.cloudStorageConfiguration()
-        }
+        this.configurationLayout()
         this.errorLabel()
       }
       .width('100%')
@@ -101,7 +118,56 @@ export struct ClientConfigurePage {
       angle: 180,
       colors: [['#FFF8E8', 0.0], ['#FBF4E5', 0.5], ['#FFF8E8', 1.0]]
     })
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
+    .onAreaChange((oldArea: Area, newArea: Area): void => {
+      this.pageWidth = configureAreaWidth(newArea.width);
+    })
+  }
+
+  @Builder
+  private configurationLayout() {
+    if (this.pageWidth >= CONFIGURE_WIDE_BREAKPOINT) {
+      Row({ space: 20 }) {
+        Column({ space: 16 }) {
+          if (this.productIndex === 0) {
+            this.rtcConnectionCard()
+            this.rtcMediaCard()
+          } else {
+            this.cloudConnectionCard()
+            this.cloudMediaCard()
+          }
+        }
+        .layoutWeight(1)
+        Column({ space: 16 }) {
+          if (this.productIndex === 0) {
+            this.rtcAuthenticationCard()
+            this.startRtcButton()
+          } else {
+            this.cloudAuthenticationCard()
+            this.startCloudButton()
+          }
+        }
+        .layoutWeight(1)
+      }
+      .id('tirtc_example_configure_wide_columns')
+      .width('100%')
+      .alignItems(VerticalAlign.Top)
+    } else {
+      Column({ space: 16 }) {
+        if (this.productIndex === 0) {
+          this.rtcConnectionCard()
+          this.rtcMediaCard()
+          this.rtcAuthenticationCard()
+          this.startRtcButton()
+        } else {
+          this.cloudConnectionCard()
+          this.cloudMediaCard()
+          this.cloudAuthenticationCard()
+          this.startCloudButton()
+        }
+      }
+      .id('tirtc_example_configure_compact_column')
+      .width('100%')
+    }
   }
 
   @Builder
@@ -112,7 +178,7 @@ export struct ClientConfigurePage {
       this.productTab('云录像', 1, 'tirtc_example_ti_cloud_storage_product_tab')
     }
     .width('100%')
-    .height(44)
+    .height(50)
     .padding(3)
     .backgroundColor('#1A659287')
     .borderRadius(22)
@@ -123,7 +189,7 @@ export struct ClientConfigurePage {
     Button(label)
       .id(anchor)
       .layoutWeight(1)
-      .height(38)
+      .height(44)
       .fontSize(14)
       .fontWeight(FontWeight.Bold)
       .fontColor(this.productIndex === index ? '#FFFFFF' : '#659287')
@@ -131,12 +197,14 @@ export struct ClientConfigurePage {
       .borderRadius(20)
       .enabled(!this.connecting)
       .onClick((): void => {
-        this.productIndex = index;
+        this.onProductIndexChanged(index);
       })
   }
 
   @Builder
-  private rtcConfiguration() {
+  private rtcConnectionCard() {
+    Column() {
+      this.sectionTitle('连接')
     this.inputField('endpoint', '留空则使用默认环境', this.endpoint, this.onEndpointChanged,
       'tirtc_example_endpoint_field')
     Blank().height(16)
@@ -145,18 +213,42 @@ export struct ClientConfigurePage {
     Blank().height(16)
     this.inputField('remote_id', '待连接的远端目标 ID', this.remoteId, this.onRemoteIdChanged,
       'tirtc_example_remote_id_field')
-    Blank().height(16)
-    Row() {
-      this.streamField('audio_stream_id', '默认 10', this.audioStreamId, this.onAudioStreamIdChanged,
-        'tirtc_example_audio_stream_id_field')
-      Blank().width(16)
-      this.streamField('video_stream_id', '默认 11', this.videoStreamId, this.onVideoStreamIdChanged,
-        'tirtc_example_video_stream_id_field')
     }
     .width('100%')
-    Blank().height(16)
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private rtcMediaCard() {
+    Column() {
+    this.sectionTitle('媒体')
+    this.inputField('audio_stream_id', '留空不接收音频', this.audioStreamId, this.onAudioStreamIdChanged,
+      'tirtc_example_audio_stream_id_field')
+    Blank().height(12)
+    this.videoIdFields('stream')
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private rtcAuthenticationCard() {
+    Column() {
+    this.sectionTitle('鉴权')
     this.tokenSection()
-    Blank().height(20)
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private startRtcButton() {
     Button(this.connecting ? '初始化中' : '开始连接、拉流播放')
       .id('tirtc_example_start_downlink_button')
       .width('100%')
@@ -174,13 +266,25 @@ export struct ClientConfigurePage {
   }
 
   @Builder
-  private cloudStorageConfiguration() {
+  private cloudConnectionCard() {
+    Column() {
+    this.sectionTitle('连接')
     this.inputField('app_id', 'Ti Cloud Storage 应用标识', this.cloudStorageAppId, this.onCloudStorageAppIdChanged,
       'tirtc_example_ti_cloud_storage_app_id_field')
     Blank().height(16)
     this.inputField('endpoint', '留空则使用默认环境', this.cloudStorageEndpoint,
       this.onCloudStorageEndpointChanged, 'tirtc_example_ti_cloud_storage_endpoint_field')
-    Blank().height(16)
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private cloudAuthenticationCard() {
+    Column() {
+    this.sectionTitle('鉴权')
     Row() {
       Column() {
         this.inputFieldContent('token', '粘贴 Ti Cloud Storage APP Token', this.cloudStorageToken,
@@ -189,8 +293,9 @@ export struct ClientConfigurePage {
       .layoutWeight(1)
       .alignItems(HorizontalAlign.Start)
       Blank().width(10)
-      Button('扫码')
+      Button('粘贴')
         .id('tirtc_example_ti_cloud_storage_token_scan_button')
+        .accessibilityText('扫码不可用，打开手动粘贴')
         .width(68)
         .height(56)
         .fontSize(13)
@@ -200,16 +305,34 @@ export struct ClientConfigurePage {
         .onClick(this.onOpenCloudStorageQrScanner)
     }
     .width('100%')
-    Blank().height(16)
-    Row() {
-      this.streamField('audio_channel_id', '默认 10', this.cloudStorageAudioChannelId,
-        this.onCloudStorageAudioChannelIdChanged, 'tirtc_example_ti_cloud_storage_audio_channel_field')
-      Blank().width(16)
-      this.streamField('video_channel_id', '默认 11', this.cloudStorageVideoChannelId,
-        this.onCloudStorageVideoChannelIdChanged, 'tirtc_example_ti_cloud_storage_video_channel_field')
+    Text('OHOS Example 未接入相机扫码，请手动粘贴 Token 或配置 JSON。')
+      .fontSize(12)
+      .fontColor('#848282')
+      .margin({ top: 8 })
     }
     .width('100%')
-    Blank().height(20)
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private cloudMediaCard() {
+    Column() {
+    this.sectionTitle('媒体')
+    this.inputField('audio_channel_id', '留空不接收音频', this.cloudStorageAudioChannelId,
+      this.onCloudStorageAudioChannelIdChanged, 'tirtc_example_ti_cloud_storage_audio_channel_field')
+    Blank().height(12)
+    this.videoIdFields('channel')
+    }
+    .width('100%')
+    .padding(18)
+    .backgroundColor('#FFFFFF')
+    .borderRadius(20)
+  }
+
+  @Builder
+  private startCloudButton() {
     Button('播放云录像')
       .id('tirtc_example_open_ti_cloud_storage_button')
       .width('100%')
@@ -304,6 +427,94 @@ export struct ClientConfigurePage {
   }
 
   @Builder
+  private videoIdFields(kind: string) {
+    Column({ space: 8 }) {
+      ForEach(kind === 'stream' ? this.visibleVideoStreamIds : this.visibleCloudStorageVideoChannelIds,
+        (value: string, index: number) => {
+        Row({ space: 8 }) {
+          Column() {
+            this.inputLabel(`video_${kind}_id ${index + 1}`)
+            TextInput({ placeholder: '0..255', text: value })
+              .id(kind === 'stream' ? `tirtc_example_video_stream_id_field_${index + 1}` :
+                `tirtc_example_cloud_storage_video_channel_field_${index + 1}`)
+              .height(52)
+              .fontSize(13)
+              .backgroundColor('#FFFFFF')
+              .borderRadius(20)
+              .padding({ left: 16, right: 16 })
+              .onChange((next: string): void => this.changeVideoId(kind, index, next))
+          }
+          .layoutWeight(1)
+          .alignItems(HorizontalAlign.Start)
+          Button('删除')
+            .id(kind === 'stream' ? `tirtc_example_remove_video_stream_id_button_${index + 1}` :
+              `tirtc_example_remove_cloud_storage_video_channel_button_${index + 1}`)
+            .height(44)
+            .fontSize(12)
+            .fontColor('#B42318')
+            .backgroundColor('#00FFFFFF')
+            .onClick((): void => this.removeVideoId(kind, index))
+        }
+        .width('100%')
+      }, (_: string, index: number): string => `${kind}-${index}`)
+      Button(`＋ 添加视频（${kind === 'stream' ? this.visibleVideoStreamIds.length :
+        this.visibleCloudStorageVideoChannelIds.length}/3）`)
+        .id(kind === 'stream' ? 'tirtc_example_add_video_stream_id_button' :
+          'tirtc_example_add_cloud_storage_video_channel_button')
+        .height(44)
+        .fontSize(13)
+        .fontColor('#659287')
+        .backgroundColor('#12659287')
+        .borderRadius(20)
+        .enabled((kind === 'stream' ? this.visibleVideoStreamIds.length :
+          this.visibleCloudStorageVideoChannelIds.length) < 3)
+        .onClick((): void => {
+          hilog.info(LOG_DOMAIN, LOG_TAG, 'TIRTC_configure_add_video_button_clicked kind=%{public}s', kind);
+          this.addVideoId(kind);
+        })
+    }
+    .width('100%')
+  }
+
+  private addVideoId(kind: string): void {
+    if (kind === 'stream') {
+      if (this.visibleVideoStreamIds.length >= 3) return;
+      this.visibleVideoStreamIds = this.visibleVideoStreamIds.concat(['']);
+      this.onAddVideoStreamId();
+      return;
+    }
+    if (this.visibleCloudStorageVideoChannelIds.length >= 3) return;
+    this.visibleCloudStorageVideoChannelIds = this.visibleCloudStorageVideoChannelIds.concat(['']);
+    this.onAddCloudStorageVideoChannelId();
+  }
+
+  private removeVideoId(kind: string, index: number): void {
+    if (kind === 'stream') {
+      this.visibleVideoStreamIds = this.visibleVideoStreamIds.filter(
+        (_: string, itemIndex: number): boolean => itemIndex !== index);
+      this.onRemoveVideoStreamId(index);
+      return;
+    }
+    this.visibleCloudStorageVideoChannelIds = this.visibleCloudStorageVideoChannelIds.filter(
+      (_: string, itemIndex: number): boolean => itemIndex !== index);
+    this.onRemoveCloudStorageVideoChannelId(index);
+  }
+
+  private changeVideoId(kind: string, index: number, value: string): void {
+    if (kind === 'stream') {
+      const next = this.visibleVideoStreamIds.slice();
+      next[index] = value;
+      this.visibleVideoStreamIds = next;
+      this.onVideoStreamIdChanged(index, value);
+      return;
+    }
+    const next = this.visibleCloudStorageVideoChannelIds.slice();
+    next[index] = value;
+    this.visibleCloudStorageVideoChannelIds = next;
+    this.onCloudStorageVideoChannelIdChanged(index, value);
+  }
+
+  @Builder
   private tokenSection() {
     Column() {
       Row() {
@@ -314,8 +525,9 @@ export struct ClientConfigurePage {
         .layoutWeight(1)
         .alignItems(HorizontalAlign.Start)
         Blank().width(10)
-        Button('扫码')
+        Button('粘贴')
           .id('tirtc_example_token_scan_button')
+          .accessibilityText('扫码不可用，打开手动粘贴')
           .width(68)
           .height(56)
           .fontSize(13)
@@ -325,6 +537,10 @@ export struct ClientConfigurePage {
           .onClick(this.onOpenQrScanner)
       }
       .width('100%')
+      Text('OHOS Example 未接入相机扫码，请手动粘贴二维码内容。')
+        .fontSize(12)
+        .fontColor('#848282')
+        .margin({ top: 8 })
       Text('或')
         .width('100%')
         .fontSize(12)
@@ -342,7 +558,7 @@ export struct ClientConfigurePage {
   private tokenSourceChip(label: string, value: DemoTokenSource, anchor: string) {
     Button(label)
       .id(anchor)
-      .height(36)
+      .height(44)
       .fontSize(12)
       .fontWeight(FontWeight.Bold)
       .fontColor(this.tokenSource === value ? '#659287' : '#848282')
@@ -370,6 +586,16 @@ export struct ClientConfigurePage {
       .fontColor('#848282')
       .height(22)
       .padding({ left: 20, bottom: 4 })
+  }
+
+  @Builder
+  private sectionTitle(label: string) {
+    Text(label)
+      .fontSize(16)
+      .fontWeight(FontWeight.Bold)
+      .fontColor('#454545')
+      .width('100%')
+      .padding({ bottom: 12 })
   }
 
   @Builder

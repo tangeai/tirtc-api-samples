@@ -40,14 +40,15 @@ export struct ExampleRouteHost {
   @Prop cloudStorageEndpoint: string = '';
   @Prop cloudStorageToken: string = '';
   @Prop cloudStorageAudioChannelId: string = '';
-  @Prop cloudStorageVideoChannelId: string = '';
+  @Prop cloudStorageVideoChannelIds: Array<string> = ['11'];
   @Prop tokenIssuerBaseUrl: string = '';
   @Prop tokenSource: DemoTokenSource = DemoTokenSource.issuer;
   @Prop qrPayloadText: string = '';
   @Prop qrErrorText: string = '';
   @Prop qrForCloudStorage: boolean = false;
   @Prop audioStreamId: string = '';
-  @Prop videoStreamId: string = '';
+  @Prop videoStreamIds: Array<string> = ['11'];
+  @Prop configureProductIndex: number = 0;
   @Prop videoDecoderPreference: TiRtcVideoDecoderPreference = TiRtcVideoDecoderPreference.auto;
   @Prop outputBufferStrategy: TiRtcOutputBufferStrategy = TiRtcOutputBufferStrategy.automatic;
   @Prop audioInputCodec: TiRtcAudioCodec = TiRtcAudioCodec.g711a;
@@ -64,10 +65,14 @@ export struct ExampleRouteHost {
   @Prop lastError: string = '';
   @Prop connState: TiRtcConnState = TiRtcConnState.idle;
   @Prop audioState: TiRtcAudioOutputState = TiRtcAudioOutputState.idle;
-  @Prop videoState: TiRtcVideoOutputState = TiRtcVideoOutputState.idle;
+  @Prop videoStates: Array<TiRtcVideoOutputState> = [TiRtcVideoOutputState.idle];
+  @Prop selectedVideoStreamId: number = 11;
   @Prop localAudioStarted: boolean = false;
   @Prop audioOutputMuted: boolean = false;
   @Prop recording: boolean = false;
+  @Prop rawDumpCapturing: boolean = false;
+  @Prop rawDumpBusy: boolean = false;
+  @Prop rawDumpUploadPending: boolean = false;
   @Prop mediaAvailable: boolean = false;
   @Prop metricsLabel: string = '';
   @Prop commandStatus: string = '';
@@ -75,8 +80,11 @@ export struct ExampleRouteHost {
   @Prop logUploadStatus: string = '';
   @Prop downlinkRenderWidth: number = 0;
   @Prop downlinkRenderHeight: number = 0;
-  videoOutput: TiRtcVideoOutput = new TiRtcVideoOutput();
+  @Prop videoOutputCount: number = 0;
+  videoOutputAt: (index: number) => TiRtcVideoOutput = (_index: number): TiRtcVideoOutput =>
+    new TiRtcVideoOutput();
   onOpenSettings: () => void = () => {};
+  onConfigureProductIndexChanged: (value: number) => void = () => {};
   onEndpointChanged: (value: string) => void = () => {};
   onAppIdChanged: (value: string) => void = () => {};
   onRemoteIdChanged: (value: string) => void = () => {};
@@ -85,7 +93,9 @@ export struct ExampleRouteHost {
   onCloudStorageEndpointChanged: (value: string) => void = () => {};
   onCloudStorageTokenChanged: (value: string) => void = () => {};
   onCloudStorageAudioChannelIdChanged: (value: string) => void = () => {};
-  onCloudStorageVideoChannelIdChanged: (value: string) => void = () => {};
+  onCloudStorageVideoChannelIdChanged: (index: number, value: string) => void = () => {};
+  onAddCloudStorageVideoChannelId: () => void = () => {};
+  onRemoveCloudStorageVideoChannelId: (index: number) => void = () => {};
   onTokenIssuerBaseUrlChanged: (value: string) => void = () => {};
   onTokenSourceChanged: (value: DemoTokenSource) => void = () => {};
   onOpenQrScanner: () => void = () => {};
@@ -94,7 +104,9 @@ export struct ExampleRouteHost {
   onQrPayloadChanged: (value: string) => void = () => {};
   onApplyQrPayload: () => void = () => {};
   onAudioStreamIdChanged: (value: string) => void = () => {};
-  onVideoStreamIdChanged: (value: string) => void = () => {};
+  onVideoStreamIdChanged: (index: number, value: string) => void = () => {};
+  onAddVideoStreamId: () => void = () => {};
+  onRemoveVideoStreamId: (index: number) => void = () => {};
   onOpenPlayer: () => void = () => {};
   onOpenCloudStorage: () => void = () => {};
   onCloudStorageBack: () => void = () => {};
@@ -111,7 +123,9 @@ export struct ExampleRouteHost {
   onPlayerToggle: () => void = () => {};
   onPlayerLocalAudioToggle: () => void = () => {};
   onPlayerAudioOutputVolumeToggle: () => void = () => {};
+  onPlayerVideoSelected: (streamId: number) => void = () => {};
   onPlayerRecordingToggle: () => void = () => {};
+  onPlayerRawDumpToggle: () => void = () => {};
   onPlayerSnapshot: () => void = () => {};
   onPlayerSaveMedia: () => void = () => {};
   onSendDownlinkCommand: (commandId: number, payload: Uint8Array) => number = () => 0;
@@ -150,14 +164,16 @@ export struct ExampleRouteHost {
       cloudStorageEndpoint: this.cloudStorageEndpoint,
       cloudStorageToken: this.cloudStorageToken,
       cloudStorageAudioChannelId: this.cloudStorageAudioChannelId,
-      cloudStorageVideoChannelId: this.cloudStorageVideoChannelId,
+      cloudStorageVideoChannelIds: this.cloudStorageVideoChannelIds,
       tokenIssuerBaseUrl: this.tokenIssuerBaseUrl,
       tokenSource: this.tokenSource,
       audioStreamId: this.audioStreamId,
-      videoStreamId: this.videoStreamId,
+      videoStreamIds: this.videoStreamIds,
+      productIndex: this.configureProductIndex,
       connecting: this.connecting,
       lastError: this.lastError,
       onOpenSettings: this.onOpenSettings,
+      onProductIndexChanged: this.onConfigureProductIndexChanged,
       onEndpointChanged: this.onEndpointChanged,
       onAppIdChanged: this.onAppIdChanged,
       onRemoteIdChanged: this.onRemoteIdChanged,
@@ -167,12 +183,16 @@ export struct ExampleRouteHost {
       onCloudStorageTokenChanged: this.onCloudStorageTokenChanged,
       onCloudStorageAudioChannelIdChanged: this.onCloudStorageAudioChannelIdChanged,
       onCloudStorageVideoChannelIdChanged: this.onCloudStorageVideoChannelIdChanged,
+      onAddCloudStorageVideoChannelId: this.onAddCloudStorageVideoChannelId,
+      onRemoveCloudStorageVideoChannelId: this.onRemoveCloudStorageVideoChannelId,
       onTokenIssuerBaseUrlChanged: this.onTokenIssuerBaseUrlChanged,
       onTokenSourceChanged: this.onTokenSourceChanged,
       onOpenQrScanner: this.onOpenQrScanner,
       onOpenCloudStorageQrScanner: this.onOpenCloudStorageQrScanner,
       onAudioStreamIdChanged: this.onAudioStreamIdChanged,
       onVideoStreamIdChanged: this.onVideoStreamIdChanged,
+      onAddVideoStreamId: this.onAddVideoStreamId,
+      onRemoveVideoStreamId: this.onRemoveVideoStreamId,
       onStartDownlink: this.onOpenPlayer,
       onOpenCloudStorage: this.onOpenCloudStorage,
     })
@@ -184,8 +204,9 @@ export struct ExampleRouteHost {
       appId: this.cloudStorageAppId,
       endpoint: this.cloudStorageEndpoint,
       token: this.cloudStorageToken,
-      audioChannelId: parseStreamId(this.cloudStorageAudioChannelId, 10),
-      videoChannelId: parseStreamId(this.cloudStorageVideoChannelId, 11),
+      audioChannelId: this.cloudStorageAudioChannelId.trim().length === 0 ? null :
+        parseStreamId(this.cloudStorageAudioChannelId, 10),
+      videoChannelIds: this.cloudStorageVideoChannelIds.map((value: string): number => parseStreamId(value, 11)),
       consoleLogEnabled: this.consoleLogEnabled,
       onBack: this.onCloudStorageBack,
     })
@@ -239,13 +260,19 @@ export struct ExampleRouteHost {
       playing: this.playing,
       connState: this.connState,
       audioState: this.audioState,
-      videoState: this.videoState,
+      videoStates: this.videoStates,
+      videoStreamIds: this.videoStreamIds.map((value: string): number => parseStreamId(value, 11)),
+      selectedVideoStreamId: this.selectedVideoStreamId,
       outputSurfaceWidth: this.downlinkOutputSurfaceWidth(),
       outputSurfaceHeight: this.downlinkOutputSurfaceHeight(),
-      videoOutput: this.videoOutput,
+      videoOutputCount: this.videoOutputCount,
+      videoOutputAt: this.videoOutputAt,
       localAudioStarted: this.localAudioStarted,
       audioOutputMuted: this.audioOutputMuted,
       recording: this.recording,
+      rawDumpCapturing: this.rawDumpCapturing,
+      rawDumpBusy: this.rawDumpBusy,
+      rawDumpUploadPending: this.rawDumpUploadPending,
       mediaAvailable: this.mediaAvailable,
       metricsLabel: this.metricsLabel,
       commandStatus: this.commandStatus,
@@ -255,7 +282,9 @@ export struct ExampleRouteHost {
       onToggle: this.onPlayerToggle,
       onLocalAudioToggle: this.onPlayerLocalAudioToggle,
       onAudioOutputVolumeToggle: this.onPlayerAudioOutputVolumeToggle,
+      onVideoSelected: this.onPlayerVideoSelected,
       onRecordingToggle: this.onPlayerRecordingToggle,
+      onRawDumpToggle: this.onPlayerRawDumpToggle,
       onSnapshot: this.onPlayerSnapshot,
       onSaveMedia: this.onPlayerSaveMedia,
       onSendCommand: this.onSendDownlinkCommand,

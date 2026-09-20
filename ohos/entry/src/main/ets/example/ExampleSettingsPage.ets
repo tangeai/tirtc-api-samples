@@ -49,8 +49,8 @@ export struct SettingsPage {
         Row() {
           Button('<')
             .id('tirtc_example_settings_back_button')
-            .width(42)
-            .height(36)
+            .width(44)
+            .height(44)
             .fontSize(18)
             .fontColor('#659287')
             .backgroundColor('#00FFFFFF')
@@ -69,15 +69,15 @@ export struct SettingsPage {
             .layoutWeight(1)
         }
         .width('100%')
-        .height(42)
+        .height(44)
         Blank().height(20)
-        this.sectionTitle('客户端')
+        this.sectionTitle('播放')
         this.clientSection()
         Blank().height(20)
-        this.sectionTitle('本地音频采集与传输')
+        this.sectionTitle('本地音频')
         this.localAudioSection()
         Blank().height(20)
-        this.sectionTitle('通用')
+        this.sectionTitle('诊断')
         this.consoleSection()
       }
       .width('100%')
@@ -87,12 +87,12 @@ export struct SettingsPage {
     .height('100%')
     .id('tirtc_example_settings_page')
     .backgroundColor('#FFF8E8')
-    .expandSafeArea([SafeAreaType.SYSTEM], [SafeAreaEdge.TOP, SafeAreaEdge.BOTTOM])
   }
 
   @Builder
   private sectionTitle(label: string) {
     Text(label)
+      .id(`tirtc_example_settings_section_${label}`)
       .fontSize(13)
       .fontWeight(FontWeight.Medium)
       .fontColor('#767676')
@@ -140,7 +140,10 @@ export struct SettingsPage {
         this.audioCodecButton('AAC', TiRtcAudioCodec.aac)
         Blank().width(10)
         this.audioCodecButton('PCM', TiRtcAudioCodec.pcm)
-        Blank().width(10)
+      }
+      .width('100%')
+      Blank().height(10)
+      Row() {
         this.audioCodecButton('OPUS', TiRtcAudioCodec.opus)
         Blank().width(10)
         this.audioCodecButton('AMR', TiRtcAudioCodec.amr)
@@ -267,7 +270,7 @@ export struct SettingsPage {
   private audioCodecButton(label: string, value: TiRtcAudioCodec) {
     Button(label)
       .layoutWeight(1)
-      .height(40)
+      .height(44)
       .fontSize(13)
       .fontColor(this.audioInputCodec === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.audioInputCodec === value ? '#659287' : '#00FFFFFF')
@@ -286,7 +289,7 @@ export struct SettingsPage {
   private audioSampleRateButton(label: string, value: TiRtcAudioSampleRate) {
     Button(label)
       .layoutWeight(1)
-      .height(40)
+      .height(44)
       .fontSize(13)
       .fontColor(this.audioInputSampleRate === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.audioInputSampleRate === value ? '#659287' : '#00FFFFFF')
@@ -305,7 +308,7 @@ export struct SettingsPage {
   private audioAgcButton(label: string, value: TiRtcAudioAgcLevel) {
     Button(label)
       .layoutWeight(1)
-      .height(36)
+      .height(44)
       .fontSize(12)
       .fontColor(this.audioAgcLevel === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.audioAgcLevel === value ? '#659287' : '#00FFFFFF')
@@ -324,7 +327,7 @@ export struct SettingsPage {
   private audioAnsButton(label: string, value: TiRtcAudioAnsLevel) {
     Button(label)
       .layoutWeight(1)
-      .height(36)
+      .height(44)
       .fontSize(12)
       .fontColor(this.audioAnsLevel === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.audioAnsLevel === value ? '#659287' : '#00FFFFFF')
@@ -343,7 +346,7 @@ export struct SettingsPage {
   private decoderPreferenceButton(label: string, value: TiRtcVideoDecoderPreference) {
     Button(label)
       .layoutWeight(1)
-      .height(40)
+      .height(44)
       .fontSize(13)
       .fontColor(this.videoDecoderPreference === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.videoDecoderPreference === value ? '#659287' : '#00FFFFFF')
@@ -362,7 +365,7 @@ export struct SettingsPage {
   private outputBufferButton(label: string, value: TiRtcOutputBufferStrategy) {
     Button(label)
       .layoutWeight(1)
-      .height(40)
+      .height(44)
       .fontSize(13)
       .fontColor(this.outputBufferStrategy === value ? '#FFFFFF' : '#659287')
       .backgroundColor(this.outputBufferStrategy === value ? '#659287' : '#00FFFFFF')
