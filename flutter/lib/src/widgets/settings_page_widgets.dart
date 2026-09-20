@@ -29,7 +29,11 @@ class SettingsSurface extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return DecoratedBox(
-      decoration: BoxDecoration(color: ExampleTheme.surface.withAlpha(224), borderRadius: BorderRadius.circular(18)),
+      decoration: BoxDecoration(
+        color: ExampleTheme.surface.withAlpha(224),
+        borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
+        border: Border.all(color: ExampleTheme.inputBorder),
+      ),
       child: child,
     );
   }

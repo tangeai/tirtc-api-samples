@@ -36,7 +36,7 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
   final TextEditingController _endpointController = TextEditingController();
   final TextEditingController _tokenController = TextEditingController();
   final TextEditingController _audioChannelController = TextEditingController();
-  final TextEditingController _videoChannelController = TextEditingController();
+  final List<TextEditingController> _videoChannelControllers = <TextEditingController>[TextEditingController()];
   bool _submitted = false;
   bool _loading = true;
 
@@ -52,7 +52,9 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
     _endpointController.dispose();
     _tokenController.dispose();
     _audioChannelController.dispose();
-    _videoChannelController.dispose();
+    for (final TextEditingController controller in _videoChannelControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -61,105 +63,150 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
     return Form(
       key: _formKey,
       autovalidateMode: _submitted ? AutovalidateMode.always : AutovalidateMode.disabled,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          TextFormField(
-            key: DemoWidgetKeys.cloudStorageAppIdField,
-            controller: _appIdController,
-            enabled: widget.enabled && !_loading,
-            textInputAction: TextInputAction.next,
-            style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(labelText: 'app_id', hintText: 'Ti Cloud Storage 应用标识，进入播放页前必须提供。'),
-            validator: _validateAppId,
-          ),
-          const SizedBox(height: 16),
-          TextFormField(
-            key: DemoWidgetKeys.cloudStorageEndpointField,
-            controller: _endpointController,
-            enabled: widget.enabled && !_loading,
-            keyboardType: TextInputType.url,
-            textInputAction: TextInputAction.next,
-            style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(labelText: 'endpoint', hintText: '接入的云端环境，留空则使用默认环境。'),
-            validator: _validateEndpoint,
-          ),
-          const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final bool wide = MediaQuery.sizeOf(context).width >= ExampleTheme.formWideBreakpoint;
+          final Widget connection = ExampleConfigurationSection(title: '连接', child: _buildConnectionFields());
+          final Widget media = ExampleConfigurationSection(title: '媒体', child: _buildMediaFields());
+          final Widget authentication = ExampleConfigurationSection(title: '鉴权', child: _buildAuthenticationFields());
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  key: DemoWidgetKeys.cloudStorageTokenField,
-                  controller: _tokenController,
+              if (wide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(child: Column(children: <Widget>[connection, const SizedBox(height: 16), media])),
+                    const SizedBox(width: 16),
+                    Expanded(child: authentication),
+                  ],
+                )
+              else ...<Widget>[
+                connection,
+                const SizedBox(height: 16),
+                media,
+                const SizedBox(height: 16),
+                authentication,
+              ],
+              const SizedBox(height: 20),
+              FilledButton(
+                key: DemoWidgetKeys.cloudStorageEnterButton,
+                onPressed: widget.enabled && !_loading ? _enterCloudStorage : null,
+                child: const Text('播放云录像'),
+              ),
+              if (widget.onUploadLogs != null) ...<Widget>[
+                const SizedBox(height: 2),
+                ConfigureLogUploadAction(
                   enabled: widget.enabled && !_loading,
-                  obscureText: true,
-                  autocorrect: false,
-                  enableSuggestions: false,
-                  style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(labelText: 'token', hintText: '粘贴云录像客户端 Token，或点右侧扫码。'),
-                  validator: _validateToken,
+                  uploading: widget.uploadingLogs,
+                  onUpload: widget.onUploadLogs!,
+                  buttonKey: DemoWidgetKeys.cloudStorageConfigureLogUploadButton,
                 ),
-              ),
-              const SizedBox(width: 10),
-              ConfigureScanButton(
-                buttonKey: DemoWidgetKeys.cloudStorageScanButton,
-                enabled: widget.enabled && !_loading && _scanSupported,
-                onPressed: _scanCloudStorageToken,
-              ),
+              ],
             ],
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: <Widget>[
-              Expanded(
-                child: TextFormField(
-                  key: DemoWidgetKeys.cloudStorageAudioChannelField,
-                  controller: _audioChannelController,
-                  enabled: widget.enabled && !_loading,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.next,
-                  inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
-                  style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(labelText: 'audio_channel_id', hintText: '音频 Channel，0..255'),
-                  validator: _validateChannelId,
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: TextFormField(
-                  key: DemoWidgetKeys.cloudStorageVideoChannelField,
-                  controller: _videoChannelController,
-                  enabled: widget.enabled && !_loading,
-                  keyboardType: TextInputType.number,
-                  textInputAction: TextInputAction.done,
-                  inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
-                  style: ExampleTheme.inputTextStyle,
-                  decoration: const InputDecoration(labelText: 'video_channel_id', hintText: '视频 Channel，0..255'),
-                  validator: _validateChannelId,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            key: DemoWidgetKeys.cloudStorageEnterButton,
-            onPressed: widget.enabled && !_loading ? _enterCloudStorage : null,
-            child: const Text('播放云录像'),
-          ),
-          if (widget.onUploadLogs != null) ...<Widget>[
-            const SizedBox(height: 2),
-            ConfigureLogUploadAction(
-              enabled: widget.enabled && !_loading,
-              uploading: widget.uploadingLogs,
-              onUpload: widget.onUploadLogs!,
-              buttonKey: DemoWidgetKeys.cloudStorageConfigureLogUploadButton,
-            ),
-          ],
-        ],
+          );
+        },
       ),
     );
   }
+
+  Widget _buildConnectionFields() => Column(
+    children: <Widget>[
+      TextFormField(
+        key: DemoWidgetKeys.cloudStorageAppIdField,
+        controller: _appIdController,
+        enabled: widget.enabled && !_loading,
+        textInputAction: TextInputAction.next,
+        style: ExampleTheme.inputTextStyle,
+        decoration: const InputDecoration(labelText: 'app_id', hintText: 'Ti Cloud Storage 应用标识，进入播放页前必须提供。'),
+        validator: _validateAppId,
+      ),
+      const SizedBox(height: 16),
+      TextFormField(
+        key: DemoWidgetKeys.cloudStorageEndpointField,
+        controller: _endpointController,
+        enabled: widget.enabled && !_loading,
+        keyboardType: TextInputType.url,
+        textInputAction: TextInputAction.next,
+        style: ExampleTheme.inputTextStyle,
+        decoration: const InputDecoration(labelText: 'endpoint', hintText: '接入的云端环境，留空则使用默认环境。'),
+        validator: _validateEndpoint,
+      ),
+    ],
+  );
+
+  Widget _buildAuthenticationFields() => Row(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: <Widget>[
+      Expanded(
+        child: TextFormField(
+          key: DemoWidgetKeys.cloudStorageTokenField,
+          controller: _tokenController,
+          enabled: widget.enabled && !_loading,
+          obscureText: true,
+          autocorrect: false,
+          enableSuggestions: false,
+          style: ExampleTheme.inputTextStyle,
+          decoration: const InputDecoration(labelText: 'token', hintText: '粘贴云录像客户端 Token，或点右侧扫码。'),
+          validator: _validateToken,
+        ),
+      ),
+      const SizedBox(width: 10),
+      ConfigureScanButton(
+        buttonKey: DemoWidgetKeys.cloudStorageScanButton,
+        enabled: widget.enabled && !_loading && _scanSupported,
+        onPressed: _scanCloudStorageToken,
+      ),
+    ],
+  );
+
+  Widget _buildMediaFields() => Column(
+    children: <Widget>[
+      TextFormField(
+        key: DemoWidgetKeys.cloudStorageAudioChannelField,
+        controller: _audioChannelController,
+        enabled: widget.enabled && !_loading,
+        keyboardType: TextInputType.number,
+        textInputAction: TextInputAction.next,
+        inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
+        style: ExampleTheme.inputTextStyle,
+        decoration: const InputDecoration(labelText: '音频 Channel ID', hintText: '留空不接收音频'),
+        validator: _validateOptionalChannelId,
+      ),
+      const SizedBox(height: 12),
+      Row(
+        children: <Widget>[
+          const Expanded(
+            child: Text('视频 Channel ID（最多 3 路）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          ),
+          IconButton(
+            key: DemoWidgetKeys.addCloudStorageVideoChannelButton,
+            tooltip: '添加视频 Channel',
+            onPressed: widget.enabled && !_loading && _videoChannelControllers.length < 3 ? _addVideoChannel : null,
+            icon: const Icon(Icons.add_circle_outline_rounded),
+          ),
+        ],
+      ),
+      for (int index = 0; index < _videoChannelControllers.length; index++) ...<Widget>[
+        if (index > 0) const SizedBox(height: 12),
+        ExampleVideoIdFieldRow(
+          position: index + 1,
+          idLabel: 'Channel ID',
+          hintText: '留空不接收该路视频',
+          fieldKey:
+              index == 0
+                  ? DemoWidgetKeys.cloudStorageVideoChannelField
+                  : DemoWidgetKeys.cloudStorageVideoChannelFieldAt(index),
+          removeButtonKey: DemoWidgetKeys.removeCloudStorageVideoChannelButtonAt(index),
+          controller: _videoChannelControllers[index],
+          enabled: widget.enabled && !_loading,
+          validator: _validateVideoChannelId,
+          onRemove: () => _removeVideoChannel(index),
+          inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.digitsOnly],
+        ),
+      ],
+    ],
+  );
 
   Future<void> _loadPersistedConfiguration() async {
     final DemoCloudStorageConfigurationSnapshot snapshot = await widget.configurationPersistence.load();
@@ -170,7 +217,7 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
       _appIdController.text = snapshot.appId;
       _endpointController.text = snapshot.endpoint;
       _audioChannelController.text = snapshot.audioChannelId;
-      _videoChannelController.text = snapshot.videoChannelId;
+      _replaceVideoChannelControllers(snapshot.videoChannelIds);
       _loading = false;
     });
   }
@@ -187,7 +234,7 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
         appId: _appIdController.text.trim(),
         endpoint: _endpointController.text.trim(),
         audioChannelId: _audioChannelController.text.trim(),
-        videoChannelId: _videoChannelController.text.trim(),
+        videoChannelIds: _videoChannelControllers.map((controller) => controller.text.trim()).join(','),
       ),
     );
     if (!mounted) {
@@ -200,8 +247,11 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
               appId: _appIdController.text.trim(),
               endpoint: _endpointController.text.trim(),
               token: _tokenController.text,
-              audioChannelId: int.parse(_audioChannelController.text),
-              videoChannelId: int.parse(_videoChannelController.text),
+              audioChannelId: int.tryParse(_audioChannelController.text.trim()),
+              videoChannelIds: _videoChannelControllers
+                  .map((controller) => int.tryParse(controller.text.trim()))
+                  .whereType<int>()
+                  .toList(growable: false),
             ),
       ),
     );
@@ -264,12 +314,47 @@ final class _DemoCloudStorageEntryPageState extends State<DemoCloudStorageEntryP
     return null;
   }
 
-  String? _validateChannelId(String? value) {
+  String? _validateOptionalChannelId(String? value) {
     final String text = (value ?? '').trim();
+    if (text.isEmpty) return null;
     final int? channelId = int.tryParse(text);
-    if (text.isEmpty || !RegExp(r'^\d+$').hasMatch(text) || channelId == null || channelId < 0 || channelId > 255) {
+    if (!RegExp(r'^\d+$').hasMatch(text) || channelId == null || channelId < 0 || channelId > 255) {
       return '请输入 0..255。';
     }
     return null;
+  }
+
+  String? _validateVideoChannelId(String? value) {
+    final String? error = _validateOptionalChannelId(value);
+    if (error != null) return error;
+    final int? channelId = int.tryParse((value ?? '').trim());
+    if (channelId != null &&
+        _videoChannelControllers.where((controller) => int.tryParse(controller.text.trim()) == channelId).length > 1) {
+      return '视频 Channel ID 不能重复。';
+    }
+    return null;
+  }
+
+  void _addVideoChannel() {
+    if (_videoChannelControllers.length >= 3) return;
+    setState(() => _videoChannelControllers.add(TextEditingController()));
+  }
+
+  void _removeVideoChannel(int index) {
+    if (index < 0 || index >= _videoChannelControllers.length) return;
+    setState(() {
+      _videoChannelControllers.removeAt(index).dispose();
+      if (_videoChannelControllers.isEmpty) _videoChannelControllers.add(TextEditingController());
+    });
+  }
+
+  void _replaceVideoChannelControllers(String serialized) {
+    for (final TextEditingController controller in _videoChannelControllers) {
+      controller.dispose();
+    }
+    final List<String> values = serialized.split(',').take(3).toList();
+    _videoChannelControllers
+      ..clear()
+      ..addAll((values.isEmpty ? <String>[''] : values).map((value) => TextEditingController(text: value.trim())));
   }
 }

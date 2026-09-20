@@ -6,11 +6,13 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
     if (_session.isRecording) {
       final Resp<TiRtcRecordingFile> result = await _session.stopRecording();
       if (result.success) {
+        _latestMediaVideoStreamId = _recordingVideoStreamId;
         widget.smokeMarkerSink?.passed(
           'smoke_recording_stopped',
           payload: <String, Object?>{
             'file_path': result.data!.path,
             'duration_ms': result.data!.duration.inMilliseconds,
+            'video_stream_id': _recordingVideoStreamId,
           },
         );
       } else {
@@ -19,12 +21,20 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
       _showPlayerSnack(
         result.success ? '录像已保存 · ${result.data!.path}' : '停止保存失败 · ${TiRtc.formatError(result.code ?? 0)}',
       );
+      _recordingVideoStreamId = null;
     } else {
+      final int? targetStreamId = _selectedVideoStreamId;
+      if (targetStreamId == null) {
+        _showPlayerSnack('请先选择视频流');
+        _setMediaFileBusy(false);
+        return;
+      }
       final Resp<TiRtcRecordingTask> result = _session.startRecording(
-        videoStreamId: widget.configuration.videoStreamId,
+        videoStreamId: targetStreamId,
         audioStreamId: widget.configuration.audioStreamId,
       );
       if (result.success) {
+        _recordingVideoStreamId = targetStreamId;
         widget.smokeMarkerSink?.passed('smoke_recording_started');
       } else {
         _smokeFail(failureStage: 'media_recording_start', message: 'recording start failed', errorCode: result.code);
@@ -35,12 +45,15 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
   }
 
   Future<void> _takeSnapshot() async {
+    final int? targetStreamId = _selectedVideoStreamId;
+    if (targetStreamId == null) return;
     _setMediaFileBusy(true);
-    final Resp<TiRtcSnapshotFile> result = await _session.takeSnapshot();
+    final Resp<TiRtcSnapshotFile> result = await _session.takeSnapshot(videoStreamId: targetStreamId);
     if (result.success) {
+      _latestMediaVideoStreamId = targetStreamId;
       widget.smokeMarkerSink?.passed(
         'smoke_snapshot_saved',
-        payload: <String, Object?>{'file_path': result.data!.path},
+        payload: <String, Object?>{'file_path': result.data!.path, 'video_stream_id': targetStreamId},
       );
     } else {
       _smokeFail(failureStage: 'media_snapshot', message: 'snapshot failed', errorCode: result.code);
@@ -59,12 +72,13 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
     final String? sourcePath = _session.latestMediaPath;
     final String? mediaType = _session.latestMediaType;
     final String? fileName = switch (mediaType) {
-      'video' => demoGalleryFileName('mp4'),
-      'image' => demoGalleryFileName('jpg'),
+      'video' => demoGalleryFileName('mp4', targetId: _latestMediaVideoStreamId),
+      'image' => demoGalleryFileName('jpg', targetId: _latestMediaVideoStreamId),
       _ => null,
     };
     final Resp<TiRtcGalleryAsset> result = await _session.moveLatestMediaToGallery(fileName: fileName);
     if (result.success) {
+      _latestMediaVideoStreamId = null;
       final String marker = mediaType == 'video' ? 'smoke_recording_gallery_saved' : 'smoke_snapshot_gallery_saved';
       widget.smokeMarkerSink?.passed(
         marker,

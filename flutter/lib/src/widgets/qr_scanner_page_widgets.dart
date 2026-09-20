@@ -5,6 +5,8 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../app_theme.dart';
 
 typedef DemoQrPayloadParser<T extends Object> = T? Function(String rawValue);
+typedef DemoQrScannerBuilder =
+    Widget Function(MobileScannerController controller, Future<void> Function(BarcodeCapture capture) onDetect);
 
 class DemoQrScannerPayloadPage<T extends Object> extends StatefulWidget {
   const DemoQrScannerPayloadPage({
@@ -14,6 +16,7 @@ class DemoQrScannerPayloadPage<T extends Object> extends StatefulWidget {
     required this.guideText,
     required this.samplePayloadText,
     required this.parsePayload,
+    this.scannerBuilder,
     this.invalidPayloadText = '二维码内容无效，请使用包含 app_id、remote_id、token 的 JSON，或 v1.xxx 纯 Token。',
   });
 
@@ -22,6 +25,7 @@ class DemoQrScannerPayloadPage<T extends Object> extends StatefulWidget {
   final String guideText;
   final String samplePayloadText;
   final DemoQrPayloadParser<T> parsePayload;
+  final DemoQrScannerBuilder? scannerBuilder;
   final String invalidPayloadText;
 
   @override
@@ -106,7 +110,7 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
         Container(
           decoration: BoxDecoration(
             color: ExampleTheme.surface.withAlpha(232),
-            borderRadius: BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
             border: Border.all(color: ExampleTheme.primary.withAlpha(31)),
           ),
           child: IconButton(
@@ -119,11 +123,14 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
           ),
         ),
         const SizedBox(width: 14),
-        Text(
-          widget.title,
-          style: (textTheme.headlineSmall ?? const TextStyle()).copyWith(
-            color: ExampleTheme.brandText,
-            fontWeight: FontWeight.w700,
+        Expanded(
+          child: Text(
+            widget.title,
+            softWrap: true,
+            style: (textTheme.headlineSmall ?? const TextStyle()).copyWith(
+              color: ExampleTheme.brandText,
+              fontWeight: FontWeight.w700,
+            ),
           ),
         ),
       ],
@@ -134,19 +141,15 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
     return AspectRatio(
       aspectRatio: 1,
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(30),
+        borderRadius: BorderRadius.circular(ExampleTheme.radiusLarge),
         child: Stack(
           fit: StackFit.expand,
           children: <Widget>[
             DecoratedBox(
               decoration: const BoxDecoration(color: ExampleTheme.videoBackground),
-              child: MobileScanner(
-                controller: _scannerController,
-                fit: BoxFit.cover,
-                onDetect: (BarcodeCapture capture) async {
-                  await _handleCapture(capture);
-                },
-              ),
+              child:
+                  widget.scannerBuilder?.call(_scannerController, _handleCapture) ??
+                  MobileScanner(controller: _scannerController, fit: BoxFit.cover, onDetect: _handleCapture),
             ),
             const IgnorePointer(child: _ScannerFrameOverlay()),
           ],
@@ -158,55 +161,38 @@ class _DemoQrScannerPayloadPageState<T extends Object> extends State<DemoQrScann
   Widget _buildPayloadGuideCard(BuildContext context) {
     final TextTheme textTheme = Theme.of(context).textTheme;
 
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 18, 20, 20),
+    return DecoratedBox(
       decoration: ExampleTheme.surfaceDecoration,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: ExpansionTile(
+        leading: const Icon(Icons.qr_code_2_rounded, color: ExampleTheme.primary),
+        title: Text(
+          '二维码内容格式',
+          style: (textTheme.titleMedium ?? const TextStyle()).copyWith(
+            color: ExampleTheme.brandText,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        subtitle: const Text('需要时展开查看格式和示例'),
+        childrenPadding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: ExampleTheme.primary.withAlpha(20),
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: const Icon(Icons.qr_code_2_rounded, color: ExampleTheme.primary, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Text(
-                  '二维码内容格式',
-                  style: (textTheme.titleMedium ?? const TextStyle()).copyWith(
-                    color: ExampleTheme.brandText,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 14),
-          Text(
-            widget.guideText,
-            style: (textTheme.bodyMedium ?? const TextStyle()).copyWith(color: ExampleTheme.textSecondary, height: 1.6),
-          ),
-          const SizedBox(height: 14),
-          Container(
-            padding: const EdgeInsets.all(16),
+          Text(widget.guideText, style: textTheme.bodyMedium?.copyWith(height: 1.6)),
+          const SizedBox(height: 12),
+          DecoratedBox(
             decoration: BoxDecoration(
               color: ExampleTheme.inputSurface,
-              borderRadius: BorderRadius.circular(22),
+              borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
               border: Border.all(color: ExampleTheme.inputBorder),
             ),
-            child: Text(
-              widget.samplePayloadText,
-              style: const TextStyle(
-                color: ExampleTheme.textPrimary,
-                fontSize: 13,
-                height: 1.6,
-                fontFamily: 'monospace',
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: SelectableText(
+                widget.samplePayloadText,
+                style: const TextStyle(
+                  color: ExampleTheme.textPrimary,
+                  fontSize: 13,
+                  height: 1.6,
+                  fontFamily: 'monospace',
+                ),
               ),
             ),
           ),

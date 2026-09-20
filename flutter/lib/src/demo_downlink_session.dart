@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:flutter/widgets.dart';
@@ -16,24 +17,31 @@ final class DemoDownlinkSession {
   DemoDownlinkSession({TiRtcConn? connection})
     : _connection = connection ?? TiRtcConn(),
       _audioOutput = TiRtcAudioOutput(),
-      _videoOutput = TiRtcVideoOutput(),
       _audioInput = TiRtcAudioInput();
 
   final TiRtcConn _connection;
   final TiRtcAudioOutput _audioOutput;
-  final TiRtcVideoOutput _videoOutput;
+  final LinkedHashMap<int, TiRtcVideoOutput> _videoOutputs = LinkedHashMap<int, TiRtcVideoOutput>();
   final TiRtcAudioInput _audioInput;
   Future<int>? _releaseInFlight;
   bool _localAudioAttached = false;
+  bool _audioOutputAttached = false;
   int? _audioSubscribeStreamId;
-  int? _videoSubscribeStreamId;
+  final Set<int> _videoSubscribeStreamIds = <int>{};
   bool _released = false;
   bool _disposed = false;
   TiRtcRecordingTask? _recordingTask;
+  TiRawDump? _rawDump;
   Object? _latestMediaFile;
   final List<Object> _ownedMediaFiles = <Object>[];
+  int _pendingVideoDecoderPreference = 0;
+  TiRtcOutputBufferStrategy _pendingVideoBufferStrategy = TiRtcOutputBufferStrategy.automatic;
+  void Function(int, TiRtcVideoOutputState)? _onVideoStateChangedForStream;
+  void Function(int, Size)? _onVideoRenderSizeChangedForStream;
+  void Function(int, int)? _onVideoErrorForStream;
 
-  Widget buildVideoView() => _videoOutput.view();
+  Widget buildVideoView([int? streamId]) =>
+      _videoOutputs[streamId ?? _videoOutputs.keys.firstOrNull]?.view() ?? const SizedBox.shrink();
 
   void setCommandCallback(TiRtcOnConnCommand? onCommand) {
     _connection.onCommand = onCommand;
@@ -46,6 +54,9 @@ final class DemoDownlinkSession {
     required TiRtcOnVideoOutputStateChanged onVideoStateChanged,
     TiRtcOnVideoOutputRenderSizeChanged? onVideoRenderSizeChanged,
     required TiRtcOnVideoOutputError onVideoError,
+    void Function(int streamId, TiRtcVideoOutputState state)? onVideoStateChangedForStream,
+    void Function(int streamId, Size size)? onVideoRenderSizeChangedForStream,
+    void Function(int streamId, int code)? onVideoErrorForStream,
     TiRtcOnConnCommand? onCommand,
     TiRtcOnInputStateChanged? onAudioInputStateChanged,
     TiRtcOnInputError? onAudioInputError,
@@ -56,9 +67,21 @@ final class DemoDownlinkSession {
     _connection.onStreamMessage = onStreamMessage;
     _audioOutput.onStateChanged = onAudioStateChanged;
     _audioOutput.onError = onAudioError;
-    _videoOutput.onStateChanged = onVideoStateChanged;
-    _videoOutput.onRenderSizeChanged = onVideoRenderSizeChanged;
-    _videoOutput.onError = onVideoError;
+    _onVideoStateChangedForStream =
+        onVideoStateChangedForStream ?? (_, TiRtcVideoOutputState state) => onVideoStateChanged(state);
+    _onVideoRenderSizeChangedForStream =
+        onVideoRenderSizeChangedForStream ??
+        (onVideoRenderSizeChanged == null ? null : (_, Size size) => onVideoRenderSizeChanged(size));
+    _onVideoErrorForStream = onVideoErrorForStream ?? (_, int code) => onVideoError(code);
+    for (final MapEntry<int, TiRtcVideoOutput> entry in _videoOutputs.entries) {
+      _bindVideoCallbacks(
+        streamId: entry.key,
+        output: entry.value,
+        onVideoStateChanged: _onVideoStateChangedForStream!,
+        onVideoRenderSizeChanged: _onVideoRenderSizeChangedForStream,
+        onVideoError: _onVideoErrorForStream!,
+      );
+    }
     _audioInput.onStateChanged = onAudioInputStateChanged;
     _audioInput.onError = onAudioInputError;
   }
@@ -69,9 +92,14 @@ final class DemoDownlinkSession {
     _connection.onStreamMessage = null;
     _audioOutput.onStateChanged = null;
     _audioOutput.onError = null;
-    _videoOutput.onStateChanged = null;
-    _videoOutput.onRenderSizeChanged = null;
-    _videoOutput.onError = null;
+    for (final TiRtcVideoOutput output in _videoOutputs.values) {
+      output.onStateChanged = null;
+      output.onRenderSizeChanged = null;
+      output.onError = null;
+    }
+    _onVideoStateChangedForStream = null;
+    _onVideoRenderSizeChangedForStream = null;
+    _onVideoErrorForStream = null;
     _audioInput.onStateChanged = null;
     _audioInput.onError = null;
   }
@@ -85,7 +113,12 @@ final class DemoDownlinkSession {
   }
 
   int attachAudio({required int streamId}) {
-    return _audioOutput.attach(connection: _connection, streamId: streamId);
+    final int code = _audioOutput.attach(connection: _connection, streamId: streamId);
+    if (code == _tiRtcErrorOk) {
+      _audioOutputAttached = true;
+      _released = false;
+    }
+    return code;
   }
 
   int setAudioOptions({required TiRtcOutputBufferStrategy bufferStrategy}) {
@@ -97,26 +130,70 @@ final class DemoDownlinkSession {
   }
 
   int setVideoOptions({required int decoderPreference, required TiRtcOutputBufferStrategy bufferStrategy}) {
-    return _videoOutput.setOptions(
-      TiRtcVideoOutputOptions(
-        decoderPreference: _videoDecoderPreferenceFromNativeValue(decoderPreference),
-        bufferStrategy: bufferStrategy,
-      ),
-    );
+    _pendingVideoDecoderPreference = decoderPreference;
+    _pendingVideoBufferStrategy = bufferStrategy;
+    return _tiRtcErrorOk;
   }
 
-  int attachVideo({required int streamId}) {
-    return _videoOutput.attach(connection: _connection, streamId: streamId);
+  int attachVideo({
+    required int streamId,
+    int? decoderPreference,
+    TiRtcOutputBufferStrategy? bufferStrategy,
+    void Function(int streamId, TiRtcVideoOutputState state)? onStateChanged,
+    void Function(int streamId, Size size)? onRenderSizeChanged,
+    void Function(int streamId, int code)? onError,
+  }) {
+    final TiRtcVideoOutput output = _videoOutputs[streamId] ?? TiRtcVideoOutput();
+    int code = output.setOptions(
+      TiRtcVideoOutputOptions(
+        decoderPreference: _videoDecoderPreferenceFromNativeValue(decoderPreference ?? _pendingVideoDecoderPreference),
+        bufferStrategy: bufferStrategy ?? _pendingVideoBufferStrategy,
+      ),
+    );
+    if (code != _tiRtcErrorOk) {
+      if (!_videoOutputs.containsKey(streamId)) output.dispose();
+      return code;
+    }
+    _bindVideoCallbacks(
+      streamId: streamId,
+      output: output,
+      onVideoStateChanged: onStateChanged ?? _onVideoStateChangedForStream ?? (_, __) {},
+      onVideoRenderSizeChanged: onRenderSizeChanged ?? _onVideoRenderSizeChangedForStream,
+      onVideoError: onError ?? _onVideoErrorForStream ?? (_, __) {},
+    );
+    code = output.attach(connection: _connection, streamId: streamId);
+    if (code != _tiRtcErrorOk) {
+      if (!_videoOutputs.containsKey(streamId)) output.dispose();
+      return code;
+    }
+    _videoOutputs[streamId] = output;
+    _released = false;
+    return _tiRtcErrorOk;
+  }
+
+  void _bindVideoCallbacks({
+    required int streamId,
+    required TiRtcVideoOutput output,
+    required void Function(int streamId, TiRtcVideoOutputState state) onVideoStateChanged,
+    void Function(int streamId, Size size)? onVideoRenderSizeChanged,
+    required void Function(int streamId, int code) onVideoError,
+  }) {
+    output.onStateChanged = (TiRtcVideoOutputState state) => onVideoStateChanged(streamId, state);
+    output.onRenderSizeChanged =
+        onVideoRenderSizeChanged == null ? null : (Size size) => onVideoRenderSizeChanged(streamId, size);
+    output.onError = (int code) => onVideoError(streamId, code);
   }
 
   int subscribeAudio({required int streamId}) {
-    _audioSubscribeStreamId = streamId;
-    return _connection.subscribeAudio(streamId: streamId);
+    final int code = _connection.subscribeAudio(streamId: streamId);
+    if (code == _tiRtcErrorOk) _audioSubscribeStreamId = streamId;
+    return code;
   }
 
   int subscribeVideo({required int streamId}) {
-    _videoSubscribeStreamId = streamId;
-    return _connection.subscribeVideo(streamId: streamId);
+    final int code = _connection.subscribeVideo(streamId: streamId);
+    if (code == _tiRtcErrorOk) _videoSubscribeStreamIds.add(streamId);
+    return code;
   }
 
   int sendCallCommand(DemoCallCommand command) {
@@ -142,6 +219,7 @@ final class DemoDownlinkSession {
     final int code = await _audioInput.attach(connection: _connection, streamId: streamId);
     if (code == 0) {
       _localAudioAttached = true;
+      _released = false;
     }
     return code;
   }
@@ -160,12 +238,19 @@ final class DemoDownlinkSession {
 
   TiRtcAudioOutputState get audioState => _audioOutput.state;
 
-  TiRtcVideoOutputState get videoState => _videoOutput.state;
+  TiRtcVideoOutputState get videoState => _videoOutputs.values.firstOrNull?.state ?? TiRtcVideoOutputState.idle;
 
-  Size? get renderSize => _videoOutput.renderSize;
+  TiRtcVideoOutputState? videoStateFor(int streamId) => _videoOutputs[streamId]?.state;
+
+  Size? get renderSize => _videoOutputs.values.firstOrNull?.renderSize;
+
+  Size? renderSizeFor(int streamId) => _videoOutputs[streamId]?.renderSize;
 
   void detachAudio() {
-    _audioOutput.detach();
+    if (!_audioOutputAttached) return;
+    if (_audioOutput.detach() == _tiRtcErrorOk) {
+      _audioOutputAttached = false;
+    }
   }
 
   int resetOutputMetricsSession() {
@@ -173,8 +258,11 @@ final class DemoDownlinkSession {
     if (code != 0) {
       return code;
     }
-    code = _videoOutput.resetMetricsSession();
-    return code;
+    for (final TiRtcVideoOutput output in _videoOutputs.values) {
+      code = output.resetMetricsSession();
+      if (code != 0) return code;
+    }
+    return _tiRtcErrorOk;
   }
 
   void disconnectConnection() {
@@ -183,7 +271,33 @@ final class DemoDownlinkSession {
 
   bool get isRecording => _recordingTask != null;
 
-  Resp<TiRtcRecordingTask> startRecording({required int videoStreamId, required int audioStreamId}) {
+  Future<Resp<TiRawDump>> startRawDump({
+    int? audioStreamId,
+    required List<int> videoStreamIds,
+    required int localAudioStreamId,
+  }) async {
+    final TiRawDump? active = _rawDump;
+    if (active != null) return const Resp<TiRawDump>.failure(_tiRtcErrorInUse);
+    final Resp<TiRawDump> result = await _connection.startRawDump(
+      TiRtcRawDumpOptions(
+        audioStreamIds: audioStreamId == null ? const <int>[] : <int>[audioStreamId],
+        videoStreamIds: videoStreamIds,
+        uplinkAudioStreamIds: <int>[localAudioStreamId],
+      ),
+    );
+    if (result.success) _rawDump = result.data;
+    return result;
+  }
+
+  Future<Resp<TiRawDumpArchive>> stopRawDump() async {
+    final TiRawDump? dump = _rawDump;
+    if (dump == null) return const Resp<TiRawDumpArchive>.failure(_tiRtcErrorInUse);
+    final Resp<TiRawDumpArchive> result = await dump.stop();
+    if (result.success || result.code != _tiRtcErrorInUse) _rawDump = null;
+    return result;
+  }
+
+  Resp<TiRtcRecordingTask> startRecording({required int videoStreamId, int? audioStreamId}) {
     if (_recordingTask != null) {
       return const Resp<TiRtcRecordingTask>.failure(_tiRtcErrorInUse);
     }
@@ -211,8 +325,10 @@ final class DemoDownlinkSession {
     return result;
   }
 
-  Future<Resp<TiRtcSnapshotFile>> takeSnapshot() async {
-    final Resp<TiRtcSnapshotFile> result = await _videoOutput.takeSnapshot();
+  Future<Resp<TiRtcSnapshotFile>> takeSnapshot({required int videoStreamId}) async {
+    final TiRtcVideoOutput? output = _videoOutputs[videoStreamId];
+    if (output == null) return const Resp<TiRtcSnapshotFile>.failure(_tiRtcErrorInvalidArgument);
+    final Resp<TiRtcSnapshotFile> result = await output.takeSnapshot();
     if (result.success && result.data != null) {
       _latestMediaFile = result.data;
       _ownedMediaFiles.add(result.data!);
@@ -290,6 +406,11 @@ final class DemoDownlinkSession {
       }
     }
 
+    if (_rawDump != null) {
+      final Resp<TiRawDumpArchive> result = await stopRawDump();
+      recordError(result.code ?? _tiRtcErrorOk);
+    }
+
     if (_recordingTask != null) {
       final Resp<TiRtcRecordingFile> result = await stopRecording();
       recordError(result.code ?? _tiRtcErrorOk);
@@ -310,11 +431,10 @@ final class DemoDownlinkSession {
       _latestMediaFile = null;
     }
 
-    final int? videoSubscribeStreamId = _videoSubscribeStreamId;
-    if (videoSubscribeStreamId != null) {
+    for (final int videoSubscribeStreamId in _videoSubscribeStreamIds.toList()) {
       final int code = _connection.unsubscribeVideo(streamId: videoSubscribeStreamId);
       if (code == _tiRtcErrorOk) {
-        _videoSubscribeStreamId = null;
+        _videoSubscribeStreamIds.remove(videoSubscribeStreamId);
       } else {
         recordError(code);
         TiRtcLogging.w(
@@ -338,8 +458,16 @@ final class DemoDownlinkSession {
       }
     }
 
-    recordError(_videoOutput.detach());
-    recordError(_audioOutput.detach());
+    for (final TiRtcVideoOutput output in _videoOutputs.values) {
+      recordError(output.detach());
+    }
+    if (_audioOutputAttached) {
+      final int code = _audioOutput.detach();
+      if (code == _tiRtcErrorOk) {
+        _audioOutputAttached = false;
+      }
+      recordError(code);
+    }
     recordError(await _audioInput.stop());
     if (_localAudioAttached) {
       final int detachCode = await _audioInput.detach(connection: _connection);
@@ -352,39 +480,42 @@ final class DemoDownlinkSession {
     return firstError;
   }
 
-  DownlinkMetricsOverlayModel? readMetricsOverlay({required int requestedDecoderPreference}) {
+  DownlinkMetricsOverlayModel? readMetricsOverlay({required int requestedDecoderPreference, int? videoStreamId}) {
     final TiRtcConnMetricsResult connResult = _connection.getMetricsSnapshot();
-    final TiRtcVideoOutputMetricsResult videoResult = _videoOutput.getMetricsSnapshot();
-    final TiRtcAudioOutputMetricsResult audioResult = _audioOutput.getMetricsSnapshot();
-    if (connResult.code != 0 || videoResult.code != 0 || audioResult.code != 0) {
+    final TiRtcVideoOutput? videoOutput = videoStreamId == null ? null : _videoOutputs[videoStreamId];
+    final TiRtcVideoOutputMetricsResult? videoResult = videoOutput?.getMetricsSnapshot();
+    final TiRtcAudioOutputMetricsResult? audioResult = _audioOutputAttached ? _audioOutput.getMetricsSnapshot() : null;
+    if (connResult.code != 0 || (videoResult != null && videoResult.code != 0)) {
       return null;
     }
 
     final TiRtcConnMetricsSnapshot? connSnapshot = connResult.snapshot;
-    final TiRtcVideoOutputMetricsSnapshot? videoSnapshot = videoResult.snapshot;
-    final TiRtcAudioOutputMetricsSnapshot? audioSnapshot = audioResult.snapshot;
-    if (connSnapshot == null || videoSnapshot == null || audioSnapshot == null) {
+    final TiRtcVideoOutputMetricsSnapshot? videoSnapshot = videoResult?.snapshot;
+    final TiRtcAudioOutputMetricsSnapshot? audioSnapshot =
+        audioResult?.code == _tiRtcErrorOk ? audioResult?.snapshot : null;
+    if (connSnapshot == null || (videoOutput != null && videoSnapshot == null)) {
       return null;
     }
 
-    final TiRtcAudioOutputDebugSnapshotResult audioDebugResult = _audioOutput.getDebugSnapshot();
-    final TiRtcVideoOutputDebugSnapshotResult videoDebugResult = _videoOutput.getDebugSnapshot();
+    final TiRtcAudioOutputDebugSnapshotResult? audioDebugResult =
+        _audioOutputAttached ? _audioOutput.getDebugSnapshot() : null;
+    final TiRtcVideoOutputDebugSnapshotResult? videoDebugResult = videoOutput?.getDebugSnapshot();
     final TiRtcAudioOutputDebugSnapshot? audioDebugSnapshot =
-        audioDebugResult.code == 0 ? audioDebugResult.snapshot : null;
+        audioDebugResult?.code == 0 ? audioDebugResult?.snapshot : null;
     final TiRtcVideoOutputDebugSnapshot? videoDebugSnapshot =
-        videoDebugResult.code == 0 ? videoDebugResult.snapshot : null;
-    final int videoWidth = videoSnapshot.videoWidth;
-    final int videoHeight = videoSnapshot.videoHeight;
-    final int videoCodec = videoSnapshot.videoCodec;
-    final int audioCodec = audioSnapshot.audioCodec;
-    final int audioSampleRate = audioSnapshot.audioSampleRateHz;
-    final int audioChannels = audioSnapshot.audioChannels;
-    final int decoderBackend = videoSnapshot.decoderBackend;
+        videoDebugResult?.code == 0 ? videoDebugResult?.snapshot : null;
+    final int videoWidth = videoSnapshot?.videoWidth ?? 0;
+    final int videoHeight = videoSnapshot?.videoHeight ?? 0;
+    final int videoCodec = videoSnapshot?.videoCodec ?? 0;
+    final int audioCodec = audioSnapshot?.audioCodec ?? 0;
+    final int audioSampleRate = audioSnapshot?.audioSampleRateHz ?? 0;
+    final int audioChannels = audioSnapshot?.audioChannels ?? 0;
+    final int decoderBackend = videoSnapshot?.decoderBackend ?? 0;
 
     return DownlinkMetricsOverlayModel(
       connectDurationMs: connSnapshot.connectDurationMs,
-      firstVideoOutputMs: videoSnapshot.startup.timeToFirstOutputMs,
-      firstAudioOutputMs: audioSnapshot.startup.timeToFirstOutputMs,
+      firstVideoOutputMs: videoSnapshot?.startup.timeToFirstOutputMs,
+      firstAudioOutputMs: audioSnapshot?.startup.timeToFirstOutputMs,
       videoWidth: videoWidth > 0 ? videoWidth : videoDebugSnapshot?.width,
       videoHeight: videoHeight > 0 ? videoHeight : videoDebugSnapshot?.height,
       videoCodec: videoCodec != 0 ? videoCodec : videoDebugSnapshot?.codec,
@@ -393,38 +524,39 @@ final class DemoDownlinkSession {
       audioChannels: audioChannels > 0 ? audioChannels : audioDebugSnapshot?.channels,
       requestedDecoderPreference: requestedDecoderPreference,
       resolvedDecoderBackend: decoderBackend != 0 ? decoderBackend : videoDebugSnapshot?.resolvedDecoderBackend,
-      audioInputBitrateKbps: audioSnapshot.audioInputBitrateKbps,
-      audioInputPacketRate: audioSnapshot.audioInputPacketRate,
-      audioRenderCallbackRate: audioSnapshot.audioRenderCallbackRate,
-      audioStatsRefreshIntervalMs: audioSnapshot.statsRefreshIntervalMs,
-      audioStatsUpdatedAtMs: audioSnapshot.statsUpdatedAtMs,
-      audioStutterThresholdMs: audioSnapshot.stutter.stutterThresholdMs,
-      audioOutputDurationMs: audioSnapshot.stutter.outputDurationMs,
-      audioStutterTotalMs: audioSnapshot.stutter.stutterTotalMs,
-      audioStutterCount: audioSnapshot.stutter.stutterCount,
-      audioStutterPeakMs: audioSnapshot.stutter.stutterPeakMs,
-      audioStutterAverageMs: audioSnapshot.stutter.stutterAverageMs,
-      audioStutterRate: audioSnapshot.stutter.stutterRate,
-      audioEstimatedOutputLatencyMs: audioSnapshot.estimatedOutputLatencyMs,
-      videoInputBitrateKbps: videoSnapshot.videoInputBitrateKbps,
-      videoInputFps: videoSnapshot.videoInputFps,
-      videoDecodedFps: videoSnapshot.videoDecodedFps,
-      videoRenderFps: videoSnapshot.videoRenderFps,
-      videoStatsRefreshIntervalMs: videoSnapshot.statsRefreshIntervalMs,
-      videoStatsUpdatedAtMs: videoSnapshot.statsUpdatedAtMs,
-      videoStutterThresholdMs: videoSnapshot.stutter.stutterThresholdMs,
-      videoOutputDurationMs: videoSnapshot.stutter.outputDurationMs,
-      videoStutterTotalMs: videoSnapshot.stutter.stutterTotalMs,
-      videoStutterCount: videoSnapshot.stutter.stutterCount,
-      videoStutterPeakMs: videoSnapshot.stutter.stutterPeakMs,
-      videoStutterAverageMs: videoSnapshot.stutter.stutterAverageMs,
-      videoStutterRate: videoSnapshot.stutter.stutterRate,
-      videoEstimatedOutputLatencyMs: videoSnapshot.estimatedOutputLatencyMs,
+      audioInputBitrateKbps: audioSnapshot?.audioInputBitrateKbps,
+      audioInputPacketRate: audioSnapshot?.audioInputPacketRate,
+      audioRenderCallbackRate: audioSnapshot?.audioRenderCallbackRate,
+      audioStatsRefreshIntervalMs: audioSnapshot?.statsRefreshIntervalMs,
+      audioStatsUpdatedAtMs: audioSnapshot?.statsUpdatedAtMs,
+      audioStutterThresholdMs: audioSnapshot?.stutter.stutterThresholdMs,
+      audioOutputDurationMs: audioSnapshot?.stutter.outputDurationMs,
+      audioStutterTotalMs: audioSnapshot?.stutter.stutterTotalMs,
+      audioStutterCount: audioSnapshot?.stutter.stutterCount,
+      audioStutterPeakMs: audioSnapshot?.stutter.stutterPeakMs,
+      audioStutterAverageMs: audioSnapshot?.stutter.stutterAverageMs,
+      audioStutterRate: audioSnapshot?.stutter.stutterRate,
+      audioEstimatedOutputLatencyMs: audioSnapshot?.estimatedOutputLatencyMs,
+      videoInputBitrateKbps: videoSnapshot?.videoInputBitrateKbps,
+      videoInputFps: videoSnapshot?.videoInputFps,
+      videoDecodedFps: videoSnapshot?.videoDecodedFps,
+      videoRenderFps: videoSnapshot?.videoRenderFps,
+      videoStatsRefreshIntervalMs: videoSnapshot?.statsRefreshIntervalMs,
+      videoStatsUpdatedAtMs: videoSnapshot?.statsUpdatedAtMs,
+      videoStutterThresholdMs: videoSnapshot?.stutter.stutterThresholdMs,
+      videoOutputDurationMs: videoSnapshot?.stutter.outputDurationMs,
+      videoStutterTotalMs: videoSnapshot?.stutter.stutterTotalMs,
+      videoStutterCount: videoSnapshot?.stutter.stutterCount,
+      videoStutterPeakMs: videoSnapshot?.stutter.stutterPeakMs,
+      videoStutterAverageMs: videoSnapshot?.stutter.stutterAverageMs,
+      videoStutterRate: videoSnapshot?.stutter.stutterRate,
+      videoEstimatedOutputLatencyMs: videoSnapshot?.estimatedOutputLatencyMs,
     );
   }
 
-  TiRtcVideoOutputMetricsResult videoMetrics() {
-    return _videoOutput.getMetricsSnapshot();
+  TiRtcVideoOutputMetricsResult videoMetrics([int? streamId]) {
+    final TiRtcVideoOutput? output = _videoOutputs[streamId ?? _videoOutputs.keys.firstOrNull];
+    return output?.getMetricsSnapshot() ?? (code: _tiRtcErrorInUse, snapshot: null);
   }
 
   TiRtcAudioOutputMetricsResult audioMetrics() {
@@ -447,10 +579,11 @@ final class DemoDownlinkSession {
     if (code != _tiRtcErrorOk) {
       return code;
     }
-    code = await _disposeVideoOutputWithTextureRetry();
-    if (code != _tiRtcErrorOk) {
-      return code;
+    for (final TiRtcVideoOutput output in _videoOutputs.values) {
+      code = await _disposeVideoOutputWithTextureRetry(output);
+      if (code != _tiRtcErrorOk) return code;
     }
+    _videoOutputs.clear();
     code = _audioOutput.dispose();
     if (code != _tiRtcErrorOk) {
       return code;
@@ -464,10 +597,10 @@ final class DemoDownlinkSession {
     return _tiRtcErrorOk;
   }
 
-  Future<int> _disposeVideoOutputWithTextureRetry() async {
+  Future<int> _disposeVideoOutputWithTextureRetry(TiRtcVideoOutput output) async {
     const int maxAttempts = 50;
     for (int attempt = 1; attempt <= maxAttempts; attempt += 1) {
-      final int code = _videoOutput.dispose();
+      final int code = output.dispose();
       if (code != _tiRtcErrorInUse || attempt == maxAttempts) {
         return code;
       }

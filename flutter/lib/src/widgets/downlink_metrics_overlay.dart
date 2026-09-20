@@ -39,7 +39,7 @@ class DownlinkMetricsOverlay extends StatefulWidget {
 }
 
 class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
-  bool _expanded = true;
+  bool _expanded = false;
 
   @override
   Widget build(BuildContext context) {
@@ -50,30 +50,39 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
           color: Colors.transparent,
           child: InkWell(
             key: DemoWidgetKeys.downlinkMetricsStatsExpandAction,
-            borderRadius: BorderRadius.circular(18),
+            borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
             onTap: () {
               setState(() {
                 _expanded = true;
               });
             },
             child: Container(
-              height: 26,
+              constraints: BoxConstraints(minHeight: ExampleTheme.minimumTargetSize(context)),
               padding: const EdgeInsets.symmetric(horizontal: 12),
               decoration: BoxDecoration(
                 color: Colors.white,
-                borderRadius: BorderRadius.circular(18),
+                borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
                 boxShadow: <BoxShadow>[
                   BoxShadow(color: Colors.black.withAlpha(35), blurRadius: 10, offset: const Offset(0, 3)),
                 ],
               ),
-              child: const Row(
+              child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Icon(Icons.bar_chart_rounded, size: 15, color: Color(0xFF4F86D9)),
-                  SizedBox(width: 5),
-                  Text(
-                    '即时统计',
-                    style: TextStyle(color: Color(0xDD111111), fontSize: 10, fontWeight: FontWeight.w800, height: 1),
+                  const Icon(Icons.bar_chart_rounded, size: 15, color: Color(0xFF4F86D9)),
+                  const SizedBox(width: 5),
+                  Flexible(
+                    child: Text(
+                      _summaryText(widget.metrics),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Color(0xDD111111),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        height: 1,
+                      ),
+                    ),
                   ),
                 ],
               ),
@@ -96,7 +105,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
             padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
             decoration: BoxDecoration(
               color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(ExampleTheme.radiusLarge),
               boxShadow: <BoxShadow>[
                 BoxShadow(color: Colors.black.withAlpha(40), blurRadius: 14, offset: const Offset(0, 5)),
               ],
@@ -112,7 +121,7 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
                         '即时统计',
                         style: TextStyle(
                           color: Color(0xDD111111),
-                          fontSize: 11,
+                          fontSize: 12,
                           fontWeight: FontWeight.w900,
                           height: 1,
                         ),
@@ -124,44 +133,21 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
                       style: IconButton.styleFrom(
                         foregroundColor: ExampleTheme.primary,
                         padding: EdgeInsets.zero,
-                        minimumSize: const Size.square(22),
-                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                        minimumSize: Size.square(ExampleTheme.minimumTargetSize(context)),
                       ),
                       icon: const Icon(Icons.help_outline_rounded, size: 16),
                     ),
                     const SizedBox(width: 6),
-                    InkWell(
+                    IconButton(
                       key: DemoWidgetKeys.downlinkMetricsStatsCollapseAction,
-                      borderRadius: BorderRadius.circular(12),
-                      onTap: () {
+                      onPressed: () {
                         setState(() {
                           _expanded = false;
                         });
                       },
-                      child: Container(
-                        height: 18,
-                        padding: const EdgeInsets.symmetric(horizontal: 8),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF4F86D9),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: <Widget>[
-                            Icon(Icons.keyboard_arrow_up_rounded, size: 14, color: Colors.white),
-                            SizedBox(width: 2),
-                            Text(
-                              '收起',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w800,
-                                height: 1,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      tooltip: '收起即时统计',
+                      style: IconButton.styleFrom(minimumSize: Size.square(ExampleTheme.minimumTargetSize(context))),
+                      icon: const Icon(Icons.keyboard_arrow_up_rounded, size: 20),
                     ),
                   ],
                 ),
@@ -174,6 +160,14 @@ class _DownlinkMetricsOverlayState extends State<DownlinkMetricsOverlay> {
         ),
       ),
     );
+  }
+
+  String _summaryText(DownlinkMetricsOverlayModel metrics) {
+    final String fps = metrics.videoRenderFps == null ? '--' : metrics.videoRenderFps!.toStringAsFixed(1);
+    final String latency =
+        metrics.videoEstimatedOutputLatencyMs == null ? '--' : '${metrics.videoEstimatedOutputLatencyMs} ms';
+    final String stutter = metrics.videoStutterCount == null ? '--' : '${metrics.videoStutterCount} 次';
+    return '视频 $fps fps · 延迟 $latency · 卡顿 $stutter';
   }
 }
 
@@ -192,11 +186,11 @@ class _MetricLine extends StatelessWidget {
           children: <InlineSpan>[
             TextSpan(
               text: '$label：',
-              style: const TextStyle(color: Color(0xFF659287), fontSize: 10, fontWeight: FontWeight.w900, height: 1.15),
+              style: const TextStyle(color: Color(0xFF35675C), fontSize: 12, fontWeight: FontWeight.w800, height: 1.3),
             ),
             TextSpan(
               text: value,
-              style: const TextStyle(color: Color(0xCC111111), fontSize: 10, fontWeight: FontWeight.w600, height: 1.15),
+              style: const TextStyle(color: Color(0xDD111111), fontSize: 12, fontWeight: FontWeight.w600, height: 1.3),
             ),
           ],
         ),

@@ -12,7 +12,6 @@ import '../demo_permissions.dart';
 import '../demo_route_lifecycle.dart';
 import '../demo_stream_message.dart';
 import '../demo_test_hooks.dart';
-import '../demo_video_attach_flow.dart';
 import '../demo_widget_keys.dart';
 import '../widgets/notice_dialog.dart';
 import '../widgets/downlink_center_loading.dart';
@@ -20,12 +19,14 @@ import '../widgets/downlink_metrics_overlay.dart';
 import '../widgets/downlink_metrics_overlay_markers.dart';
 import '../widgets/downlink_metrics_overlay_model.dart';
 import '../widgets/player_page_widgets.dart';
+import '../widgets/raw_dump_button.dart';
 import '../widgets/stream_message_bubble.dart';
 import 'player_command_controller.dart';
 import 'player_local_audio_controller.dart';
 import 'player_log_upload_controller.dart';
 
 part 'player_media_file_actions.dart';
+part 'player_raw_dump_actions.dart';
 
 enum _DownlinkViewState { idle, connecting, playing, failed }
 
@@ -54,6 +55,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   late final DemoPlayerCommandController _commandController;
   late final DemoPlayerLocalAudioController _localAudioController;
   late final DemoPlayerLogUploadController _logUploadController;
+  late final DemoRawDumpController _rawDumpController;
 
   _DownlinkViewState _downlinkState = _DownlinkViewState.idle;
   String _stageStatusLabel = '加载中';
@@ -61,11 +63,20 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   int _sessionGeneration = 0;
   bool _commandConnected = false;
   bool _audioMuted = false;
+  bool _audioOutputAvailable = false;
   bool _mediaFileBusy = false;
   bool _smokeConnectedMarked = false;
   bool _smokeAudioPlayingMarked = false;
   bool _smokeVideoRenderingMarked = false;
-  bool _hasRenderedVideoOnce = false;
+  bool _smokeMultiVideoRenderingMarked = false;
+  final Set<int> _smokePendingVideoStreamIds = <int>{};
+  final Set<int> _smokeRenderedVideoStreamIds = <int>{};
+  final Map<int, TiRtcVideoOutputState> _videoStates = <int, TiRtcVideoOutputState>{};
+  final Map<int, String> _videoStatusLabels = <int, String>{};
+  int? _selectedVideoStreamId;
+  int? _maximizedVideoStreamId;
+  int? _recordingVideoStreamId;
+  int? _latestMediaVideoStreamId;
 
   void _setMediaFileBusy(bool value) {
     if (mounted) setState(() => _mediaFileBusy = value);
@@ -80,10 +91,14 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   DownlinkMetricsOverlayModel? _metricsOverlay;
   DownlinkMetricsOverlayModel? _lastAvStatsOverlay;
   final DemoStreamMessageOverlayController _streamMessageOverlay = DemoStreamMessageOverlayController();
+  final FocusNode _commandButtonFocusNode = FocusNode(debugLabel: 'player-command-button');
+
+  void _notifyRawDumpChanged() => setState(() {});
 
   @override
   void initState() {
     super.initState();
+    _selectedVideoStreamId = widget.configuration.videoStreamIds.firstOrNull;
     _session = DemoDownlinkSession();
     _commandController = DemoPlayerCommandController(
       session: _session,
@@ -121,6 +136,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         return context.showNoticeDialog(title: title, content: content);
       },
     );
+    _initializeRawDumpController();
   }
 
   @override
@@ -128,16 +144,19 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _sessionGeneration += 1;
     _stopMetricsPolling();
     _streamMessageOverlay.dispose();
+    _commandButtonFocusNode.dispose();
     _metricsOverlay = null;
     _lastAvStatsOverlay = null;
     _commandConnected = false;
     _localAudioController.resetAfterSessionRelease(notify: false);
+    final Future<void> rawDumpFinalized = _rawDumpController.finalizeForLeave();
+    _rawDumpController.dispose();
     _logUploadController.reset(notify: false);
     _commandController.reset(notify: false);
     _clearSessionCallbacks();
     final DemoAutomationMarkerSink? markerSink = widget.smokeMarkerSink;
     unawaited(
-      _session.disposeAsync().then((int code) {
+      rawDumpFinalized.then((_) => _session.disposeAsync()).then((int code) {
         if (code == 0) {
           markerSink?.passed(
             'smoke_dispose_completed',
@@ -180,7 +199,6 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     setState(() {
       _downlinkState = _DownlinkViewState.connecting;
       _stageStatusLabel = '连接中';
-      _hasRenderedVideoOnce = false;
     });
 
     TiRtcLogging.i(
@@ -189,7 +207,8 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
           'remoteId=${widget.configuration.remoteId}',
     );
 
-    final int audioSessionCode = await _audioSession.retainIfNeeded();
+    final int? audioStreamId = widget.configuration.audioStreamId;
+    final int audioSessionCode = audioStreamId == null ? 0 : await _audioSession.retainIfNeeded();
     if (!_acceptGeneration(generation)) {
       _audioSession.releaseIfNeeded(reason: 'stale_audio_session_retain');
       return;
@@ -206,61 +225,45 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _bindSessionCallbacks(generation: generation);
 
     final TiRtcOutputBufferStrategy outputBufferStrategy = _outputBufferStrategy(widget.configuration.settings);
-    final int audioOptionsCode = _session.setAudioOptions(bufferStrategy: outputBufferStrategy);
-    if (audioOptionsCode != 0) {
-      _clearSessionCallbacks();
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(audioOptionsCode),
-        summary: 'Audio output buffer options failed with ${TiRtc.formatError(audioOptionsCode)}.',
-      );
-      return;
+    if (audioStreamId != null) {
+      final int audioOptionsCode = _session.setAudioOptions(bufferStrategy: outputBufferStrategy);
+      if (audioOptionsCode != 0) {
+        _handleAudioOutputFailure(
+          generation: generation,
+          code: audioOptionsCode,
+          summary: 'Audio output buffer options failed.',
+        );
+      } else {
+        final int audioAttachCode = _session.attachAudio(streamId: audioStreamId);
+        if (audioAttachCode != 0) {
+          _handleAudioOutputFailure(generation: generation, code: audioAttachCode, summary: 'Audio attach failed.');
+        } else {
+          _audioOutputAvailable = true;
+        }
+      }
     }
 
-    final int audioAttachCode = _session.attachAudio(streamId: widget.configuration.audioStreamId);
-    if (audioAttachCode != 0) {
-      _clearSessionCallbacks();
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(audioAttachCode),
-        summary: 'Audio attach failed with ${TiRtc.formatError(audioAttachCode)}.',
-      );
-      return;
-    }
-
-    final int videoStreamId = widget.configuration.videoStreamId;
     final int requestedDecoderPreference = widget.configuration.settings.videoDecoderPreference;
-    final DemoVideoAttachResult videoAttachResult = applyVideoDecoderPreferenceThenAttach(
-      sessionGeneration: generation,
-      videoStreamId: videoStreamId,
-      requestedPreference: requestedDecoderPreference,
-      applyOptions:
-          () => _session.setVideoOptions(
-            decoderPreference: requestedDecoderPreference,
-            bufferStrategy: outputBufferStrategy,
-          ),
-      attachVideo: () => _session.attachVideo(streamId: videoStreamId),
-      log: (String message) => TiRtcLogging.i('flutter_example', message),
-    );
-    if (!videoAttachResult.optionsApplied) {
-      _clearSessionCallbacks();
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(videoAttachResult.optionsCode),
-        summary: 'Video decoder preference apply failed with ${TiRtc.formatError(videoAttachResult.optionsCode)}.',
+    for (final int videoStreamId in widget.configuration.videoStreamIds) {
+      final int videoAttachCode = _session.attachVideo(
+        streamId: videoStreamId,
+        decoderPreference: requestedDecoderPreference,
+        bufferStrategy: outputBufferStrategy,
+        onStateChanged: (int streamId, TiRtcVideoOutputState state) {
+          _handleVideoState(generation: generation, streamId: streamId, state: state);
+        },
+        onError: (int streamId, int code) {
+          _handleVideoError(generation: generation, streamId: streamId, code: code);
+        },
       );
-      return;
-    }
-
-    final int videoAttachCode = videoAttachResult.attachCode ?? 0;
-    if (videoAttachCode != 0) {
-      _clearSessionCallbacks();
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(videoAttachCode),
-        summary: 'Video attach failed with ${TiRtc.formatError(videoAttachCode)}.',
-      );
-      return;
+      if (videoAttachCode != 0) {
+        _handleVideoError(generation: generation, streamId: videoStreamId, code: videoAttachCode);
+        _smokeFail(
+          failureStage: 'video_output_attach',
+          message: 'video output attach failed for stream $videoStreamId',
+          errorCode: videoAttachCode,
+        );
+      }
     }
 
     if (!_acceptGeneration(generation)) {
@@ -305,25 +308,15 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         _handleAudioState(generation: generation, state: state);
       },
       onAudioError: (int code) {
-        _smokeAudioErrorCount += 1;
-        _smokeFail(failureStage: 'audio_output', message: 'audio output failed', errorCode: code);
-        _handleFailure(
-          generation: generation,
-          label: _downlinkErrorLabel(code),
-          summary: 'Audio output failed with ${TiRtc.formatError(code)}.',
-        );
+        _handleAudioOutputFailure(generation: generation, code: code, summary: 'Audio output failed.');
       },
-      onVideoStateChanged: (TiRtcVideoOutputState state) {
-        _handleVideoState(generation: generation, state: state);
+      onVideoStateChanged: (_) {},
+      onVideoStateChangedForStream: (int streamId, TiRtcVideoOutputState state) {
+        _handleVideoState(generation: generation, streamId: streamId, state: state);
       },
-      onVideoError: (int code) {
-        _smokeVideoErrorCount += 1;
-        _smokeFail(failureStage: 'video_output', message: 'video output failed', errorCode: code);
-        _handleFailure(
-          generation: generation,
-          label: _downlinkErrorLabel(code),
-          summary: 'Video output failed with ${TiRtc.formatError(code)}.',
-        );
+      onVideoError: (_) {},
+      onVideoErrorForStream: (int streamId, int code) {
+        _handleVideoError(generation: generation, streamId: streamId, code: code);
       },
       onCommand: (int commandId, Uint8List data) {
         _handleCommand(generation: generation, commandId: commandId, payload: data);
@@ -358,6 +351,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _clearMetricsOverlay();
     _clearCommandState();
     _clearSessionCallbacks();
+    await _rawDumpController.finalizeForLeave();
     await _releaseSession(reason: reason);
     _shouldKeepPlaying = !clearIntent;
 
@@ -367,7 +361,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     setState(() {
       _downlinkState = _DownlinkViewState.idle;
       _stageStatusLabel = clearIntent ? '已停止' : '加载中';
-      _hasRenderedVideoOnce = false;
+      _audioOutputAvailable = false;
     });
   }
 
@@ -409,11 +403,11 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     required int timestampMs,
     required Uint8List payload,
   }) {
-    if (!_acceptGeneration(generation) || streamId != widget.configuration.videoStreamId) {
+    if (!_acceptGeneration(generation) || !widget.configuration.videoStreamIds.contains(streamId)) {
       return;
     }
     final DemoStreamMessageReceiveEvent? event = _streamMessageOverlay.handleIncoming(
-      expectedStreamId: widget.configuration.videoStreamId,
+      expectedStreamId: streamId,
       streamId: streamId,
       timestampMs: timestampMs,
       payload: payload,
@@ -464,6 +458,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
 
     final DownlinkMetricsOverlayModel? nextMetrics = _session.readMetricsOverlay(
       requestedDecoderPreference: widget.configuration.settings.videoDecoderPreference,
+      videoStreamId: _selectedVideoStreamId,
     );
     if (nextMetrics == null) {
       return;
@@ -495,10 +490,6 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     return mounted && generation == _sessionGeneration;
   }
 
-  String _downlinkErrorLabel(int code) {
-    return '播放失败 · ${TiRtc.formatError(code)}';
-  }
-
   String _connectionErrorLabel(int code) {
     return '连接失败 · ${TiRtc.formatError(code)}';
   }
@@ -522,31 +513,34 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
 
     if (state == TiRtcConnState.connected) {
-      final int audioStreamId = widget.configuration.audioStreamId;
-      final int audioSubscribeCode = _session.subscribeAudio(streamId: audioStreamId);
-      if (audioSubscribeCode != 0) {
-        _handleFailure(
-          generation: generation,
-          label: _connectionErrorLabel(audioSubscribeCode),
-          summary: 'Audio subscribe failed for stream $audioStreamId with ${TiRtc.formatError(audioSubscribeCode)}.',
-        );
-        return;
+      final int? audioStreamId = widget.configuration.audioStreamId;
+      if (audioStreamId != null && _audioOutputAvailable) {
+        final int audioSubscribeCode = _session.subscribeAudio(streamId: audioStreamId);
+        if (audioSubscribeCode != 0) {
+          _handleAudioOutputFailure(
+            generation: generation,
+            code: audioSubscribeCode,
+            summary: 'Audio subscribe failed for stream $audioStreamId.',
+          );
+        }
       }
 
-      final int videoStreamId = widget.configuration.videoStreamId;
-      final int videoSubscribeCode = _session.subscribeVideo(streamId: videoStreamId);
-      if (videoSubscribeCode != 0) {
-        _handleFailure(
-          generation: generation,
-          label: _connectionErrorLabel(videoSubscribeCode),
-          summary: 'Video subscribe failed for stream $videoStreamId with ${TiRtc.formatError(videoSubscribeCode)}.',
-        );
-        return;
+      for (final int videoStreamId in widget.configuration.videoStreamIds) {
+        if (_videoStates[videoStreamId] == TiRtcVideoOutputState.failed) continue;
+        final int videoSubscribeCode = _session.subscribeVideo(streamId: videoStreamId);
+        if (videoSubscribeCode != 0) {
+          _handleVideoError(generation: generation, streamId: videoStreamId, code: videoSubscribeCode);
+          _smokeFail(
+            failureStage: 'video_output_subscribe',
+            message: 'video subscribe failed for stream $videoStreamId',
+            errorCode: videoSubscribeCode,
+          );
+        }
       }
 
       TiRtcLogging.i(
         'flutter_example',
-        'remote_media_subscribed audio_stream_id=$audioStreamId video_stream_id=$videoStreamId',
+        'remote_media_subscribed audio_stream_id=$audioStreamId video_stream_ids=${widget.configuration.videoStreamIds}',
       );
       _smokePassOnce(
         marker: 'smoke_connected',
@@ -562,8 +556,18 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       }
       setState(() {
         _commandConnected = true;
-        _downlinkState = _DownlinkViewState.connecting;
-        _stageStatusLabel = '加载中';
+        final bool waitingForVideo = widget.configuration.videoStreamIds.any(
+          (int streamId) => _videoStates[streamId] != TiRtcVideoOutputState.failed,
+        );
+        _downlinkState = waitingForVideo ? _DownlinkViewState.connecting : _DownlinkViewState.playing;
+        _stageStatusLabel =
+            _audioOutputAvailable
+                ? '音频播放中'
+                : widget.configuration.audioStreamId == null && widget.configuration.videoStreamIds.isEmpty
+                ? '未配置音视频'
+                : waitingForVideo
+                ? '等待视频'
+                : '音视频输出不可用';
       });
       _commandController.refreshSheet();
       return;
@@ -589,17 +593,12 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
 
     if (state == TiRtcAudioOutputState.failed) {
-      _smokeAudioErrorCount += 1;
-      _smokeFail(failureStage: 'audio_output', message: 'audio output entered failed state');
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(0),
-        summary: 'Audio output entered a failed state.',
-      );
+      _handleAudioOutputFailure(generation: generation, code: 0, summary: 'Audio output entered a failed state.');
       return;
     }
 
     if (state == TiRtcAudioOutputState.playing) {
+      if (!_audioOutputAvailable) setState(() => _audioOutputAvailable = true);
       _smokePassOnce(
         marker: 'smoke_audio_playing',
         marked: _smokeAudioPlayingMarked,
@@ -625,32 +624,68 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _localAudioController.handleInputError(code: code, message: message);
   }
 
-  void _handleVideoState({required int generation, required TiRtcVideoOutputState state}) {
+  void _handleVideoState({required int generation, required int streamId, required TiRtcVideoOutputState state}) {
     if (!_acceptGeneration(generation)) {
       return;
     }
 
     if (state == TiRtcVideoOutputState.failed) {
       _smokeVideoErrorCount += 1;
-      _smokeFail(failureStage: 'video_output', message: 'video output entered failed state');
-      _handleFailure(
-        generation: generation,
-        label: _downlinkErrorLabel(0),
-        summary: 'Video output entered a failed state.',
-      );
+      setState(() {
+        _videoStates[streamId] = state;
+        _videoStatusLabels[streamId] = '播放失败';
+        _settleAfterAllVideoOutputsFail();
+      });
+      TiRtcLogging.w('flutter_example', 'video_output_failed stream_id=$streamId');
       return;
     }
 
+    setState(() {
+      _videoStates[streamId] = state;
+      _videoStatusLabels[streamId] = state == TiRtcVideoOutputState.rendering ? '播放中' : '等待视频';
+    });
     if (state == TiRtcVideoOutputState.rendering) {
       setState(() {
         if (_downlinkState == _DownlinkViewState.connecting) {
           _downlinkState = _DownlinkViewState.playing;
         }
-        _hasRenderedVideoOnce = true;
       });
-      _markSmokeVideoRendering(generation: generation);
+      _markSmokeVideoRendering(generation: generation, streamId: streamId);
       _startMetricsPolling(generation: generation);
     }
+  }
+
+  void _handleVideoError({required int generation, required int streamId, required int code}) {
+    if (!_acceptGeneration(generation)) return;
+    _smokeVideoErrorCount += 1;
+    setState(() {
+      _videoStates[streamId] = TiRtcVideoOutputState.failed;
+      _videoStatusLabels[streamId] = '播放失败 · ${TiRtc.formatError(code)}';
+      _settleAfterAllVideoOutputsFail();
+    });
+    TiRtcLogging.w('flutter_example', 'video_output_error stream_id=$streamId code=$code');
+  }
+
+  void _handleAudioOutputFailure({required int generation, required int code, required String summary}) {
+    if (!_acceptGeneration(generation)) return;
+    _smokeAudioErrorCount += 1;
+    _audioOutputAvailable = false;
+    _smokeFail(failureStage: 'audio_output', message: summary, errorCode: code == 0 ? null : code);
+    setState(() {
+      if (widget.configuration.videoStreamIds.isEmpty) {
+        _stageStatusLabel = code == 0 ? '音频播放失败' : '音频播放失败 · ${TiRtc.formatError(code)}';
+      }
+    });
+    TiRtcLogging.w('flutter_example', 'audio_output_error code=$code summary=$summary');
+  }
+
+  void _settleAfterAllVideoOutputsFail() {
+    if (!_commandConnected ||
+        !widget.configuration.videoStreamIds.every((int id) => _videoStates[id] == TiRtcVideoOutputState.failed)) {
+      return;
+    }
+    _downlinkState = _DownlinkViewState.playing;
+    _stageStatusLabel = _audioOutputAvailable ? '音频播放中' : '音视频输出不可用';
   }
 
   void _handleFailure({required int generation, required String label, required String summary}) {
@@ -667,6 +702,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       _stageStatusLabel = label;
       _metricsOverlay = null;
       _commandConnected = false;
+      _audioOutputAvailable = false;
     });
     TiRtcLogging.w('flutter_example', 'downlink_failed summary=$summary');
     _commandController.refreshSheet();
@@ -690,29 +726,47 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     widget.smokeMarkerSink?.failure(failureStage: failureStage, message: message, errorCode: errorCode);
   }
 
-  void _markSmokeVideoRendering({required int generation}) {
-    if (_smokeVideoRenderingMarked || widget.smokeMarkerSink == null) {
+  void _markSmokeVideoRendering({required int generation, required int streamId}) {
+    if (widget.smokeMarkerSink == null ||
+        _smokeRenderedVideoStreamIds.contains(streamId) ||
+        !_smokePendingVideoStreamIds.add(streamId)) {
       return;
     }
-    _smokeVideoRenderingMarked = true;
     unawaited(() async {
-      final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
-      while (DateTime.now().isBefore(deadline)) {
-        if (!_acceptGeneration(generation)) {
-          return;
+      try {
+        final DateTime deadline = DateTime.now().add(const Duration(seconds: 30));
+        while (DateTime.now().isBefore(deadline)) {
+          if (!_acceptGeneration(generation)) {
+            return;
+          }
+          final TiRtcVideoOutputMetricsResult metrics = _session.videoMetrics(streamId);
+          final int? firstOutputDurationMs = metrics.snapshot?.startup.timeToFirstOutputMs;
+          if (metrics.code == 0 && firstOutputDurationMs != null && firstOutputDurationMs >= 0) {
+            _smokeRenderedVideoStreamIds.add(streamId);
+            if (!_smokeVideoRenderingMarked) {
+              _smokeVideoRenderingMarked = true;
+              widget.smokeMarkerSink?.passed(
+                'smoke_video_rendering',
+                payload: <String, Object?>{'stream_id': streamId, 'first_frame_duration_ms': firstOutputDurationMs},
+              );
+            }
+            if (_smokeRenderedVideoStreamIds.containsAll(widget.configuration.videoStreamIds) &&
+                widget.configuration.videoStreamIds.length > 1 &&
+                !_smokeMultiVideoRenderingMarked) {
+              _smokeMultiVideoRenderingMarked = true;
+              widget.smokeMarkerSink?.passed(
+                'smoke_multi_video_rendering',
+                payload: <String, Object?>{'video_stream_ids': widget.configuration.videoStreamIds},
+              );
+            }
+            return;
+          }
+          await Future<void>.delayed(const Duration(milliseconds: 100));
         }
-        final TiRtcVideoOutputMetricsResult metrics = _session.videoMetrics();
-        final int? firstOutputDurationMs = metrics.snapshot?.startup.timeToFirstOutputMs;
-        if (metrics.code == 0 && firstOutputDurationMs != null && firstOutputDurationMs >= 0) {
-          widget.smokeMarkerSink?.passed(
-            'smoke_video_rendering',
-            payload: <String, Object?>{'first_frame_duration_ms': firstOutputDurationMs},
-          );
-          return;
-        }
-        await Future<void>.delayed(const Duration(milliseconds: 100));
+        _smokeFail(failureStage: 'render_timeout', message: 'first frame metrics timeout');
+      } finally {
+        _smokePendingVideoStreamIds.remove(streamId);
       }
-      _smokeFail(failureStage: 'render_timeout', message: 'first frame metrics timeout');
     }());
   }
 
@@ -728,6 +782,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       }
       final DownlinkMetricsOverlayModel? metrics = _session.readMetricsOverlay(
         requestedDecoderPreference: widget.configuration.settings.videoDecoderPreference,
+        videoStreamId: _selectedVideoStreamId,
       );
       if (_smokeAudioErrorCount != 0 || _smokeVideoErrorCount != 0 || metrics == null || !metrics.debugStatsReady) {
         _smokeFail(failureStage: 'render_window', message: 'render window ended without healthy output');
@@ -745,7 +800,10 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
           'audio_error_count': _smokeAudioErrorCount,
           'video_error_count': _smokeVideoErrorCount,
           'audio_state': _session.audioState.name,
-          'video_state': _session.videoState.name,
+          'video_states': <String, String>{
+            for (final int id in widget.configuration.videoStreamIds)
+              '$id': (_session.videoStateFor(id)?.name ?? 'missing'),
+          },
         },
       );
     }());
@@ -782,14 +840,16 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     );
   }
 
-  Future<void> _showCommandPanel() {
-    return _commandController.showPanel(context, connected: () => _commandConnected);
+  Future<void> _showCommandPanel() async {
+    await _commandController.showPanel(context, connected: () => _commandConnected);
+    if (mounted) _commandButtonFocusNode.requestFocus();
   }
 
   @override
   Widget build(BuildContext context) {
     final bool connecting = _downlinkState == _DownlinkViewState.connecting;
     final bool playing = _downlinkState == _DownlinkViewState.playing;
+    final bool appleProfile = ExampleTheme.isAppleProfile(context);
     return Scaffold(
       key: DemoWidgetKeys.playerPage,
       backgroundColor: ExampleTheme.background,
@@ -799,11 +859,15 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
           style: const TextStyle(color: ExampleTheme.primary, fontSize: 14, fontWeight: FontWeight.w600),
         ),
         actions: <Widget>[
-          PlayerCommandButton(key: DemoWidgetKeys.playerCommandButton, onOpenCommands: _showCommandPanel),
+          PlayerCommandButton(
+            key: DemoWidgetKeys.playerCommandButton,
+            focusNode: _commandButtonFocusNode,
+            onOpenCommands: _showCommandPanel,
+          ),
           PlayerLogUploadButton(
             buttonKey: DemoWidgetKeys.playerLogUploadButton,
             uploadingLogs: _logUploadController.uploading,
-            onUploadLogs: () => _logUploadController.upload(remoteId: widget.configuration.remoteId),
+            onUploadLogs: _uploadLogs,
           ),
         ],
       ),
@@ -811,13 +875,33 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         children: <Widget>[
           Positioned.fill(
             child: DownlinkVideoStage(
-              videoView: _session.buildVideoView(),
-              showStageOverlay: _showStageOverlay,
+              lanes: <DownlinkVideoLaneModel>[
+                for (final int id in widget.configuration.videoStreamIds)
+                  DownlinkVideoLaneModel(
+                    streamId: id,
+                    videoView: _session.buildVideoView(id),
+                    statusLabel: _videoStatusLabels[id] ?? '等待视频',
+                    showStatus: _videoStates[id] != TiRtcVideoOutputState.rendering,
+                  ),
+              ],
+              selectedStreamId: _selectedVideoStreamId,
+              maximizedStreamId: _maximizedVideoStreamId,
               stageStatusLabel: _stageStatusLabel,
               indicatorMode: _centerIndicatorMode,
+              onSelect: _selectVideoStream,
             ),
           ),
           const Positioned.fill(child: DownlinkOverlayGradient()),
+          Positioned(
+            left: 12,
+            top: 0,
+            bottom: 0,
+            child: SafeArea(
+              child: Center(
+                child: DemoRawDumpButton(key: DemoWidgetKeys.rawDumpButton, controller: _rawDumpController),
+              ),
+            ),
+          ),
           if (_metricsOverlay != null)
             Positioned(
               top: 18,
@@ -834,7 +918,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
           SafeArea(
             top: false,
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+              padding: EdgeInsets.fromLTRB(20, appleProfile ? 0 : 16, 20, appleProfile ? 0 : 24),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -845,48 +929,36 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                       child: StreamMessageBubble(text: _streamMessageOverlay.text!),
                     ),
                   if (_streamMessageOverlay.text != null) const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.bottomRight,
-                    child: Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      alignment: WrapAlignment.end,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: <Widget>[
-                        IconButton.filledTonal(
-                          key: DemoWidgetKeys.playerRecordingButton,
-                          tooltip: _session.isRecording ? '停止本地保存' : '开始本地保存',
-                          onPressed: playing && !_mediaFileBusy ? _toggleRecording : null,
-                          icon: Icon(_session.isRecording ? Icons.stop_circle_outlined : Icons.fiber_manual_record),
-                        ),
-                        IconButton.filledTonal(
-                          key: DemoWidgetKeys.playerSnapshotButton,
-                          tooltip: '截图',
-                          onPressed: playing && !_mediaFileBusy ? _takeSnapshot : null,
-                          icon: const Icon(Icons.camera_alt_outlined),
-                        ),
-                        IconButton.filledTonal(
-                          key: DemoWidgetKeys.playerGalleryButton,
-                          tooltip: '保存到系统相册',
-                          onPressed: playing && !_mediaFileBusy ? _moveLatestMediaToGallery : null,
-                          icon: const Icon(Icons.photo_library_outlined),
-                        ),
-                        AudioOutputVolumeButton(
-                          key: DemoWidgetKeys.playerAudioVolumeButton,
-                          enabled: _commandConnected,
-                          muted: _audioMuted,
-                          onPressed: _toggleAudioOutputVolume,
-                        ),
-                        LocalAudioControlButton(
-                          key: DemoWidgetKeys.playerLocalAudioButton,
-                          enabled: _commandConnected,
-                          busy: _localAudioController.busy,
-                          running: _localAudioController.running,
-                          onPressed: _localAudioController.toggle,
-                        ),
-                        DownlinkControlButton(connecting: connecting, playing: playing, onPressed: _toggleDownlink),
-                      ],
+                  PlayerControlPanel(
+                    connecting: connecting,
+                    playing: playing,
+                    audioOutputEnabled: _commandConnected && _audioOutputAvailable,
+                    audioMuted: _audioMuted,
+                    localAudioControl: LocalAudioControlButton(
+                      key: DemoWidgetKeys.playerLocalAudioButton,
+                      enabled: _commandConnected,
+                      busy: _localAudioController.busy,
+                      running: _localAudioController.running,
+                      onPressed: _localAudioController.toggle,
                     ),
+                    selectedVideoPosition:
+                        _selectedVideoStreamId == null
+                            ? null
+                            : widget.configuration.videoStreamIds.indexOf(_selectedVideoStreamId!) + 1,
+                    selectedVideoStreamId: _selectedVideoStreamId,
+                    mediaBusy: _mediaFileBusy,
+                    recording: _session.isRecording,
+                    canExecuteMedia:
+                        () =>
+                            _downlinkState == _DownlinkViewState.playing &&
+                            _selectedVideoStreamId != null &&
+                            !_mediaFileBusy,
+                    onToggleDownlink: _toggleDownlink,
+                    onToggleAudioOutput: _toggleAudioOutputVolume,
+                    onToggleRecording: _toggleRecording,
+                    onSnapshot: _takeSnapshot,
+                    onGallery: _moveLatestMediaToGallery,
+                    onMediaUnavailable: () => _showPlayerSnack('播放状态已变化，请恢复播放后重试。'),
                   ),
                 ],
               ),
@@ -895,6 +967,17 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
         ],
       ),
     );
+  }
+
+  void _selectVideoStream(int streamId) {
+    setState(() {
+      if (_selectedVideoStreamId == streamId) {
+        _maximizedVideoStreamId = _maximizedVideoStreamId == streamId ? null : streamId;
+      } else {
+        _selectedVideoStreamId = streamId;
+        _maximizedVideoStreamId = null;
+      }
+    });
   }
 
   void _toggleDownlink() {
@@ -947,18 +1030,5 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     }
 
     return DownlinkCenterIndicatorMode.loading;
-  }
-
-  bool get _showStageOverlay {
-    if (_downlinkState == _DownlinkViewState.playing) {
-      return false;
-    }
-    if (_downlinkState == _DownlinkViewState.failed) {
-      return true;
-    }
-    if (_downlinkState == _DownlinkViewState.idle && !_shouldKeepPlaying) {
-      return true;
-    }
-    return !_hasRenderedVideoOnce;
   }
 }

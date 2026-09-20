@@ -5,10 +5,11 @@ import 'package:tirtc_flutter/tirtc_flutter.dart';
 
 typedef DemoLogResultDialog = Future<void> Function({required String title, required String content});
 
-String demoGalleryFileName(String extension, {DateTime? now}) {
+String demoGalleryFileName(String extension, {DateTime? now, int? targetId, String targetKind = 'stream'}) {
   final DateTime value = (now ?? DateTime.now()).toLocal();
   String part(int number, int width) => number.toString().padLeft(width, '0');
-  return '客厅角落摄像头-${part(value.year, 4)}-${part(value.month, 2)}-${part(value.day, 2)}-'
+  final String target = targetId == null ? '' : '-$targetKind-$targetId';
+  return '客厅角落摄像头$target-${part(value.year, 4)}-${part(value.month, 2)}-${part(value.day, 2)}-'
       '${part(value.hour, 2)}-${part(value.minute, 2)}-${part(value.second, 2)}-'
       '${part(value.millisecond, 3)}.$extension';
 }

@@ -41,8 +41,8 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
 
     return Padding(
       padding: const EdgeInsets.all(14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      child: ListView(
+        keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
         children: <Widget>[
           Align(alignment: Alignment.centerLeft, child: _ConnectionPill(connected: widget.connected)),
           const SizedBox(height: 12),
@@ -117,18 +117,13 @@ class _DemoCommandPanelState extends State<DemoCommandPanel> {
             ),
           ),
           const SizedBox(height: 10),
-          Expanded(
-            child:
-                events.isEmpty
-                    ? const _EmptyCommandEvents()
-                    : ListView.separated(
-                      itemCount: events.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 6),
-                      itemBuilder: (BuildContext context, int index) {
-                        return _CommandEventRow(event: events[index]);
-                      },
-                    ),
-          ),
+          if (events.isEmpty)
+            const _EmptyCommandEvents()
+          else
+            for (int index = 0; index < events.length; index++) ...<Widget>[
+              if (index > 0) const SizedBox(height: 6),
+              _CommandEventRow(event: events[index]),
+            ],
         ],
       ),
     );

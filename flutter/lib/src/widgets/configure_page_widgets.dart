@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../app_theme.dart';
 import '../demo_widget_keys.dart';
@@ -173,9 +174,9 @@ class ConfigureHeader extends StatelessWidget {
             foregroundColor: startingPlayer ? ExampleTheme.textHint : ExampleTheme.primary,
             backgroundColor: Colors.transparent,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            minimumSize: const Size(0, 40),
+            minimumSize: Size.square(ExampleTheme.minimumTargetSize(context)),
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(ExampleTheme.radiusMedium),
               side: BorderSide(color: (startingPlayer ? ExampleTheme.textHint : ExampleTheme.primary).withAlpha(180)),
             ),
           ),
@@ -197,11 +198,14 @@ class ConfigureForm extends StatelessWidget {
     required this.endpointController,
     required this.remoteIdController,
     required this.audioStreamIdController,
-    required this.videoStreamIdController,
+    required this.videoStreamIdControllers,
+    required this.onAddVideoStream,
+    required this.onRemoveVideoStream,
     required this.tokenController,
     required this.tokenServerAddressController,
     required this.validateEndpoint,
-    required this.validateStreamId,
+    required this.validateAudioStreamId,
+    required this.validateVideoStreamId,
     required this.validateOneTimeToken,
     required this.validateTokenServerAddress,
     required this.scanSupported,
@@ -217,11 +221,14 @@ class ConfigureForm extends StatelessWidget {
   final TextEditingController endpointController;
   final TextEditingController remoteIdController;
   final TextEditingController audioStreamIdController;
-  final TextEditingController videoStreamIdController;
+  final List<TextEditingController> videoStreamIdControllers;
+  final VoidCallback onAddVideoStream;
+  final ValueChanged<int> onRemoveVideoStream;
   final TextEditingController tokenController;
   final TextEditingController tokenServerAddressController;
   final FormFieldValidator<String> validateEndpoint;
-  final FormFieldValidator<String> validateStreamId;
+  final FormFieldValidator<String> validateAudioStreamId;
+  final FormFieldValidator<String> validateVideoStreamId;
   final FormFieldValidator<String> validateOneTimeToken;
   final FormFieldValidator<String> validateTokenServerAddress;
   final bool scanSupported;
@@ -233,41 +240,101 @@ class ConfigureForm extends StatelessWidget {
     return Form(
       key: formKey,
       autovalidateMode: submitted ? AutovalidateMode.always : AutovalidateMode.disabled,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _EndpointAndAppIdFields(
-            appIdController: appIdController,
-            endpointController: endpointController,
-            enabled: enabled,
-            validateEndpoint: validateEndpoint,
-          ),
-          const SizedBox(height: 16),
-          _RemoteIdField(controller: remoteIdController, enabled: enabled),
-          const SizedBox(height: 16),
-          _StreamIdRow(
-            audioStreamIdController: audioStreamIdController,
-            videoStreamIdController: videoStreamIdController,
-            enabled: enabled,
-            validator: validateStreamId,
-          ),
-          const SizedBox(height: 16),
-          ConfigureTokenAcquisitionSection(
-            tokenController: tokenController,
-            tokenServerAddressController: tokenServerAddressController,
-            enabled: enabled,
-            scanSupported: scanSupported,
-            validateOneTimeToken: validateOneTimeToken,
-            validateTokenServerAddress: validateTokenServerAddress,
-            onScanToken: onScanToken,
-          ),
-          const SizedBox(height: 20),
-          FilledButton(
-            key: DemoWidgetKeys.startDownlinkButton,
-            onPressed: enabled ? onStartPlaying : null,
-            child: _EnterPlayerButtonLabel(startingPlayer: startingPlayer),
-          ),
-        ],
+      child: LayoutBuilder(
+        builder: (BuildContext context, BoxConstraints constraints) {
+          final Widget connection = ExampleConfigurationSection(
+            title: '连接',
+            child: Column(
+              children: <Widget>[
+                _EndpointAndAppIdFields(
+                  appIdController: appIdController,
+                  endpointController: endpointController,
+                  enabled: enabled,
+                  validateEndpoint: validateEndpoint,
+                ),
+                const SizedBox(height: 16),
+                _RemoteIdField(controller: remoteIdController, enabled: enabled),
+              ],
+            ),
+          );
+          final Widget media = ExampleConfigurationSection(
+            title: '媒体',
+            child: _StreamIdSection(
+              audioStreamIdController: audioStreamIdController,
+              videoStreamIdControllers: videoStreamIdControllers,
+              enabled: enabled,
+              validateAudioStreamId: validateAudioStreamId,
+              validateVideoStreamId: validateVideoStreamId,
+              onAddVideoStream: onAddVideoStream,
+              onRemoveVideoStream: onRemoveVideoStream,
+            ),
+          );
+          final Widget authentication = ExampleConfigurationSection(
+            title: '鉴权',
+            child: ConfigureTokenAcquisitionSection(
+              tokenController: tokenController,
+              tokenServerAddressController: tokenServerAddressController,
+              enabled: enabled,
+              scanSupported: scanSupported,
+              validateOneTimeToken: validateOneTimeToken,
+              validateTokenServerAddress: validateTokenServerAddress,
+              onScanToken: onScanToken,
+            ),
+          );
+          final bool wide = MediaQuery.sizeOf(context).width >= ExampleTheme.formWideBreakpoint;
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (wide)
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Expanded(child: Column(children: <Widget>[connection, const SizedBox(height: 16), media])),
+                    const SizedBox(width: 16),
+                    Expanded(child: authentication),
+                  ],
+                )
+              else ...<Widget>[
+                connection,
+                const SizedBox(height: 16),
+                media,
+                const SizedBox(height: 16),
+                authentication,
+              ],
+              const SizedBox(height: 20),
+              FilledButton(
+                key: DemoWidgetKeys.startDownlinkButton,
+                onPressed: enabled ? onStartPlaying : null,
+                child: _EnterPlayerButtonLabel(startingPlayer: startingPlayer),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class ExampleConfigurationSection extends StatelessWidget {
+  const ExampleConfigurationSection({super.key, required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: ExampleTheme.formSectionDecoration,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(title, style: Theme.of(context).textTheme.titleMedium),
+            const SizedBox(height: 12),
+            child,
+          ],
+        ),
       ),
     );
   }
@@ -297,7 +364,7 @@ class ConfigureLogUploadAction extends StatelessWidget {
         style: TextButton.styleFrom(
           foregroundColor: ExampleTheme.textHint,
           disabledForegroundColor: ExampleTheme.textHint.withAlpha(145),
-          minimumSize: const Size(44, 44),
+          minimumSize: Size.square(ExampleTheme.minimumTargetSize(context)),
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
           tapTargetSize: MaterialTapTargetSize.padded,
         ),
@@ -430,49 +497,136 @@ class _RemoteIdField extends StatelessWidget {
   }
 }
 
-class _StreamIdRow extends StatelessWidget {
-  const _StreamIdRow({
+class _StreamIdSection extends StatelessWidget {
+  const _StreamIdSection({
     required this.audioStreamIdController,
-    required this.videoStreamIdController,
+    required this.videoStreamIdControllers,
     required this.enabled,
-    required this.validator,
+    required this.validateAudioStreamId,
+    required this.validateVideoStreamId,
+    required this.onAddVideoStream,
+    required this.onRemoveVideoStream,
   });
 
   final TextEditingController audioStreamIdController;
-  final TextEditingController videoStreamIdController;
+  final List<TextEditingController> videoStreamIdControllers;
   final bool enabled;
-  final FormFieldValidator<String> validator;
+  final FormFieldValidator<String> validateAudioStreamId;
+  final FormFieldValidator<String> validateVideoStreamId;
+  final VoidCallback onAddVideoStream;
+  final ValueChanged<int> onRemoveVideoStream;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Expanded(
-          child: TextFormField(
-            key: DemoWidgetKeys.audioStreamIdField,
-            controller: audioStreamIdController,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            textInputAction: TextInputAction.next,
-            style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(labelText: 'audio_stream_id', hintText: '音频流 ID，默认 10'),
-            validator: validator,
-          ),
+        TextFormField(
+          key: DemoWidgetKeys.audioStreamIdField,
+          controller: audioStreamIdController,
+          enabled: enabled,
+          keyboardType: TextInputType.number,
+          textInputAction: TextInputAction.next,
+          style: ExampleTheme.inputTextStyle,
+          decoration: const InputDecoration(labelText: '音频 Stream ID', hintText: '留空不接收音频'),
+          validator: validateAudioStreamId,
         ),
-        const SizedBox(width: 16),
-        Expanded(
-          child: TextFormField(
-            key: DemoWidgetKeys.videoStreamIdField,
-            controller: videoStreamIdController,
-            enabled: enabled,
-            keyboardType: TextInputType.number,
-            textInputAction: TextInputAction.next,
-            style: ExampleTheme.inputTextStyle,
-            decoration: const InputDecoration(labelText: 'video_stream_id', hintText: '视频流 ID，默认 11'),
-            validator: validator,
-          ),
+        const SizedBox(height: 12),
+        Row(
+          children: <Widget>[
+            const Expanded(
+              child: Text('视频 Stream ID（最多 3 路）', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ),
+            IconButton(
+              key: DemoWidgetKeys.addVideoStreamIdButton,
+              tooltip: '添加视频流',
+              onPressed: enabled && videoStreamIdControllers.length < 3 ? onAddVideoStream : null,
+              icon: const Icon(Icons.add_circle_outline_rounded),
+            ),
+          ],
         ),
+        for (int index = 0; index < videoStreamIdControllers.length; index++) ...<Widget>[
+          if (index > 0) const SizedBox(height: 12),
+          ExampleVideoIdFieldRow(
+            position: index + 1,
+            idLabel: 'Stream ID',
+            hintText: '留空不接收该路视频',
+            fieldKey: index == 0 ? DemoWidgetKeys.videoStreamIdField : DemoWidgetKeys.videoStreamIdFieldAt(index),
+            removeButtonKey: DemoWidgetKeys.removeVideoStreamIdButtonAt(index),
+            controller: videoStreamIdControllers[index],
+            enabled: enabled,
+            validator: validateVideoStreamId,
+            onRemove: () => onRemoveVideoStream(index),
+          ),
+        ],
       ],
+    );
+  }
+}
+
+class ExampleVideoIdFieldRow extends StatelessWidget {
+  const ExampleVideoIdFieldRow({
+    super.key,
+    required this.position,
+    required this.idLabel,
+    required this.hintText,
+    required this.fieldKey,
+    required this.removeButtonKey,
+    required this.controller,
+    required this.enabled,
+    required this.validator,
+    required this.onRemove,
+    this.inputFormatters,
+  });
+
+  final int position;
+  final String idLabel;
+  final String hintText;
+  final Key fieldKey;
+  final Key removeButtonKey;
+  final TextEditingController controller;
+  final bool enabled;
+  final FormFieldValidator<String> validator;
+  final VoidCallback onRemove;
+  final List<TextInputFormatter>? inputFormatters;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      container: true,
+      label: '视频 $position',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Text('视频 $position', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          const SizedBox(height: 8),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                child: TextFormField(
+                  key: fieldKey,
+                  controller: controller,
+                  enabled: enabled,
+                  keyboardType: TextInputType.number,
+                  textInputAction: TextInputAction.next,
+                  inputFormatters: inputFormatters,
+                  style: ExampleTheme.inputTextStyle,
+                  decoration: InputDecoration(labelText: idLabel, hintText: hintText),
+                  validator: validator,
+                ),
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                key: removeButtonKey,
+                tooltip: '删除视频 $position',
+                onPressed: enabled ? onRemove : null,
+                icon: const Icon(Icons.remove_circle_outline_rounded),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

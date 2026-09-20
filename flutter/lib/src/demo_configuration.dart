@@ -161,7 +161,7 @@ final class DemoDownlinkConfiguration {
     required this.endpoint,
     required this.remoteId,
     required this.audioStreamId,
-    required this.videoStreamId,
+    required this.videoStreamIds,
     required this.token,
     required this.settings,
     this.tokenServerAddress = '',
@@ -170,8 +170,8 @@ final class DemoDownlinkConfiguration {
   final String appId;
   final String endpoint;
   final String remoteId;
-  final int audioStreamId;
-  final int videoStreamId;
+  final int? audioStreamId;
+  final List<int> videoStreamIds;
   final String token;
   final DemoExampleSettings settings;
   final String tokenServerAddress;
@@ -182,7 +182,7 @@ final class DemoDownlinkConfiguration {
       endpoint: endpoint,
       remoteId: remoteId,
       audioStreamId: audioStreamId,
-      videoStreamId: videoStreamId,
+      videoStreamIds: videoStreamIds,
       token: resolvedToken,
       settings: settings,
       tokenServerAddress: tokenServerAddress,

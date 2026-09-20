@@ -222,12 +222,12 @@ class DemoPlayerLocalAudioController {
 
   TiRtcAudioInputOptions _localAudioOptions(DemoExampleSettings settings) {
     return TiRtcAudioInputOptions(
-      codec: switch (settings.localAudioCodec) {
-        DemoExampleSettings.localAudioCodecAac => TiRtcAudioCodec.aac,
-        DemoExampleSettings.localAudioCodecPcm => TiRtcAudioCodec.pcm,
-        DemoExampleSettings.localAudioCodecOpus => TiRtcAudioCodec.opus,
-        DemoExampleSettings.localAudioCodecAmr => TiRtcAudioCodec.amr,
-        _ => TiRtcAudioCodec.g711a,
+      media: switch (settings.localAudioCodec) {
+        DemoExampleSettings.localAudioCodecAac => 3,
+        DemoExampleSettings.localAudioCodecPcm => 1,
+        DemoExampleSettings.localAudioCodecOpus => 4,
+        DemoExampleSettings.localAudioCodecAmr => 5,
+        _ => 2,
       },
       sampleRate:
           settings.localAudioSampleRateHz == DemoExampleSettings.localAudioSampleRate8k

@@ -24,9 +24,9 @@ class DemoPlayerLogUploadController {
 
   bool uploading = false;
 
-  Future<void> upload({required String remoteId}) async {
+  Future<({int code, String? logId})?> upload({required String remoteId}) async {
     if (uploading) {
-      return;
+      return null;
     }
     uploading = true;
     _notifyChanged();
@@ -45,6 +45,7 @@ class DemoPlayerLogUploadController {
       } else if (_markerSink() != null) {
         _markerSink()?.failure(failureStage: 'log_upload', message: 'log upload failed', errorCode: result?.code);
       }
+      return result;
     } finally {
       uploading = false;
       _notifyChanged();

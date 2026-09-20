@@ -59,6 +59,9 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> cloudStorageSnapshotButton = ValueKey<String>(
     'tirtc-example-ti-cloud-storage-snapshot-button',
   );
+  static const ValueKey<String> cloudStorageMediaTarget = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-media-target',
+  );
   static const ValueKey<String> cloudStorageGalleryButton = ValueKey<String>(
     'tirtc-example-ti-cloud-storage-gallery-button',
   );
@@ -72,9 +75,20 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> playerAudioVolumeButton = ValueKey<String>('tirtc_example_player_audio_volume_button');
   static const ValueKey<String> streamMessageBubble = ValueKey<String>('tirtc_example_stream_message_bubble');
   static const ValueKey<String> playerLogUploadButton = ValueKey<String>('tirtc_example_player_log_upload_button');
+  static const ValueKey<String> rawDumpButton = ValueKey<String>('tirtc_example_raw_dump_button');
   static const ValueKey<String> playerRecordingButton = ValueKey<String>('tirtc_example_player_recording_button');
   static const ValueKey<String> playerSnapshotButton = ValueKey<String>('tirtc_example_player_snapshot_button');
+  static const ValueKey<String> playerMediaTarget = ValueKey<String>('tirtc_example_player_media_target');
   static const ValueKey<String> playerGalleryButton = ValueKey<String>('tirtc_example_player_gallery_button');
+  static const ValueKey<String> playerMoreButton = ValueKey<String>('tirtc_example_player_more_button');
+  static const ValueKey<String> cloudStorageMoreButton = ValueKey<String>('tirtc-example-ti-cloud-storage-more-button');
+  static const ValueKey<String> cloudStorageControlSurface = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-control-surface',
+  );
+  static const ValueKey<String> cloudStoragePlaybackViewport = ValueKey<String>(
+    'tirtc-example-ti-cloud-storage-playback-viewport',
+  );
+  static const ValueKey<String> playerControlSurface = ValueKey<String>('tirtc_example_player_control_surface');
   static const ValueKey<String> commandPanelSheet = ValueKey<String>('tirtc_example_command_panel_sheet');
   static const ValueKey<String> commandPanelCloseButton = ValueKey<String>('tirtc_example_command_panel_close_button');
   static const ValueKey<String> commandPanelCommandIdField = ValueKey<String>(
@@ -97,6 +111,18 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> remoteIdField = ValueKey<String>('tirtc_example_remote_id_field');
   static const ValueKey<String> audioStreamIdField = ValueKey<String>('tirtc_example_audio_stream_id_field');
   static const ValueKey<String> videoStreamIdField = ValueKey<String>('tirtc_example_video_stream_id_field');
+  static const ValueKey<String> addVideoStreamIdButton = ValueKey<String>('tirtc_example_add_video_stream_id_button');
+  static ValueKey<String> videoStreamIdFieldAt(int index) =>
+      ValueKey<String>('tirtc_example_video_stream_id_field_$index');
+  static ValueKey<String> removeVideoStreamIdButtonAt(int index) =>
+      ValueKey<String>('tirtc_example_remove_video_stream_id_button_$index');
+  static const ValueKey<String> addCloudStorageVideoChannelButton = ValueKey<String>(
+    'tirtc_example_add_cloud_storage_video_channel_button',
+  );
+  static ValueKey<String> cloudStorageVideoChannelFieldAt(int index) =>
+      ValueKey<String>('tirtc_example_cloud_storage_video_channel_field_$index');
+  static ValueKey<String> removeCloudStorageVideoChannelButtonAt(int index) =>
+      ValueKey<String>('tirtc_example_remove_cloud_storage_video_channel_button_$index');
   static const ValueKey<String> tokenField = ValueKey<String>('tirtc_example_token_field');
   static const ValueKey<String> tokenServerAddressField = ValueKey<String>('tirtc_example_token_server_address_field');
   static const ValueKey<String> tokenScanButton = ValueKey<String>('tirtc_example_token_scan_button');

@@ -45,6 +45,10 @@ class MainFlutterWindow: NSWindow {
         result(self.capturePermissionGranted(for: .audio))
       case "requestMicrophonePermission":
         self.requestCaptureAccessIfNeeded(for: .audio, result: result)
+      case "checkCameraPermission":
+        result(self.capturePermissionGranted(for: .video))
+      case "requestCameraPermission":
+        self.requestCaptureAccessIfNeeded(for: .video, result: result)
       case "requestLocalNetworkPermission":
         result(true)
       default:

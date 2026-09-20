@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:tirtc_flutter/tirtc_flutter.dart';
 
+import '../app_theme.dart';
 import '../demo_configuration.dart';
 import '../demo_downlink_support.dart';
 import '../demo_permissions.dart';
@@ -41,7 +42,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
   final TextEditingController _endpointController = TextEditingController();
   final TextEditingController _remoteIdController = TextEditingController();
   final TextEditingController _audioStreamIdController = TextEditingController();
-  final TextEditingController _videoStreamIdController = TextEditingController();
+  final List<TextEditingController> _videoStreamIdControllers = <TextEditingController>[TextEditingController()];
   final TextEditingController _tokenController = TextEditingController();
   final TextEditingController _tokenServerAddressController = TextEditingController();
   final DemoTokenAcquirer _tokenAcquirer = const DemoTokenAcquirer();
@@ -85,7 +86,9 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     _endpointController.dispose();
     _remoteIdController.dispose();
     _audioStreamIdController.dispose();
-    _videoStreamIdController.dispose();
+    for (final TextEditingController controller in _videoStreamIdControllers) {
+      controller.dispose();
+    }
     _tokenController.dispose();
     _tokenServerAddressController.dispose();
     _configurationSaveDebounce?.cancel();
@@ -96,6 +99,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
   Widget build(BuildContext context) {
     final bool showBackdropOrbs = !Platform.isMacOS;
     final bool runtimeBusy = _startingPlayer || _uploadingLogs;
+    final double contentMaxWidth = MediaQuery.sizeOf(context).width >= ExampleTheme.formWideBreakpoint ? 960 : 460;
 
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: _configurePageOverlayStyle,
@@ -108,7 +112,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
               padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 460),
+                  constraints: BoxConstraints(maxWidth: contentMaxWidth),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
@@ -131,11 +135,14 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
                                 endpointController: _endpointController,
                                 remoteIdController: _remoteIdController,
                                 audioStreamIdController: _audioStreamIdController,
-                                videoStreamIdController: _videoStreamIdController,
+                                videoStreamIdControllers: _videoStreamIdControllers,
+                                onAddVideoStream: _addVideoStream,
+                                onRemoveVideoStream: _removeVideoStream,
                                 tokenController: _tokenController,
                                 tokenServerAddressController: _tokenServerAddressController,
                                 validateEndpoint: _validateEndpoint,
-                                validateStreamId: _validateStreamId,
+                                validateAudioStreamId: _validateAudioStreamId,
+                                validateVideoStreamId: _validateVideoStreamId,
                                 validateOneTimeToken: _validateOneTimeToken,
                                 validateTokenServerAddress: _validateTokenServerAddress,
                                 scanSupported: _scanSupported,
@@ -226,8 +233,31 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
     if (text.isEmpty) {
       return null;
     }
-    if (int.tryParse(text) == null) {
-      return '请输入整数。';
+    final int? id = int.tryParse(text);
+    if (id == null || id < 0 || id > 15) {
+      return '请输入 0..15。';
+    }
+    return null;
+  }
+
+  String? _validateAudioStreamId(String? value) {
+    final String? error = _validateStreamId(value);
+    if (error != null) return error;
+    final int? audio = int.tryParse((value ?? '').trim());
+    if (audio != null && _videoStreamIdControllers.any((controller) => int.tryParse(controller.text.trim()) == audio)) {
+      return '音频与视频 Stream ID 不能相同。';
+    }
+    return null;
+  }
+
+  String? _validateVideoStreamId(String? value) {
+    final String? error = _validateStreamId(value);
+    if (error != null) return error;
+    final int? video = int.tryParse((value ?? '').trim());
+    if (video == null) return null;
+    if (int.tryParse(_audioStreamIdController.text.trim()) == video) return '音频与视频 Stream ID 不能相同。';
+    if (_videoStreamIdControllers.where((controller) => int.tryParse(controller.text.trim()) == video).length > 1) {
+      return '视频 Stream ID 不能重复。';
     }
     return null;
   }
@@ -313,25 +343,17 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       appId: _resolvedAppId(),
       endpoint: _resolvedEndpoint(),
       remoteId: _remoteIdController.text.trim(),
-      audioStreamId: _resolvedStreamId(
-        controller: _audioStreamIdController,
-        fallback: DemoDownlinkConfiguration.defaultAudioStreamId,
-      ),
-      videoStreamId: _resolvedStreamId(
-        controller: _videoStreamIdController,
-        fallback: DemoDownlinkConfiguration.defaultVideoStreamId,
-      ),
+      audioStreamId: _optionalStreamId(_audioStreamIdController),
+      videoStreamIds: _videoStreamIdControllers.map(_optionalStreamId).whereType<int>().toList(growable: false),
       token: _tokenController.text.trim(),
       settings: _settings,
       tokenServerAddress: _tokenServerAddressController.text.trim(),
     );
   }
 
-  int _resolvedStreamId({required TextEditingController controller, required int fallback}) {
+  int? _optionalStreamId(TextEditingController controller) {
     final String text = controller.text.trim();
-    if (text.isEmpty) {
-      return fallback;
-    }
+    if (text.isEmpty) return null;
     return int.parse(text);
   }
 
@@ -412,7 +434,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
         'open_player endpoint=${resolvedConfiguration.endpoint} '
             'remoteId=${resolvedConfiguration.remoteId} '
             'audioStreamId=${resolvedConfiguration.audioStreamId} '
-            'videoStreamId=${resolvedConfiguration.videoStreamId}',
+            'videoStreamIds=${resolvedConfiguration.videoStreamIds}',
       );
       await Navigator.of(context).push<void>(
         MaterialPageRoute<void>(
@@ -496,9 +518,11 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       _endpointController,
       _remoteIdController,
       _audioStreamIdController,
-      _videoStreamIdController,
       _tokenServerAddressController,
     ]) {
+      controller.addListener(_scheduleConfigurationSave);
+    }
+    for (final TextEditingController controller in _videoStreamIdControllers) {
       controller.addListener(_scheduleConfigurationSave);
     }
   }
@@ -509,12 +533,14 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       return;
     }
     _applyingStoredConfiguration = true;
-    _appIdController.text = snapshot.appId;
-    _endpointController.text = snapshot.endpoint;
-    _remoteIdController.text = snapshot.remoteId;
-    _audioStreamIdController.text = snapshot.audioStreamId;
-    _videoStreamIdController.text = snapshot.videoStreamId;
-    _tokenServerAddressController.text = snapshot.tokenServerAddress;
+    setState(() {
+      _appIdController.text = snapshot.appId;
+      _endpointController.text = snapshot.endpoint;
+      _remoteIdController.text = snapshot.remoteId;
+      _audioStreamIdController.text = snapshot.audioStreamId;
+      _replaceVideoStreamControllers(snapshot.videoStreamIds);
+      _tokenServerAddressController.text = snapshot.tokenServerAddress;
+    });
     _applyingStoredConfiguration = false;
     TiRtcLogging.i(
       'flutter_example',
@@ -579,9 +605,49 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
       endpoint: _endpointController.text.trim(),
       remoteId: _remoteIdController.text.trim(),
       audioStreamId: _audioStreamIdController.text.trim(),
-      videoStreamId: _videoStreamIdController.text.trim(),
+      videoStreamIds: _videoStreamIdControllers.map((controller) => controller.text.trim()).join(','),
       tokenServerAddress: _tokenServerAddressController.text.trim(),
     );
+  }
+
+  void _addVideoStream() {
+    if (_videoStreamIdControllers.length >= 3) return;
+    setState(() {
+      final TextEditingController controller = TextEditingController();
+      controller.addListener(_scheduleConfigurationSave);
+      _videoStreamIdControllers.add(controller);
+    });
+    _scheduleConfigurationSave();
+  }
+
+  void _removeVideoStream(int index) {
+    if (index < 0 || index >= _videoStreamIdControllers.length) return;
+    setState(() {
+      final TextEditingController removed = _videoStreamIdControllers.removeAt(index);
+      removed.dispose();
+      if (_videoStreamIdControllers.isEmpty) {
+        final TextEditingController controller = TextEditingController();
+        controller.addListener(_scheduleConfigurationSave);
+        _videoStreamIdControllers.add(controller);
+      }
+    });
+    _scheduleConfigurationSave();
+  }
+
+  void _replaceVideoStreamControllers(String serialized) {
+    for (final TextEditingController controller in _videoStreamIdControllers) {
+      controller.dispose();
+    }
+    final List<String> values = serialized.split(',').take(3).toList();
+    _videoStreamIdControllers
+      ..clear()
+      ..addAll(
+        (values.isEmpty ? <String>[''] : values).map((String value) {
+          final TextEditingController controller = TextEditingController(text: value.trim());
+          controller.addListener(_scheduleConfigurationSave);
+          return controller;
+        }),
+      );
   }
 
   Future<void> _saveConfigurationSnapshot() async {

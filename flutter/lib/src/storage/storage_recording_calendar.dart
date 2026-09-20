@@ -57,128 +57,160 @@ final class DemoCloudStorageRecordingCalendar extends StatelessWidget {
       for (final TiCloudStorageRecordingDay day in days) day.date: day.hasRecording,
     };
     final String month = _monthText(visibleMonth);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              IconButton(
-                key: DemoWidgetKeys.cloudStorageCalendarMonthPrevious,
-                tooltip: '上个月',
-                onPressed: loading ? null : onPreviousMonth,
-                icon: const Icon(Icons.chevron_left),
-              ),
-              Expanded(
-                child: Text(
-                  '${visibleMonth.year} 年 ${visibleMonth.month} 月',
-                  textAlign: TextAlign.center,
-                  style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-                ),
-              ),
-              IconButton(
-                key: DemoWidgetKeys.cloudStorageCalendarMonthNext,
-                tooltip: '下个月',
-                onPressed: loading ? null : onNextMonth,
-                icon: const Icon(Icons.chevron_right),
-              ),
-            ],
-          ),
-          Row(
-            children: <Widget>[
-              for (final String weekday in <String>['日', '一', '二', '三', '四', '五', '六'])
-                Expanded(
-                  child: Semantics(
-                    header: true,
-                    child: Text(weekday, textAlign: TextAlign.center, style: Theme.of(context).textTheme.labelSmall),
-                  ),
-                ),
-            ],
-          ),
-          const SizedBox(height: 4),
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 7,
-              mainAxisExtent: 46,
-              crossAxisSpacing: 4,
-              mainAxisSpacing: 4,
-            ),
-            itemCount: 42,
-            itemBuilder: (BuildContext context, int index) {
-              final int dayNumber = index - firstWeekday + 1;
-              if (dayNumber < 1 || dayNumber > dayCount) return const SizedBox.shrink();
-              final String date = _dateText(visibleMonth.year, visibleMonth.month, dayNumber);
-              final bool hasRecording = availability[date] == true;
-              final bool enabled = !loading && hasRecording;
-              final bool selected =
-                  selectedDate.year == visibleMonth.year &&
-                  selectedDate.month == visibleMonth.month &&
-                  selectedDate.day == dayNumber;
-              final bool isToday =
-                  today.year == visibleMonth.year && today.month == visibleMonth.month && today.day == dayNumber;
-              final Color foreground =
-                  selected
-                      ? Colors.white
-                      : hasRecording
-                      ? ExampleTheme.primary
-                      : Theme.of(context).disabledColor;
-              return Semantics(
-                button: true,
-                enabled: enabled,
-                selected: selected,
-                label: '$date，${hasRecording ? '有录像' : '无录像'}${isToday ? '，今天' : ''}',
-                child: InkWell(
-                  key: DemoWidgetKeys.cloudStorageCalendarDay(date),
-                  borderRadius: BorderRadius.circular(12),
-                  onTap: enabled ? () => onSelectDay(dayNumber) : null,
-                  child: AnimatedContainer(
-                    duration:
-                        MediaQuery.disableAnimationsOf(context) ? Duration.zero : const Duration(milliseconds: 140),
-                    decoration: BoxDecoration(
-                      color:
-                          selected
-                              ? ExampleTheme.primary
-                              : hasRecording
-                              ? ExampleTheme.primary.withAlpha(24)
-                              : Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(150),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isToday ? Theme.of(context).colorScheme.secondary : Colors.transparent,
-                        width: isToday ? 2 : 1,
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        final double targetSize = ExampleTheme.minimumTargetSize(context);
+        final double minimumWidth = targetSize * 7 + 48;
+        final double contentWidth = constraints.maxWidth < minimumWidth ? minimumWidth : constraints.maxWidth;
+        return SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: SizedBox(
+            width: contentWidth,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      IconButton(
+                        key: DemoWidgetKeys.cloudStorageCalendarMonthPrevious,
+                        tooltip: '上个月',
+                        onPressed: loading ? null : onPreviousMonth,
+                        icon: const Icon(Icons.chevron_left),
                       ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: <Widget>[
-                        Text('$dayNumber', style: TextStyle(color: foreground, fontWeight: FontWeight.w600)),
-                        Text(
-                          loading
-                              ? '加载'
-                              : hasRecording
-                              ? '有录像'
-                              : '无录像',
-                          style: TextStyle(color: foreground, fontSize: 8),
+                      Expanded(
+                        child: Text(
+                          '${visibleMonth.year} 年 ${visibleMonth.month} 月',
+                          textAlign: TextAlign.center,
+                          style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
                         ),
-                      ],
+                      ),
+                      IconButton(
+                        key: DemoWidgetKeys.cloudStorageCalendarMonthNext,
+                        tooltip: '下个月',
+                        onPressed: loading ? null : onNextMonth,
+                        icon: const Icon(Icons.chevron_right),
+                      ),
+                    ],
+                  ),
+                  Row(
+                    children: <Widget>[
+                      for (final String weekday in <String>['日', '一', '二', '三', '四', '五', '六'])
+                        Expanded(
+                          child: Semantics(
+                            header: true,
+                            child: Text(
+                              weekday,
+                              textAlign: TextAlign.center,
+                              style: Theme.of(context).textTheme.labelSmall,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 7,
+                      mainAxisExtent: ExampleTheme.minimumTargetSize(context),
+                      crossAxisSpacing: 4,
+                      mainAxisSpacing: 4,
+                    ),
+                    itemCount: 42,
+                    itemBuilder: (BuildContext context, int index) {
+                      final int dayNumber = index - firstWeekday + 1;
+                      if (dayNumber < 1 || dayNumber > dayCount) return const SizedBox.shrink();
+                      final String date = _dateText(visibleMonth.year, visibleMonth.month, dayNumber);
+                      final bool hasRecording = availability[date] == true;
+                      final bool enabled = !loading && hasRecording;
+                      final bool selected =
+                          selectedDate.year == visibleMonth.year &&
+                          selectedDate.month == visibleMonth.month &&
+                          selectedDate.day == dayNumber;
+                      final bool isToday =
+                          today.year == visibleMonth.year &&
+                          today.month == visibleMonth.month &&
+                          today.day == dayNumber;
+                      final Color foreground =
+                          selected
+                              ? Colors.white
+                              : hasRecording
+                              ? ExampleTheme.primary
+                              : Theme.of(context).disabledColor;
+                      return Semantics(
+                        button: true,
+                        enabled: enabled,
+                        selected: selected,
+                        label: '$date，${hasRecording ? '有录像' : '无录像'}${isToday ? '，今天' : ''}',
+                        child: InkWell(
+                          key: DemoWidgetKeys.cloudStorageCalendarDay(date),
+                          borderRadius: BorderRadius.circular(12),
+                          onTap: enabled ? () => onSelectDay(dayNumber) : null,
+                          child: AnimatedContainer(
+                            duration:
+                                MediaQuery.disableAnimationsOf(context)
+                                    ? Duration.zero
+                                    : const Duration(milliseconds: 140),
+                            decoration: BoxDecoration(
+                              color:
+                                  selected
+                                      ? ExampleTheme.primary
+                                      : hasRecording
+                                      ? ExampleTheme.primary.withAlpha(24)
+                                      : Theme.of(context).colorScheme.surfaceContainerHighest.withAlpha(150),
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: isToday ? Theme.of(context).colorScheme.secondary : Colors.transparent,
+                                width: isToday ? 2 : 1,
+                              ),
+                            ),
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: <Widget>[
+                                Text(
+                                  '$dayNumber',
+                                  style: TextStyle(color: foreground, fontWeight: FontWeight.w600, height: 1),
+                                ),
+                                const SizedBox(height: 3),
+                                AnimatedContainer(
+                                  duration:
+                                      MediaQuery.disableAnimationsOf(context)
+                                          ? Duration.zero
+                                          : const Duration(milliseconds: 140),
+                                  width: 5,
+                                  height: 5,
+                                  decoration: BoxDecoration(
+                                    shape: BoxShape.circle,
+                                    color: hasRecording ? foreground : Colors.transparent,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                  if (loading)
+                    const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator(minHeight: 2)),
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      loading
+                          ? '$month 正在加载'
+                          : '${availability.values.where((bool value) => value).length} 天有录像，灰色日期不可选择',
+                      style: Theme.of(context).textTheme.labelSmall,
                     ),
                   ),
-                ),
-              );
-            },
-          ),
-          if (loading) const Padding(padding: EdgeInsets.only(top: 8), child: LinearProgressIndicator(minHeight: 2)),
-          Semantics(
-            liveRegion: true,
-            child: Text(
-              loading ? '$month 正在加载' : '${availability.values.where((bool value) => value).length} 天有录像，灰色日期不可选择',
-              style: Theme.of(context).textTheme.labelSmall,
+                ],
+              ),
             ),
           ),
-        ],
-      ),
+        );
+      },
     );
   }
 

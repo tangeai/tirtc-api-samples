@@ -1,3 +1,4 @@
+import '../demo_configuration.dart';
 import '../settings/example_preferences.dart';
 
 final class DemoCloudStorageConfigurationSnapshot {
@@ -5,13 +6,13 @@ final class DemoCloudStorageConfigurationSnapshot {
     this.appId = '',
     this.endpoint = '',
     this.audioChannelId = '',
-    this.videoChannelId = '',
+    this.videoChannelIds = '',
   });
 
   final String appId;
   final String endpoint;
   final String audioChannelId;
-  final String videoChannelId;
+  final String videoChannelIds;
 }
 
 final class DemoCloudStorageConfigurationPersistence {
@@ -22,7 +23,7 @@ final class DemoCloudStorageConfigurationPersistence {
   static const String _appIdKey = 'tirtc_example.cloud_storage.app_id';
   static const String _endpointKey = 'tirtc_example.cloud_storage.endpoint';
   static const String _audioChannelIdKey = 'tirtc_example.cloud_storage.audio_channel_id';
-  static const String _videoChannelIdKey = 'tirtc_example.cloud_storage.video_channel_id';
+  static const String _videoChannelIdsKey = 'tirtc_example.cloud_storage.video_channel_ids';
 
   final DemoExamplePreferences _preferences;
 
@@ -30,8 +31,14 @@ final class DemoCloudStorageConfigurationPersistence {
     return DemoCloudStorageConfigurationSnapshot(
       appId: await _preferences.getString(key: _appIdKey, defaultValue: ''),
       endpoint: await _preferences.getString(key: _endpointKey, defaultValue: ''),
-      audioChannelId: await _preferences.getString(key: _audioChannelIdKey, defaultValue: ''),
-      videoChannelId: await _preferences.getString(key: _videoChannelIdKey, defaultValue: ''),
+      audioChannelId: await _preferences.getString(
+        key: _audioChannelIdKey,
+        defaultValue: DemoDownlinkConfiguration.defaultAudioStreamId.toString(),
+      ),
+      videoChannelIds: await _preferences.getString(
+        key: _videoChannelIdsKey,
+        defaultValue: DemoDownlinkConfiguration.defaultVideoStreamId.toString(),
+      ),
     );
   }
 
@@ -40,7 +47,7 @@ final class DemoCloudStorageConfigurationPersistence {
       _preferences.putString(key: _appIdKey, value: snapshot.appId),
       _preferences.putString(key: _endpointKey, value: snapshot.endpoint),
       _preferences.putString(key: _audioChannelIdKey, value: snapshot.audioChannelId),
-      _preferences.putString(key: _videoChannelIdKey, value: snapshot.videoChannelId),
+      _preferences.putString(key: _videoChannelIdsKey, value: snapshot.videoChannelIds),
     ]);
   }
 }
