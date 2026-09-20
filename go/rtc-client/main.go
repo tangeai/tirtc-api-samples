@@ -30,6 +30,11 @@ type clientConfig struct {
 	outputDir      string
 	audioStreamID  *uint8
 	videoStreamIDs []uint8
+	rawDumpSeconds uint
+	rawDump        bool
+	rawDumpCopyTo  string
+	uploadLogs     bool
+	caseID         string
 }
 
 type optionalUintFlag struct {
@@ -275,6 +280,22 @@ func run() error {
 			return fmt.Errorf("request key frame %d: %w", pair.streamID, err)
 		}
 	}
+	var rawDump *tirtc.RawDump
+	var rawDumpStarted time.Time
+	if config.rawDump {
+		audioIDs := make([]uint8, 0, 1)
+		if config.audioStreamID != nil {
+			audioIDs = append(audioIDs, *config.audioStreamID)
+		}
+		rawDump, err = connection.StartRawDump(tirtc.RawDumpOptions{
+			AudioStreamIDs: audioIDs, VideoStreamIDs: config.videoStreamIDs,
+		})
+		if err != nil {
+			return fmt.Errorf("start raw dump: %w", err)
+		}
+		rawDumpStarted = time.Now()
+		defer func() { _ = rawDump.Close() }()
+	}
 	if err := waitSelectedFrames(ctx, audioFrames, config.audioStreamID != nil, videos, failures); err != nil {
 		return err
 	}
@@ -297,6 +318,49 @@ func run() error {
 	}
 	if err := waitSignal(ctx, "remote stream message", messageReceived, failures); err != nil {
 		return err
+	}
+	if rawDump != nil {
+		if config.caseID == "integration.raw-dump-recovery" {
+			_, duplicateErr := connection.StartRawDump(tirtc.RawDumpOptions{
+				AudioStreamIDs: func() []uint8 {
+					if config.audioStreamID == nil {
+						return nil
+					}
+					return []uint8{*config.audioStreamID}
+				}(),
+				VideoStreamIDs: config.videoStreamIDs,
+			})
+			if !errors.Is(duplicateErr, tirtc.ErrInUse) {
+				return fmt.Errorf("duplicate raw dump start must return ErrInUse: %w", duplicateErr)
+			}
+		}
+		remaining := time.Duration(config.rawDumpSeconds)*time.Second - time.Since(rawDumpStarted)
+		if remaining > 0 {
+			select {
+			case <-time.After(remaining):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		archive, stopErr := rawDump.Stop()
+		if stopErr != nil {
+			return fmt.Errorf("stop raw dump: %w", stopErr)
+		}
+		fmt.Printf("raw dump capture_id=%s path=%s size=%d sha256=%s duration=%s complete=%t empty=%t\n",
+			archive.CaptureID, archive.Path, archive.Size, archive.SHA256,
+			archive.CapturedDuration, archive.CaptureComplete, archive.Empty)
+		if config.rawDumpCopyTo != "" {
+			if err := copyRawDump(archive.Path, config.rawDumpCopyTo); err != nil {
+				return err
+			}
+			fmt.Printf("raw dump copy path=%s\n", config.rawDumpCopyTo)
+		}
+		if config.caseID == "integration.raw-dump-recovery" {
+			repeated, repeatedErr := rawDump.Stop()
+			if repeatedErr != nil || repeated != archive {
+				return fmt.Errorf("repeated raw dump stop changed terminal result: %w", repeatedErr)
+			}
+		}
 	}
 
 	for _, pair := range videos {
@@ -357,6 +421,13 @@ func run() error {
 			return fmt.Errorf("unsubscribe audio: %w", err)
 		}
 	}
+	if config.uploadLogs {
+		logID, err := client.UploadLogs()
+		if err != nil {
+			return fmt.Errorf("upload logs: %w", err)
+		}
+		fmt.Printf("log_id=%s\n", logID)
+	}
 	return cleanup()
 }
 
@@ -365,6 +436,9 @@ func parseConfig() (clientConfig, error) {
 	var audioStreamID optionalUintFlag
 	var videoStreamIDs uintListFlag
 	var noReceiveAudio, noReceiveVideo bool
+	var rawDumpSeconds uint
+	var rawDump, uploadLogs bool
+	var rawDumpCopyTo, caseID string
 	flag.StringVar(&endpoint, "endpoint", "", "TiRTC endpoint")
 	flag.StringVar(&remoteID, "remote-id", "", "remote device ID")
 	flag.StringVar(&cacheDir, "cache-dir", "", "absolute writable SDK work directory")
@@ -373,7 +447,18 @@ func parseConfig() (clientConfig, error) {
 	flag.Var(&videoStreamIDs, "video-stream-id", "remote video stream ID; repeat up to three times")
 	flag.BoolVar(&noReceiveAudio, "no-receive-audio", false, "do not receive audio")
 	flag.BoolVar(&noReceiveVideo, "no-receive-video", false, "do not receive video")
+	flag.BoolVar(&rawDump, "raw-dump", false, "capture the selected encoded inputs")
+	flag.UintVar(&rawDumpSeconds, "raw-dump-seconds", 10, "capture selected encoded inputs for this many seconds before continuing")
+	flag.StringVar(&rawDumpCopyTo, "raw-dump-copy-to", "", "copy the stopped diagnostic ZIP before upload")
+	flag.BoolVar(&uploadLogs, "upload-logs", false, "upload logs and the stopped raw dump attachment")
+	flag.StringVar(&caseID, "case-id", "", "smoke.raw-dump-upload or integration.raw-dump-recovery")
 	flag.Parse()
+	if caseID != "" {
+		if caseID != "smoke.raw-dump-upload" && caseID != "integration.raw-dump-recovery" {
+			return clientConfig{}, fmt.Errorf("unknown --case-id %q", caseID)
+		}
+		rawDump, uploadLogs = true, true
+	}
 	if noReceiveAudio && audioStreamID.set {
 		return clientConfig{}, errors.New("--no-receive-audio conflicts with --audio-stream-id")
 	}
@@ -394,7 +479,8 @@ func parseConfig() (clientConfig, error) {
 		seen[streamID] = true
 	}
 	if remoteID == "" || !filepath.IsAbs(cacheDir) || !filepath.IsAbs(outputDir) ||
-		(!noReceiveAudio && audioStreamID.value > 15) || len(videoStreamIDs) > 3 ||
+		(!noReceiveAudio && audioStreamID.value > 15) || len(videoStreamIDs) > 3 || rawDumpSeconds == 0 || rawDumpSeconds > 300 ||
+		(rawDumpCopyTo != "" && (!rawDump || !filepath.IsAbs(rawDumpCopyTo))) ||
 		(!noReceiveAudio && seen[audioStreamID.value]) {
 		return clientConfig{}, errors.New("--remote-id, absolute --cache-dir/--output-dir, optional audio, and up to three distinct 0..15 video stream IDs are required")
 	}
@@ -411,7 +497,33 @@ func parseConfig() (clientConfig, error) {
 		endpoint: endpoint, remoteID: remoteID,
 		cacheDir: filepath.Clean(cacheDir), outputDir: filepath.Clean(outputDir),
 		audioStreamID: resolvedAudioID, videoStreamIDs: resolvedVideoIDs,
+		rawDumpSeconds: rawDumpSeconds,
+		rawDump:        rawDump, rawDumpCopyTo: rawDumpCopyTo, uploadLogs: uploadLogs, caseID: caseID,
 	}, nil
+}
+
+func copyRawDump(sourcePath, destinationPath string) error {
+	if !filepath.IsAbs(destinationPath) {
+		return errors.New("--raw-dump-copy-to must be absolute")
+	}
+	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
+		return err
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(destination, source)
+	closeErr := destination.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(destinationPath)
+	}
+	return errors.Join(copyErr, closeErr)
 }
 
 func createAudioOutputs(frames *frameSignals, failures chan<- error) (*tirtc.AudioOutput, *tirtc.EncodedAudioOutput, error) {

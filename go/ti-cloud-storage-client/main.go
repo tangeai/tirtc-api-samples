@@ -21,7 +21,9 @@ import (
 
 const (
 	maximumMediaFileSize = int64(512 << 20)
-	operationTimeout     = 3 * time.Minute
+	operationTimeout     = 10 * time.Minute
+	operationSettleTime  = 5 * time.Second
+	resourceCloseTimeout = 30 * time.Second
 )
 
 type cloudStorageConfig struct {
@@ -29,6 +31,11 @@ type cloudStorageConfig struct {
 	startTime, endTime            time.Time
 	audioChannelID                *uint8
 	videoChannelIDs               []uint8
+	rawDumpSeconds                uint
+	rawDump                       bool
+	rawDumpCopyTo                 string
+	uploadLogs                    bool
+	caseID                        string
 }
 
 type optionalUintFlag struct {
@@ -159,26 +166,55 @@ func run() error {
 	var encodedAudio *storage.EncodedAudioOutput
 	var videos []videoOutputPair
 	cleaned := false
+	closeReplayResources := func(closeCtx context.Context) error {
+		var closeErrors []error
+		for index := len(videos) - 1; index >= 0; index-- {
+			pair := &videos[index]
+			if pair.encoded != nil {
+				err := closeEventually(closeCtx, pair.encoded.Close)
+				closeErrors = append(closeErrors, err)
+				if err == nil {
+					pair.encoded = nil
+				}
+			}
+			if pair.decoded != nil {
+				err := closeEventually(closeCtx, pair.decoded.Close)
+				closeErrors = append(closeErrors, err)
+				if err == nil {
+					pair.decoded = nil
+				}
+			}
+		}
+		if encodedAudio != nil {
+			err := closeEventually(closeCtx, encodedAudio.Close)
+			closeErrors = append(closeErrors, err)
+			if err == nil {
+				encodedAudio = nil
+			}
+		}
+		if audio != nil {
+			err := closeEventually(closeCtx, audio.Close)
+			closeErrors = append(closeErrors, err)
+			if err == nil {
+				audio = nil
+			}
+		}
+		if replay != nil {
+			err := closeEventually(closeCtx, replay.Close)
+			closeErrors = append(closeErrors, err)
+			if err == nil {
+				replay = nil
+			}
+		}
+		return errors.Join(closeErrors...)
+	}
 	cleanup := func() error {
 		if cleaned {
 			return nil
 		}
-		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), resourceCloseTimeout)
 		defer cleanupCancel()
-		var cleanupErrors []error
-		for index := len(videos) - 1; index >= 0; index-- {
-			for _, closeResource := range []func() error{videos[index].encoded.Close, videos[index].decoded.Close} {
-				cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, closeResource))
-			}
-		}
-		for _, closeResource := range []func() error{closeFunction(encodedAudio), closeFunction(audio)} {
-			if closeResource != nil {
-				cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, closeResource))
-			}
-		}
-		if replay != nil {
-			cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, replay.Close))
-		}
+		cleanupErrors := []error{closeReplayResources(cleanupCtx)}
 		cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, client.Close))
 		err := errors.Join(cleanupErrors...)
 		cleaned = err == nil
@@ -230,9 +266,6 @@ func run() error {
 		if err != nil {
 			return err
 		}
-		if err := audio.Attach(replay, *config.audioChannelID); err != nil {
-			return fmt.Errorf("attach decoded audio: %w", err)
-		}
 		if err := encodedAudio.Attach(replay, *config.audioChannelID); err != nil {
 			return fmt.Errorf("attach encoded audio: %w", err)
 		}
@@ -243,9 +276,6 @@ func run() error {
 			return createErr
 		}
 		videos = append(videos, pair)
-		if err := pair.decoded.Attach(replay, channelID); err != nil {
-			return fmt.Errorf("attach decoded video %d: %w", channelID, err)
-		}
 		if err := pair.encoded.Attach(replay, channelID); err != nil {
 			return fmt.Errorf("attach encoded video %d: %w", channelID, err)
 		}
@@ -253,13 +283,98 @@ func run() error {
 	if err := replay.Play(selected.StartTime, selected.EndTime); err != nil {
 		return fmt.Errorf("play replay: %w", err)
 	}
-	if err := waitSelectedFrames(ctx, audioFrames, config.audioChannelID != nil, videos, failures); err != nil {
+	var rawDump *storage.RawDump
+	var rawDumpStarted time.Time
+	if config.rawDump {
+		audioIDs := make([]uint8, 0, 1)
+		if config.audioChannelID != nil {
+			audioIDs = append(audioIDs, *config.audioChannelID)
+		}
+		rawDump, err = replay.StartRawDump(storage.RawDumpOptions{
+			AudioChannelIDs: audioIDs, VideoChannelIDs: config.videoChannelIDs,
+		})
+		if err != nil {
+			return fmt.Errorf("start raw dump: %w", err)
+		}
+		rawDumpStarted = time.Now()
+		defer func() { _ = rawDump.Close() }()
+	}
+	if err := waitSelectedEncodedFrames(ctx, audioFrames, config.audioChannelID != nil, videos, failures); err != nil {
 		return err
 	}
-	if err := replay.Pause(); err != nil {
+	if audio != nil {
+		if err := audio.Attach(replay, *config.audioChannelID); err != nil {
+			return fmt.Errorf("attach decoded audio: %w", err)
+		}
+	}
+	for _, pair := range videos {
+		if err := pair.decoded.Attach(replay, pair.channelID); err != nil {
+			return fmt.Errorf("attach decoded video %d: %w", pair.channelID, err)
+		}
+	}
+	if err := waitSelectedDecodedFrames(ctx, audioFrames, config.audioChannelID != nil, videos, failures); err != nil {
+		return err
+	}
+	if rawDump != nil {
+		if config.caseID == "ti-cloud-storage.raw-dump.integration-recovery" {
+			_, duplicateErr := replay.StartRawDump(storage.RawDumpOptions{
+				AudioChannelIDs: func() []uint8 {
+					if config.audioChannelID == nil {
+						return nil
+					}
+					return []uint8{*config.audioChannelID}
+				}(),
+				VideoChannelIDs: config.videoChannelIDs,
+			})
+			if !errors.Is(duplicateErr, storage.ErrInUse) {
+				return fmt.Errorf("duplicate raw dump start must return ErrInUse: %w", duplicateErr)
+			}
+			if pauseErr := callWhenIdle(ctx, replay.Pause); pauseErr != nil {
+				return fmt.Errorf("pause replay during raw dump: %w", pauseErr)
+			}
+			if resumeErr := callWhenIdle(ctx, replay.Resume); resumeErr != nil {
+				return fmt.Errorf("resume replay during raw dump: %w", resumeErr)
+			}
+		}
+		remaining := time.Duration(config.rawDumpSeconds)*time.Second - time.Since(rawDumpStarted)
+		if remaining > 0 {
+			select {
+			case <-time.After(remaining):
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		}
+		archive, stopErr := rawDump.Stop()
+		if stopErr != nil {
+			return fmt.Errorf("stop raw dump: %w", stopErr)
+		}
+		fmt.Printf("raw dump capture_id=%s path=%s size=%d sha256=%s duration=%s complete=%t empty=%t\n",
+			archive.CaptureID, archive.Path, archive.Size, archive.SHA256,
+			archive.CapturedDuration, archive.CaptureComplete, archive.Empty)
+		if config.rawDumpCopyTo != "" {
+			if err := copyRawDump(archive.Path, config.rawDumpCopyTo); err != nil {
+				return err
+			}
+			fmt.Printf("raw dump copy path=%s\n", config.rawDumpCopyTo)
+		}
+		if config.caseID == "ti-cloud-storage.raw-dump.integration-recovery" {
+			repeated, repeatedErr := rawDump.Stop()
+			if repeatedErr != nil || repeated != archive {
+				return fmt.Errorf("repeated raw dump stop changed terminal result: %w", repeatedErr)
+			}
+		}
+	}
+	if config.uploadLogs {
+		logID, uploadErr := client.UploadLogs()
+		if uploadErr != nil {
+			return fmt.Errorf("upload logs: %w", uploadErr)
+		}
+		fmt.Printf("log_id=%s\n", logID)
+	}
+	if err := callWhenIdle(ctx, replay.Pause); err != nil {
 		return fmt.Errorf("pause replay: %w", err)
 	}
-	if err := replay.Resume(); err != nil {
+	if err := callWhenIdle(ctx, replay.Resume); err != nil {
 		return fmt.Errorf("resume replay: %w", err)
 	}
 	for _, pair := range videos {
@@ -359,46 +474,56 @@ func run() error {
 		}
 		return err
 	}
+	closeCtx, closeCancel := context.WithTimeout(context.Background(), resourceCloseTimeout)
+	defer closeCancel()
+	if err := closeReplayResources(closeCtx); err != nil {
+		return fmt.Errorf("close replay resources before export: %w", err)
+	}
 
 	if len(videos) == 0 {
 		return cleanup()
 	}
 	var retainedReport storage.ExportReport
 	for index, pair := range videos {
+		channelID := pair.channelID
+		exportStart, exportEnd := selected.StartTime, selected.EndTime
+		if index > 0 && exportEnd.After(exportStart.Add(5*time.Second)) {
+			exportEnd = exportStart.Add(5 * time.Second)
+		}
 		exportTask, exportErr := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
-			StartTime: selected.StartTime, EndTime: selected.EndTime,
-			VideoChannelID: pair.channelID, AudioChannelID: config.audioChannelID,
+			StartTime: exportStart, EndTime: exportEnd,
+			VideoChannelID: channelID, AudioChannelID: config.audioChannelID,
 			OnProgress: func(progress storage.ExportProgress) {
-				fmt.Printf("export channel=%d progress %.3f covered=%s\n", pair.channelID, progress.Fraction, progress.CoveredDuration)
+				fmt.Printf("export channel=%d progress %.3f covered=%s\n", channelID, progress.Fraction, progress.CoveredDuration)
 			},
 			OnRecordingGap: func(gap storage.RecordingGap) {
-				fmt.Printf("export channel=%d gap %s..%s tracks=%v reasons=%v\n", pair.channelID, gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
+				fmt.Printf("export channel=%d gap %s..%s tracks=%v reasons=%v\n", channelID, gap.Range.StartTime, gap.Range.EndTime, gap.Tracks, gap.Reasons)
 			},
 		})
 		if exportErr != nil {
-			return fmt.Errorf("start channel %d range export: %w", pair.channelID, exportErr)
+			return fmt.Errorf("start channel %d range export: %w", channelID, exportErr)
 		}
 		exported, waitErr := exportTask.Wait()
 		fmt.Printf("export channel=%d report complete=%t termination=%d covered=%s gaps=%d unprocessed=%d cause=%v\n",
-			pair.channelID, exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
+			channelID, exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
 			len(exported.Report.Gaps), len(exported.Report.UnprocessedRanges), exported.Report.Cause)
 		if waitErr != nil {
 			if exported.File != nil {
 				waitErr = errors.Join(waitErr, exported.File.Delete())
 			}
-			return fmt.Errorf("export channel %d recording range: %w", pair.channelID, waitErr)
+			return fmt.Errorf("export channel %d recording range: %w", channelID, waitErr)
 		}
 		if progress := exportTask.Progress().Fraction; progress < 0 || progress > 1 || (exported.Report.Complete && progress != 1) {
-			progressErr := fmt.Errorf("export channel %d returned inconsistent progress %.3f (complete=%t)", pair.channelID, progress, exported.Report.Complete)
+			progressErr := fmt.Errorf("export channel %d returned inconsistent progress %.3f (complete=%t)", channelID, progress, exported.Report.Complete)
 			if exported.File != nil {
 				progressErr = errors.Join(progressErr, exported.File.Delete())
 			}
 			return progressErr
 		}
 		if exported.File == nil {
-			return fmt.Errorf("successful channel %d export returned no file", pair.channelID)
+			return fmt.Errorf("successful channel %d export returned no file", channelID)
 		}
-		if saveErr := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-range-export-channel-%d.mp4", pair.channelID)), []byte("ftyp"), 4); saveErr != nil {
+		if saveErr := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-range-export-channel-%d.mp4", channelID)), []byte("ftyp"), 4); saveErr != nil {
 			return errors.Join(saveErr, exported.File.Delete())
 		}
 		if deleteErr := exported.File.Delete(); deleteErr != nil {
@@ -525,6 +650,9 @@ func parseConfig() (cloudStorageConfig, error) {
 	var audioChannelID optionalUintFlag
 	var videoChannelIDs uintListFlag
 	var noReceiveAudio, noReceiveVideo bool
+	var rawDumpSeconds uint
+	var rawDump, uploadLogs bool
+	var rawDumpCopyTo, caseID string
 	flag.StringVar(&endpoint, "endpoint", "", "Ti Cloud Storage endpoint")
 	flag.StringVar(&cacheDir, "cache-dir", "", "absolute writable SDK work directory")
 	flag.StringVar(&outputDir, "output-dir", "", "absolute application-owned output directory")
@@ -534,7 +662,18 @@ func parseConfig() (cloudStorageConfig, error) {
 	flag.Var(&videoChannelIDs, "video-channel-id", "recorded video channel ID; repeat up to three times")
 	flag.BoolVar(&noReceiveAudio, "no-receive-audio", false, "do not consume audio")
 	flag.BoolVar(&noReceiveVideo, "no-receive-video", false, "do not consume video")
+	flag.BoolVar(&rawDump, "raw-dump", false, "capture selected raw objects and encoded inputs")
+	flag.UintVar(&rawDumpSeconds, "raw-dump-seconds", 10, "capture selected raw objects and encoded inputs for this many seconds")
+	flag.StringVar(&rawDumpCopyTo, "raw-dump-copy-to", "", "copy the stopped diagnostic ZIP before upload")
+	flag.BoolVar(&uploadLogs, "upload-logs", false, "upload logs and the stopped raw dump attachment")
+	flag.StringVar(&caseID, "case-id", "", "ti-cloud-storage.raw-dump.smoke-upload or ti-cloud-storage.raw-dump.integration-recovery")
 	flag.Parse()
+	if caseID != "" {
+		if caseID != "ti-cloud-storage.raw-dump.smoke-upload" && caseID != "ti-cloud-storage.raw-dump.integration-recovery" {
+			return cloudStorageConfig{}, fmt.Errorf("unknown --case-id %q", caseID)
+		}
+		rawDump, uploadLogs = true, true
+	}
 	if noReceiveAudio && audioChannelID.set {
 		return cloudStorageConfig{}, errors.New("--no-receive-audio conflicts with --audio-channel-id")
 	}
@@ -555,7 +694,8 @@ func parseConfig() (cloudStorageConfig, error) {
 		seen[channelID] = true
 	}
 	if !filepath.IsAbs(cacheDir) || !filepath.IsAbs(outputDir) || startMS < 0 || startMS >= endMS ||
-		(!noReceiveAudio && audioChannelID.value > 255) || len(videoChannelIDs) > 3 {
+		(!noReceiveAudio && audioChannelID.value > 255) || len(videoChannelIDs) > 3 || rawDumpSeconds == 0 || rawDumpSeconds > 300 ||
+		(rawDumpCopyTo != "" && (!rawDump || !filepath.IsAbs(rawDumpCopyTo))) {
 		return cloudStorageConfig{}, errors.New("absolute --cache-dir/--output-dir, a valid --start-ms/--end-ms window, optional audio, and up to three distinct 0..255 video channel IDs are required")
 	}
 	var resolvedAudioID *uint8
@@ -571,7 +711,33 @@ func parseConfig() (cloudStorageConfig, error) {
 		endpoint: endpoint, cacheDir: filepath.Clean(cacheDir), outputDir: filepath.Clean(outputDir),
 		startTime: time.UnixMilli(startMS).UTC(), endTime: time.UnixMilli(endMS).UTC(),
 		audioChannelID: resolvedAudioID, videoChannelIDs: resolvedVideoIDs,
+		rawDumpSeconds: rawDumpSeconds,
+		rawDump:        rawDump, rawDumpCopyTo: rawDumpCopyTo, uploadLogs: uploadLogs, caseID: caseID,
 	}, nil
+}
+
+func copyRawDump(sourcePath, destinationPath string) error {
+	if !filepath.IsAbs(destinationPath) {
+		return errors.New("--raw-dump-copy-to must be absolute")
+	}
+	if err := os.MkdirAll(filepath.Dir(destinationPath), 0o755); err != nil {
+		return err
+	}
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return err
+	}
+	defer source.Close()
+	destination, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(destination, source)
+	closeErr := destination.Close()
+	if copyErr != nil || closeErr != nil {
+		_ = os.Remove(destinationPath)
+	}
+	return errors.Join(copyErr, closeErr)
 }
 
 func newestFirstRecordingRanges(input []storage.RecordingRange) []storage.RecordingRange {
@@ -619,20 +785,28 @@ func createVideoOutputs(channelID uint8, failures chan<- error) (videoOutputPair
 	return videoOutputPair{channelID: channelID, decoded: video, encoded: encodedVideo, frames: frames}, nil
 }
 
-func waitSelectedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
+func waitSelectedEncodedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
 	if receiveAudio {
-		if err := waitFrameAfter(ctx, "decoded audio frame", audioFrames.audio, 0, failures); err != nil {
-			return err
-		}
 		if err := waitFrameAfter(ctx, "encoded audio frame", audioFrames.encodedAudio, 0, failures); err != nil {
 			return err
 		}
 	}
 	for _, pair := range videos {
-		if err := waitFrameAfter(ctx, fmt.Sprintf("decoded video frame channel %d", pair.channelID), pair.frames.video, 0, failures); err != nil {
+		if err := waitFrameAfter(ctx, fmt.Sprintf("encoded video frame channel %d", pair.channelID), pair.frames.encodedVideo, 0, failures); err != nil {
 			return err
 		}
-		if err := waitFrameAfter(ctx, fmt.Sprintf("encoded video frame channel %d", pair.channelID), pair.frames.encodedVideo, 0, failures); err != nil {
+	}
+	return nil
+}
+
+func waitSelectedDecodedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
+	if receiveAudio {
+		if err := waitFrameAfter(ctx, "decoded audio frame", audioFrames.audio, 0, failures); err != nil {
+			return err
+		}
+	}
+	for _, pair := range videos {
+		if err := waitFrameAfter(ctx, fmt.Sprintf("decoded video frame channel %d", pair.channelID), pair.frames.video, 0, failures); err != nil {
 			return err
 		}
 	}
@@ -726,20 +900,21 @@ func waitReplayTerminal(ctx context.Context, terminal <-chan error, failures <-c
 	}
 }
 
-type closeable interface{ Close() error }
-
-func closeFunction(resource closeable) func() error {
-	if resource == nil {
-		return nil
-	}
-	return resource.Close
+func closeEventually(ctx context.Context, closeResource func() error) error {
+	return retryWhileInUse(ctx, closeResource)
 }
 
-func closeEventually(ctx context.Context, closeResource func() error) error {
+func callWhenIdle(parent context.Context, operation func() error) error {
+	ctx, cancel := context.WithTimeout(parent, operationSettleTime)
+	defer cancel()
+	return retryWhileInUse(ctx, operation)
+}
+
+func retryWhileInUse(ctx context.Context, operation func() error) error {
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
-		err := closeResource()
+		err := operation()
 		if !errors.Is(err, storage.ErrInUse) {
 			return err
 		}
