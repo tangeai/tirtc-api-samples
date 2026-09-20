@@ -11,17 +11,13 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
         let isConnected = state == .connected
         let isDisconnected = state == .disconnected
         Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
+            guard let self, let activeConnection = self.conn,
+                ObjectIdentifier(activeConnection) == connectionIdentity
+            else { return }
             self.setStatus("conn state=\(rawValue) error=\(errorCode)")
             if isConnected {
                 self.appendStatusLogLine("connected")
-                if let activeConnection = self.conn,
-                    ObjectIdentifier(activeConnection) == connectionIdentity
-                {
-                    self.subscribeDownlink(activeConnection)
-                }
+                self.subscribeDownlink(activeConnection)
             }
             if isDisconnected {
                 self.appendStatusLogLine("disconnected error=\(errorCode)")
@@ -33,10 +29,11 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
     }
 
     nonisolated func conn(_ conn: TiRtcConn, didReceiveCommand commandId: UInt32, data: Data) {
+        let connectionIdentity = ObjectIdentifier(conn)
         Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
+            guard let self, let activeConnection = self.conn,
+                ObjectIdentifier(activeConnection) == connectionIdentity
+            else { return }
             self.handleReceivedCommand(commandId: commandId, data: data)
         }
     }
@@ -47,10 +44,11 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
         timestampMs: UInt32,
         data: Data
     ) {
+        let connectionIdentity = ObjectIdentifier(conn)
         Task { @MainActor [weak self] in
-            guard let self else {
-                return
-            }
+            guard let self, let activeConnection = self.conn,
+                ObjectIdentifier(activeConnection) == connectionIdentity
+            else { return }
             let payloadText = self.decodedPayloadText(data)
             self.setStatus(
                 "recv stream=\(streamId) ts=\(timestampMs) bytes=\(data.count) payload=\(payloadText)"
@@ -66,42 +64,83 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
     nonisolated func audioOutput(
         _ output: TiRtcAudioOutput, didChangeState state: TiRtcAudioOutputState
     ) {
+        let outputIdentity = ObjectIdentifier(output)
         let rawValue = state.rawValue
+        let nextState = TiRtcAudioOutputState(rawValue: rawValue) ?? .failed
         Task { @MainActor [weak self] in
-            self?.setStatus("audio state=\(rawValue)")
-            self?.appendStatusLogLine("audio-state=\(rawValue)")
+            guard let self, let audioOutput = self.audioOutput,
+                ObjectIdentifier(audioOutput) == outputIdentity
+            else { return }
+            self.isAudioOutputAvailable = nextState != .failed && nextState != .completed
+            if nextState == .playing {
+                self.isClientConnecting = false
+                if !self.isAudioOutputMuted {
+                    self.audioOutputVolumeStatus = "audible"
+                }
+            } else if !self.isAudioOutputAvailable,
+                !self.videoStates.values.contains(where: { $0 != .failed })
+            {
+                self.isClientConnecting = false
+            }
+            self.setStatus("audio state=\(rawValue)")
+            self.appendStatusLogLine("audio-state=\(rawValue)")
         }
     }
 
     nonisolated func audioOutput(
         _ output: TiRtcAudioOutput, didFailWithCode code: Int32, message: String?
     ) {
+        let outputIdentity = ObjectIdentifier(output)
         Task { @MainActor [weak self] in
-            self?.setStatus("audio error=\(code) msg=\(message ?? "")")
-            self?.showUserFacingError(code: code, context: "audio")
+            guard let self, let audioOutput = self.audioOutput,
+                ObjectIdentifier(audioOutput) == outputIdentity
+            else { return }
+            self.isAudioOutputAvailable = false
+            self.audioOutputVolumeStatus = "failed code=\(code)"
+            self.isClientConnecting = false
+            self.setStatus("audio error=\(code) msg=\(message ?? "")")
+            self.appendStatusLogLine("audio-output-failed phase=runtime code=\(code)")
         }
     }
 
     nonisolated func videoOutput(
         _ output: TiRtcVideoOutput, didChangeState state: TiRtcVideoOutputState
     ) {
+        let outputIdentity = ObjectIdentifier(output)
         let rawValue = state.rawValue
         Task { @MainActor [weak self] in
-            self?.setStatus("video state=\(rawValue)")
-            self?.appendStatusLogLine("video-state=\(rawValue)")
+            guard let self,
+                let streamId = self.videoOutputs.first(where: {
+                    ObjectIdentifier($0.value) == outputIdentity
+                })?.key
+            else { return }
+            self.videoStates[streamId] = TiRtcVideoOutputState(rawValue: rawValue) ?? .failed
+            self.isClientVideoRendering = self.videoStates.values.contains(.rendering)
+            if !self.videoStates.values.contains(where: { $0 != .failed }),
+                !self.isAudioOutputAvailable
+            {
+                self.isClientConnecting = false
+            }
+            self.setStatus("video[\(streamId)] state=\(rawValue)")
+            self.appendStatusLogLine("video-state stream_id=\(streamId) state=\(rawValue)")
         }
     }
 
     nonisolated func videoOutput(_ output: TiRtcVideoOutput, didChangeRenderSize size: CGSize) {
+        let outputIdentity = ObjectIdentifier(output)
+        let width = size.width
+        let height = size.height
         Task { @MainActor [weak self] in
-            guard let self, self.lastLoggedVideoOutputSize != size else {
-                return
-            }
-            self.lastLoggedVideoOutputSize = size
+            guard let self,
+                let streamId = self.videoOutputs.first(where: {
+                    ObjectIdentifier($0.value) == outputIdentity
+                })?.key
+            else { return }
+            self.lastLoggedVideoOutputSize = CGSize(width: width, height: height)
             self.isClientConnecting = false
             self.isClientVideoRendering = true
-            self.setStatus("video size=\(Int(size.width))x\(Int(size.height))")
-            self.appendStatusLogLine("video \(Int(size.width))x\(Int(size.height))")
+            self.setStatus("video[\(streamId)] size=\(Int(width))x\(Int(height))")
+            self.appendStatusLogLine("video stream_id=\(streamId) \(Int(width))x\(Int(height))")
             self.startDiagnosticsRefreshLoop()
         }
     }
@@ -109,9 +148,21 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
     nonisolated func videoOutput(
         _ output: TiRtcVideoOutput, didFailWithCode code: Int32, message: String?
     ) {
+        let outputIdentity = ObjectIdentifier(output)
         Task { @MainActor [weak self] in
-            self?.setStatus("video error=\(code) msg=\(message ?? "")")
-            self?.showUserFacingError(code: code, context: "video")
+            guard let self,
+                let streamId = self.videoOutputs.first(where: {
+                    ObjectIdentifier($0.value) == outputIdentity
+                })?.key
+            else { return }
+            self.videoStates[streamId] = .failed
+            self.isClientVideoRendering = self.videoStates.values.contains(.rendering)
+            if !self.videoStates.values.contains(where: { $0 != .failed }) {
+                self.isClientConnecting = false
+            }
+            self.setStatus("video[\(streamId)] error=\(code) msg=\(message ?? "")")
+            self.appendStatusLogLine(
+                "video-output-failed phase=runtime stream_id=\(streamId) code=\(code)")
         }
     }
 

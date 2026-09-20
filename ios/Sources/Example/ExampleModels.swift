@@ -2,6 +2,76 @@ import CryptoKit
 import Foundation
 import TiRTC
 
+enum ExampleAuxiliaryLayoutMode: Equatable {
+    case stacked
+    case twoColumn
+}
+
+enum ExampleAuxiliaryLayout {
+    static let wideBreakpoint = 840.0
+    static let minimumCalendarCellSize = 44.0
+
+    static func isWide(availableWidth: Double) -> Bool {
+        resolve(availableWidth: availableWidth) == .twoColumn
+    }
+
+    static func resolve(availableWidth: Double) -> ExampleAuxiliaryLayoutMode {
+        availableWidth >= wideBreakpoint ? .twoColumn : .stacked
+    }
+
+    static func calendarContentWidth(availableWidth: Double) -> Double {
+        max(availableWidth, minimumCalendarCellSize * 7 + 48)
+    }
+}
+
+enum ExampleScannerAvailability: String {
+    case checking
+    case ready
+    case denied
+    case restricted
+    case unavailable
+
+    var accessibilitySummary: String {
+        switch self {
+        case .checking: "正在检查相机"
+        case .ready: "相机已就绪"
+        case .denied: "相机权限已关闭，可前往系统设置开启，或返回手动输入"
+        case .restricted: "相机受系统限制，请返回手动输入"
+        case .unavailable: "相机不可用，请返回手动输入"
+        }
+    }
+}
+
+enum ExamplePlaybackLayout: Equatable {
+    case empty
+    case single
+    case twoVertical
+    case twoHorizontal
+    case threePrimaryTop
+    case threePrimaryLeading
+
+    static let compactBreakpoint: Double = 600
+
+    static func resolve(itemCount: Int, availableWidth: Double) -> ExamplePlaybackLayout {
+        switch itemCount {
+        case ...0: .empty
+        case 1: .single
+        case 2: availableWidth < compactBreakpoint ? .twoVertical : .twoHorizontal
+        default: availableWidth < compactBreakpoint ? .threePrimaryTop : .threePrimaryLeading
+        }
+    }
+
+    static func promoted<Item: Equatable>(_ items: [Item], selected: Item?) -> [Item] {
+        guard let selected, let index = items.firstIndex(of: selected), index != 0 else {
+            return items
+        }
+        var result = items
+        result.remove(at: index)
+        result.insert(selected, at: 0)
+        return result
+    }
+}
+
 enum ExampleValidationError: Error, Equatable {
     case invalidJSON
     case missingRequiredField(String)
@@ -290,23 +360,25 @@ struct ExampleClientConfiguration: Equatable {
     var appId: String
     var endpoint: String
     var remoteId: String
-    var audioStreamId: UInt8
-    var videoStreamId: UInt8
+    var audioStreamId: UInt8?
+    var videoStreamIds: [UInt8]
+    var videoStreamId: UInt8 { videoStreamIds.first ?? Self.defaultVideoStreamId }
     var token: String
 
     init(
         appId: String,
         endpoint: String = "",
         remoteId: String,
-        audioStreamId: UInt8 = defaultAudioStreamId,
+        audioStreamId: UInt8? = defaultAudioStreamId,
         videoStreamId: UInt8 = defaultVideoStreamId,
+        videoStreamIds: [UInt8]? = nil,
         token: String
     ) {
         self.appId = appId
         self.endpoint = endpoint
         self.remoteId = remoteId
         self.audioStreamId = audioStreamId
-        self.videoStreamId = videoStreamId
+        self.videoStreamIds = videoStreamIds ?? [videoStreamId]
         self.token = token
     }
 
@@ -316,7 +388,7 @@ struct ExampleClientConfiguration: Equatable {
             endpoint: endpoint.trimmedForExample(),
             remoteId: remoteId.trimmedForExample(),
             audioStreamId: audioStreamId,
-            videoStreamId: videoStreamId,
+            videoStreamIds: videoStreamIds,
             token: token.trimmedForExample()
         )
         if normalized.appId.isEmpty {
@@ -409,8 +481,9 @@ enum ExampleEvidenceRedactor {
             "app_id": config.appId,
             "endpoint": config.endpoint,
             "remote_id": config.remoteId,
-            "audio_stream_id": String(config.audioStreamId),
+            "audio_stream_id": config.audioStreamId.map(String.init) ?? "",
             "video_stream_id": String(config.videoStreamId),
+            "video_stream_ids": config.videoStreamIds.map(String.init).joined(separator: ","),
             "token_fingerprint": tokenFingerprint(config.token),
         ]
     }
@@ -421,8 +494,6 @@ struct ExampleSettingsSnapshot: Equatable {
     var appId: String
     var endpoint: String
     var remoteId: String
-    var audioStreamId: UInt8
-    var videoStreamId: UInt8
     var outputBufferPolicy: ExampleOutputBufferPolicy = .automatic
     var localAudioCodec: ExampleAudioCodec = .g711a
     var localAudioSampleRate: ExampleAudioSampleRate = .rate16k
@@ -439,8 +510,8 @@ final class ExampleSettingsStore {
         static let appId = "example.app_id"
         static let endpoint = "example.endpoint"
         static let remoteId = "example.remote_id"
-        static let audioStreamId = "example.audio_stream_id"
-        static let videoStreamId = "example.video_stream_id"
+        static let audioStreamSelection = "example.audio_stream_selection"
+        static let videoStreamIds = "example.video_stream_ids"
         static let outputBufferPolicy = "example.output_buffer_policy"
         static let localAudioCodec = "example.local_audio_codec"
         static let localAudioSampleRate = "example.local_audio_sample_rate_hz"
@@ -462,8 +533,6 @@ final class ExampleSettingsStore {
         userDefaults.set(snapshot.appId, forKey: Key.appId)
         userDefaults.set(snapshot.endpoint, forKey: Key.endpoint)
         userDefaults.set(snapshot.remoteId, forKey: Key.remoteId)
-        userDefaults.set(Int(snapshot.audioStreamId), forKey: Key.audioStreamId)
-        userDefaults.set(Int(snapshot.videoStreamId), forKey: Key.videoStreamId)
         userDefaults.set(snapshot.outputBufferPolicy.rawValue, forKey: Key.outputBufferPolicy)
         userDefaults.set(snapshot.localAudioCodec.rawValue, forKey: Key.localAudioCodec)
         userDefaults.set(snapshot.localAudioSampleRate.rawValue, forKey: Key.localAudioSampleRate)
@@ -475,13 +544,26 @@ final class ExampleSettingsStore {
         userDefaults.set(snapshot.consoleLogEnabled, forKey: Key.consoleLogEnabled)
     }
 
+    func saveMediaSelection(audio: String, videos: [String]) {
+        userDefaults.set(audio, forKey: Key.audioStreamSelection)
+        userDefaults.set(videos, forKey: Key.videoStreamIds)
+    }
+
+    func loadMediaSelection() -> (audio: String, videos: [String])? {
+        guard userDefaults.object(forKey: Key.audioStreamSelection) != nil,
+            userDefaults.object(forKey: Key.videoStreamIds) != nil
+        else { return nil }
+        return (
+            userDefaults.string(forKey: Key.audioStreamSelection) ?? "",
+            (userDefaults.array(forKey: Key.videoStreamIds) as? [String] ?? []).prefix(3).map { $0 }
+        )
+    }
+
     func load() -> ExampleSettingsSnapshot {
         ExampleSettingsSnapshot(
             appId: userDefaults.string(forKey: Key.appId) ?? "",
             endpoint: userDefaults.string(forKey: Key.endpoint) ?? "",
             remoteId: userDefaults.string(forKey: Key.remoteId) ?? "",
-            audioStreamId: UInt8(userDefaults.integer(forKey: Key.audioStreamId)),
-            videoStreamId: UInt8(userDefaults.integer(forKey: Key.videoStreamId)),
             outputBufferPolicy: ExampleOutputBufferPolicy(
                 rawValue: userDefaults.string(forKey: Key.outputBufferPolicy) ?? ""
             ) ?? .automatic,

@@ -8,7 +8,7 @@ struct ExampleClientConfigure: View {
     @State private var cloudStorageEndpoint: String
     @State private var cloudStorageToken: String
     @State private var cloudStorageAudioChannelId: String
-    @State private var cloudStorageVideoChannelId: String
+    @State private var cloudStorageVideoChannelIds: [String]
     @State private var resolvedCloudStorageToken = ""
     @State private var cloudStorageOpening = false
     @State private var cloudStorageOpenStatus = ""
@@ -19,8 +19,17 @@ struct ExampleClientConfigure: View {
         _cloudStorageAppId = State(initialValue: session.appId)
         _cloudStorageEndpoint = State(initialValue: session.endpoint)
         _cloudStorageToken = State(initialValue: session.token)
-        _cloudStorageAudioChannelId = State(initialValue: session.audioStreamId)
-        _cloudStorageVideoChannelId = State(initialValue: session.videoStreamId)
+        let defaults = UserDefaults.standard
+        _cloudStorageAudioChannelId = State(
+            initialValue:
+                defaults.object(forKey: "example.cloud.audio_channel_id") == nil
+                ? String(ExampleSessionController.StreamDefaults.audio)
+                : defaults.string(forKey: "example.cloud.audio_channel_id") ?? "")
+        let storedCloudVideos = defaults.array(forKey: "example.cloud.video_channel_ids") as? [String]
+        _cloudStorageVideoChannelIds = State(
+            initialValue:
+                storedCloudVideos.map { Array($0.prefix(3)) }
+                ?? [String(ExampleSessionController.StreamDefaults.video)])
     }
 
     var body: some View {
@@ -44,7 +53,7 @@ struct ExampleClientConfigure: View {
     }
 
     private var content: some View {
-        ExampleConfigureBackground {
+        ExampleConfigureBackground { isWide in
             VStack(spacing: 0) {
                 ExampleConfigureHeader(
                     primaryAction: {
@@ -55,128 +64,8 @@ struct ExampleClientConfigure: View {
 
                 ExampleProductTabs(selectedProduct: $selectedProduct)
                     .padding(.bottom, 20)
-                ExampleConfigureCard {
-                    VStack(spacing: 16) {
-                        if selectedProduct == "rtc" {
-                            ExampleTextInput(
-                                "endpoint",
-                                hint: "接入的云端环境，留空则使用默认环境。",
-                                text: $session.endpoint,
-                                accessibilityIdentifier: "client.endpoint"
-                            )
-                            ExampleTextInput(
-                                "app_id",
-                                hint: "TiRTC 应用标识，进入播放页前必须提供。",
-                                text: $session.appId,
-                                accessibilityIdentifier: "client.app_id"
-                            )
-                            ExampleTextInput(
-                                "remote_id",
-                                hint: "待连接的远端目标 ID",
-                                text: $session.remoteId,
-                                accessibilityIdentifier: "client.remote_id"
-                            )
-                            HStack(spacing: 16) {
-                                ExampleTextInput(
-                                    "audio_stream_id",
-                                    hint: "音频流 ID，默认 10",
-                                    text: $session.audioStreamId,
-                                    accessibilityIdentifier: "client.audio_stream_id"
-                                )
-                                ExampleTextInput(
-                                    "video_stream_id",
-                                    hint: "视频流 ID，默认 11",
-                                    text: $session.videoStreamId,
-                                    accessibilityIdentifier: "client.video_stream_id"
-                                )
-                            }
-                            HStack(alignment: .top, spacing: 10) {
-                                ExampleTextInput(
-                                    "一次性连接 Token",
-                                    hint: "粘贴 v1.xxx 一次性 Token，或点右侧扫码。",
-                                    text: $session.token,
-                                    accessibilityIdentifier: "client.token"
-                                )
-                                ExampleInlineScanButton(
-                                    enabled: ExamplePlatform.scanSupported,
-                                    action: { session.isClientQRCodeScannerPresented = true }
-                                )
-                            }
-                            Text("或")
-                                .font(.system(size: 12, weight: .semibold))
-                                .foregroundColor(ExampleColors.textSecondary)
-                                .frame(maxWidth: .infinity)
-                            ExampleTextInput(
-                                "TiRTC DevTools 服务地址",
-                                hint: "例如 http://192.168.1.10:8966",
-                                text: $session.tokenIssuerBaseUrl,
-                                accessibilityIdentifier: "client.token_issuer_base_url"
-                            )
-                            ExamplePrimaryButton(title: "开始连接、拉流播放") {
-                                session.tokenSource =
-                                    session.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                    ? ExampleTokenSource.issuer.rawValue : ExampleTokenSource.oneTime.rawValue
-                                session.startClient()
-                            }
-                            .padding(.top, 4)
-                            .accessibilityIdentifier("client.enter_player")
-                        } else {
-                            ExampleTextInput(
-                                "app_id",
-                                hint: "Ti Cloud Storage 应用标识，进入播放页前必须提供。",
-                                text: $cloudStorageAppId,
-                                accessibilityIdentifier: "ti-cloud-storage.app_id"
-                            )
-                            ExampleTextInput(
-                                "endpoint",
-                                hint: "接入的云端环境，留空则使用默认环境。",
-                                text: $cloudStorageEndpoint,
-                                accessibilityIdentifier: "ti-cloud-storage.endpoint"
-                            )
-                            HStack(alignment: .top, spacing: 10) {
-                                ExampleTextInput(
-                                    "token",
-                                    hint: "粘贴云录像客户端 Token，或点右侧扫码。",
-                                    text: $cloudStorageToken,
-                                    secure: true,
-                                    accessibilityIdentifier: "ti-cloud-storage.token"
-                                )
-                                ExampleInlineScanButton(
-                                    enabled: ExamplePlatform.scanSupported,
-                                    action: { isCloudStorageQRCodeScannerPresented = true }
-                                )
-                            }
-                            HStack(spacing: 16) {
-                                ExampleTextInput(
-                                    "audio_channel_id",
-                                    hint: "音频 Channel，0..255",
-                                    text: $cloudStorageAudioChannelId,
-                                    accessibilityIdentifier: "ti-cloud-storage.audio_channel_id"
-                                )
-                                ExampleTextInput(
-                                    "video_channel_id",
-                                    hint: "视频 Channel，0..255",
-                                    text: $cloudStorageVideoChannelId,
-                                    accessibilityIdentifier: "ti-cloud-storage.video_channel_id"
-                                )
-                            }
-                            if !cloudStorageOpenStatus.isEmpty {
-                                Text(cloudStorageOpenStatus)
-                                    .font(.system(size: 12))
-                                    .foregroundColor(ExampleColors.textSecondary)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .accessibilityIdentifier("ti-cloud-storage.configure.status")
-                            }
-                            ExamplePrimaryButton(title: cloudStorageOpening ? "连接中…" : "播放云录像") {
-                                openCloudStorage()
-                            }
-                            .padding(.top, 4)
-                            .accessibilityIdentifier("ti-cloud-storage.enter_player")
-                            .disabled(!cloudStorageConfigurationValid || cloudStorageOpening)
-                            .opacity(cloudStorageConfigurationValid && !cloudStorageOpening ? 1 : 0.55)
-                        }
-                    }
-                }
+                    .accessibilityIdentifier("product.tabs")
+                configurationSections(isWide: isWide)
             }
         }
         .accessibilityIdentifier("client.configure.page")
@@ -189,21 +78,205 @@ struct ExampleClientConfigure: View {
                 appId: cloudStorageAppId,
                 endpoint: cloudStorageEndpoint,
                 token: resolvedCloudStorageToken,
-                audioChannelId: UInt8(cloudStorageAudioChannelId) ?? ExampleSessionController.StreamDefaults.audio,
-                videoChannelId: UInt8(cloudStorageVideoChannelId) ?? ExampleSessionController.StreamDefaults.video
+                audioChannelId: resolvedCloudStorageAudioChannelId,
+                videoChannelIds: resolvedCloudStorageVideoChannelIds ?? []
             )
         }
     }
 
+    @ViewBuilder
+    private func configurationSections(isWide: Bool) -> some View {
+        if isWide {
+            HStack(alignment: .top, spacing: 16) {
+                VStack(spacing: 16) {
+                    connectionSection
+                    mediaSection
+                }
+                .frame(maxWidth: .infinity)
+                authenticationSection.frame(maxWidth: .infinity)
+            }
+        } else {
+            VStack(spacing: 16) {
+                connectionSection
+                mediaSection
+                authenticationSection
+            }
+        }
+    }
+
+    private var connectionSection: some View {
+        ExampleConfigureSection(
+            title: "连接", symbol: "network",
+            accessibilityIdentifier: "configure.section.connection"
+        ) {
+            if selectedProduct == "rtc" {
+                ExampleTextInput(
+                    "endpoint", hint: "接入的云端环境，留空则使用默认环境。",
+                    text: $session.endpoint, accessibilityIdentifier: "client.endpoint")
+                ExampleTextInput(
+                    "app_id", hint: "TiRTC 应用标识，进入播放页前必须提供。",
+                    text: $session.appId, accessibilityIdentifier: "client.app_id")
+                ExampleTextInput(
+                    "remote_id", hint: "待连接的远端目标 ID", text: $session.remoteId,
+                    accessibilityIdentifier: "client.remote_id")
+            } else {
+                ExampleTextInput(
+                    "app_id", hint: "Ti Cloud Storage 应用标识，进入播放页前必须提供。",
+                    text: $cloudStorageAppId, accessibilityIdentifier: "ti-cloud-storage.app_id")
+                ExampleTextInput(
+                    "endpoint", hint: "接入的云端环境，留空则使用默认环境。",
+                    text: $cloudStorageEndpoint,
+                    accessibilityIdentifier: "ti-cloud-storage.endpoint")
+            }
+        }
+    }
+
+    private var mediaSection: some View {
+        ExampleConfigureSection(
+            title: "媒体", symbol: "play.rectangle",
+            accessibilityIdentifier: "configure.section.media"
+        ) {
+            if selectedProduct == "rtc" {
+                ExampleTextInput(
+                    "音频 Stream ID", hint: "留空不接收音频", text: $session.audioStreamId,
+                    accessibilityIdentifier: "client.audio_stream_id")
+                mediaIdList(
+                    title: "视频 Stream ID（最多 3 路）", values: $session.videoStreamIds,
+                    identifierPrefix: "client.video_stream_id")
+            } else {
+                ExampleTextInput(
+                    "音频 Channel ID", hint: "留空不接收音频",
+                    text: $cloudStorageAudioChannelId,
+                    accessibilityIdentifier: "ti-cloud-storage.audio_channel_id")
+                mediaIdList(
+                    title: "视频 Channel ID（最多 3 路）", values: $cloudStorageVideoChannelIds,
+                    identifierPrefix: "ti-cloud-storage.video_channel_id")
+            }
+        }
+    }
+
+    private var authenticationSection: some View {
+        ExampleConfigureSection(
+            title: "鉴权", symbol: "key",
+            accessibilityIdentifier: "configure.section.authentication"
+        ) {
+            if selectedProduct == "rtc" {
+                ExampleScanFirstButton(
+                    enabled: ExamplePlatform.scanSupported,
+                    accessibilityIdentifier: "client.scan_qr",
+                    action: { session.isClientQRCodeScannerPresented = true })
+                ExampleManualEntryDivider()
+                ExampleTextInput(
+                    "一次性连接 Token", hint: "粘贴 v1.xxx 一次性 Token。", text: $session.token,
+                    accessibilityIdentifier: "client.token")
+                ExampleTextInput(
+                    "TiRTC DevTools 服务地址", hint: "例如 http://192.168.1.10:8966",
+                    text: $session.tokenIssuerBaseUrl,
+                    accessibilityIdentifier: "client.token_issuer_base_url")
+                ExamplePrimaryButton(title: "开始连接、拉流播放") {
+                    session.tokenSource =
+                        session.token.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        ? ExampleTokenSource.issuer.rawValue : ExampleTokenSource.oneTime.rawValue
+                    session.startClient()
+                }
+                .accessibilityIdentifier("client.enter_player")
+            } else {
+                ExampleScanFirstButton(
+                    enabled: ExamplePlatform.scanSupported,
+                    accessibilityIdentifier: "ti-cloud-storage.scan_qr",
+                    action: { isCloudStorageQRCodeScannerPresented = true })
+                ExampleManualEntryDivider()
+                ExampleTextInput(
+                    "token", hint: "粘贴云录像客户端 Token。", text: $cloudStorageToken,
+                    secure: true, accessibilityIdentifier: "ti-cloud-storage.token")
+                if !cloudStorageOpenStatus.isEmpty {
+                    Text(cloudStorageOpenStatus)
+                        .font(.footnote)
+                        .foregroundColor(ExampleColors.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .accessibilityIdentifier("ti-cloud-storage.configure.status")
+                }
+                ExamplePrimaryButton(title: cloudStorageOpening ? "连接中…" : "播放云录像") {
+                    openCloudStorage()
+                }
+                .accessibilityIdentifier("ti-cloud-storage.enter_player")
+                .disabled(!cloudStorageConfigurationValid || cloudStorageOpening)
+                .opacity(cloudStorageConfigurationValid && !cloudStorageOpening ? 1 : 0.55)
+            }
+        }
+    }
+
+    private var resolvedCloudStorageAudioChannelId: UInt8? {
+        let value = cloudStorageAudioChannelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return value.isEmpty ? nil : UInt8(value)
+    }
+
+    private var resolvedCloudStorageVideoChannelIds: [UInt8]? {
+        let values =
+            cloudStorageVideoChannelIds
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let ids = values.compactMap(UInt8.init)
+        guard ids.count == values.count, Set(ids).count == ids.count else { return nil }
+        return ids
+    }
+
     private var cloudStorageConfigurationValid: Bool {
-        !cloudStorageAppId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let audio = cloudStorageAudioChannelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !cloudStorageAppId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !cloudStorageToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && UInt8(cloudStorageAudioChannelId) != nil
-            && UInt8(cloudStorageVideoChannelId) != nil
+            && (audio.isEmpty || resolvedCloudStorageAudioChannelId != nil)
+            && resolvedCloudStorageVideoChannelIds != nil
+    }
+
+    private func mediaIdList(
+        title: String,
+        values: Binding<[String]>,
+        identifierPrefix: String
+    ) -> some View {
+        VStack(spacing: 8) {
+            HStack {
+                Text(title).font(.system(size: 13, weight: .semibold))
+                Spacer()
+                Button {
+                    if values.wrappedValue.count < 3 { values.wrappedValue.append("") }
+                } label: {
+                    Image(systemName: "plus.circle")
+                        .frame(width: 44, height: 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(values.wrappedValue.count >= 3)
+                .accessibilityIdentifier("\(identifierPrefix).add")
+            }
+            ForEach(Array(values.wrappedValue.indices), id: \.self) { index in
+                HStack(spacing: 8) {
+                    Text("\(index + 1)").foregroundColor(ExampleColors.textSecondary)
+                    ExampleTextInput(
+                        "视频 ID",
+                        hint: "留空不接收该路视频",
+                        text: Binding(
+                            get: { values.wrappedValue[index] },
+                            set: { values.wrappedValue[index] = $0 }),
+                        accessibilityIdentifier: "\(identifierPrefix).\(index)"
+                    )
+                    Button {
+                        values.wrappedValue.remove(at: index)
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .frame(width: 44, height: 44)
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("\(identifierPrefix).remove.\(index)")
+                }
+            }
+        }
     }
 
     private func openCloudStorage() {
         guard cloudStorageConfigurationValid, !cloudStorageOpening else { return }
+        UserDefaults.standard.set(cloudStorageAudioChannelId, forKey: "example.cloud.audio_channel_id")
+        UserDefaults.standard.set(
+            cloudStorageVideoChannelIds, forKey: "example.cloud.video_channel_ids")
         cloudStorageOpening = true
         cloudStorageOpenStatus = ""
         Task { @MainActor in
@@ -283,58 +356,103 @@ struct ExampleClientConfigure: View {
 }
 
 private struct ExampleConfigureBackground<Content: View>: View {
-    let content: Content
+    let content: (Bool) -> Content
 
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
+    init(@ViewBuilder content: @escaping (Bool) -> Content) {
+        self.content = content
     }
 
     var body: some View {
-        ScrollView {
-            configuredContent
+        GeometryReader { proxy in
+            ScrollView {
+                configuredContent(
+                    isWide: ExampleAuxiliaryLayout.isWide(
+                        availableWidth: Double(proxy.size.width)))
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(ExampleColors.configureGradient.ignoresSafeArea())
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(ExampleColors.configureGradient.ignoresSafeArea())
     }
 
-    @ViewBuilder
-    private var configuredContent: some View {
-        #if os(iOS)
-            content
-                .frame(maxWidth: .infinity, alignment: .top)
-                .padding(.horizontal, 24)
-                .padding(.top, 24)
-                .padding(.bottom, 32)
-        #else
-            HStack {
-                Spacer(minLength: 0)
-                content
-                    .frame(maxWidth: 460)
-                Spacer(minLength: 0)
-            }
+    private func configuredContent(isWide: Bool) -> some View {
+        content(isWide)
+            .frame(maxWidth: isWide ? 1120 : 560, alignment: .top)
             .padding(.horizontal, 24)
             .padding(.top, 24)
             .padding(.bottom, 32)
             .frame(maxWidth: .infinity)
-        #endif
     }
 }
 
-private struct ExampleConfigureCard<Content: View>: View {
+private struct ExampleConfigureSection<Content: View>: View {
+    let title: String
+    let symbol: String
+    let accessibilityIdentifier: String
     let content: Content
 
-    init(@ViewBuilder content: () -> Content) {
+    init(
+        title: String, symbol: String, accessibilityIdentifier: String,
+        @ViewBuilder content: () -> Content
+    ) {
+        self.title = title
+        self.symbol = symbol
+        self.accessibilityIdentifier = accessibilityIdentifier
         self.content = content()
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
+        VStack(alignment: .leading, spacing: 14) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .foregroundColor(ExampleColors.brandText)
+                .accessibilityAddTraits(.isHeader)
+                .accessibilityIdentifier(accessibilityIdentifier)
             content
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
         .padding(16)
-        .background(ExampleColors.surface.opacity(0.88))
-        .clipShape(RoundedRectangle(cornerRadius: 30))
+        .background(ExampleColors.surface.opacity(0.9))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct ExampleScanFirstButton: View {
+    let enabled: Bool
+    let accessibilityIdentifier: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(enabled ? "扫描二维码" : "此平台不支持扫码", systemImage: "qrcode.viewfinder")
+                .font(.headline)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(enabled ? .white : ExampleColors.textSecondary)
+        .background(enabled ? ExampleColors.primary : ExampleColors.inputSurface)
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .disabled(!enabled)
+        .accessibilityIdentifier(accessibilityIdentifier)
+        .accessibilityHint(enabled ? "打开相机扫描配置" : "请手动输入 Token")
+    }
+}
+
+private struct ExampleManualEntryDivider: View {
+    var body: some View {
+        HStack(spacing: 10) {
+            Rectangle()
+                .fill(ExampleColors.inputBorder)
+                .frame(height: 1)
+            Text("或手动输入")
+                .font(.caption)
+                .foregroundColor(ExampleColors.textSecondary)
+                .fixedSize()
+            Rectangle()
+                .fill(ExampleColors.inputBorder)
+                .frame(height: 1)
+        }
+        .accessibilityHidden(true)
     }
 }
 
@@ -356,9 +474,10 @@ private struct ExampleConfigureHeader: View {
                 Text("偏好设置")
                     .font(.system(size: 13, weight: .medium))
                     .padding(.horizontal, 14)
-                    .frame(height: 40)
+                    .frame(minHeight: 44)
             }
             .buttonStyle(ExamplePillButtonStyle())
+            .accessibilityIdentifier("settings.open")
         }
     }
 }
@@ -387,44 +506,6 @@ private struct ExampleProductTabs: View {
                 .clipShape(RoundedRectangle(cornerRadius: 17))
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("product.tab.\(value)")
-    }
-}
-
-private struct ExampleInlineScanButton: View {
-    let enabled: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button("扫码", action: action)
-            .buttonStyle(.plain)
-            .font(.system(size: 13, weight: .bold))
-            .foregroundColor(enabled ? ExampleColors.primary : ExampleColors.textSecondary)
-            .padding(.horizontal, 16)
-            .frame(minWidth: 56, minHeight: 56)
-            .background(ExampleColors.inputSurface)
-            .clipShape(RoundedRectangle(cornerRadius: 20))
-            .disabled(!enabled)
-            .opacity(enabled ? 1 : 0.55)
-    }
-}
-
-private struct ExampleSegmentedField<Content: View>: View {
-    let title: String
-    let content: Content
-
-    init(_ title: String, @ViewBuilder content: () -> Content) {
-        self.title = title
-        self.content = content()
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.system(size: 14, weight: .medium))
-                .foregroundColor(ExampleColors.textSecondary)
-            content
-        }
     }
 }
 
@@ -500,90 +581,150 @@ private struct ExampleSettingsSheet: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                Text("设置")
-                    .font(.system(size: 22, weight: .bold))
-                    .foregroundColor(ExampleColors.textPrimary)
-                Text("本地仅保存连接配置，不保存 token。")
-                    .font(.system(size: 14))
-                    .foregroundColor(ExampleColors.textSecondary)
-                ExampleSegmentedField("解码后端") {
-                    Picker("decoderPreference", selection: $session.decoderPreference) {
-                        Text("自动").tag(ExampleVideoDecoderPreference.automatic.rawValue)
-                        Text("软解").tag(ExampleVideoDecoderPreference.software.rawValue)
-                        Text("硬解").tag(ExampleVideoDecoderPreference.hardware.rawValue)
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .top) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("设置")
+                            .font(.title2.bold())
+                            .foregroundColor(ExampleColors.textPrimary)
+                            .accessibilityAddTraits(.isHeader)
+                        Text("本地仅保存连接配置，不保存 token。")
+                            .font(.body)
+                            .foregroundColor(ExampleColors.textSecondary)
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.decoderPreference")
+                    Spacer()
+                    Button("完成") { close() }
+                        .frame(minWidth: 44, minHeight: 44)
+                        .accessibilityIdentifier("settings.close")
                 }
-                ExampleSegmentedField("输出缓冲") {
-                    Picker("outputBufferPolicy", selection: $session.outputBufferPolicy) {
-                        Text("自动").tag(ExampleOutputBufferPolicy.automatic.rawValue)
-                        Text("无缓冲").tag(ExampleOutputBufferPolicy.noBuffer.rawValue)
+
+                ExampleSettingsSection(title: "播放", symbol: "play.rectangle") {
+                    ExampleSettingsPicker("解码后端") {
+                        Picker("decoderPreference", selection: $session.decoderPreference) {
+                            Text("自动").tag(ExampleVideoDecoderPreference.automatic.rawValue)
+                            Text("软解").tag(ExampleVideoDecoderPreference.software.rawValue)
+                            Text("硬解").tag(ExampleVideoDecoderPreference.hardware.rawValue)
+                        }
+                        .accessibilityIdentifier("settings.decoderPreference")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.output_buffer_policy")
-                }
-                ExampleSegmentedField("本地音频编码") {
-                    Picker("localAudioCodec", selection: $session.localAudioCodec) {
-                        Text("G711A").tag(ExampleAudioCodec.g711a.rawValue)
-                        Text("AAC").tag(ExampleAudioCodec.aac.rawValue)
-                        Text("PCM").tag(ExampleAudioCodec.pcm.rawValue)
-                        Text("OPUS").tag(ExampleAudioCodec.opus.rawValue)
-                        Text("AMR").tag(ExampleAudioCodec.amr.rawValue)
+                    ExampleSettingsPicker("输出缓冲") {
+                        Picker("outputBufferPolicy", selection: $session.outputBufferPolicy) {
+                            Text("自动").tag(ExampleOutputBufferPolicy.automatic.rawValue)
+                            Text("无缓冲").tag(ExampleOutputBufferPolicy.noBuffer.rawValue)
+                        }
+                        .accessibilityIdentifier("settings.output_buffer_policy")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.local_audio_codec")
                 }
-                ExampleSegmentedField("本地音频采样率") {
-                    Picker("localAudioSampleRate", selection: $session.localAudioSampleRate) {
-                        Text("8K").tag(String(ExampleAudioSampleRate.rate8k.rawValue))
-                        Text("16K").tag(String(ExampleAudioSampleRate.rate16k.rawValue))
+
+                ExampleSettingsSection(title: "本地音频", symbol: "mic") {
+                    ExampleSettingsPicker("编码") {
+                        Picker("localAudioCodec", selection: $session.localAudioCodec) {
+                            Text("G711A").tag(ExampleAudioCodec.g711a.rawValue)
+                            Text("AAC").tag(ExampleAudioCodec.aac.rawValue)
+                            Text("PCM").tag(ExampleAudioCodec.pcm.rawValue)
+                            Text("OPUS").tag(ExampleAudioCodec.opus.rawValue)
+                            Text("AMR").tag(ExampleAudioCodec.amr.rawValue)
+                        }
+                        .accessibilityIdentifier("settings.local_audio_codec")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.local_audio_sample_rate")
-                }
-                ExampleTextInput(
-                    "local_audio_stream_id",
-                    hint: "播放器页麦克风对讲使用的本地音频流 ID。",
-                    text: $session.localAudioStreamId,
-                    accessibilityIdentifier: "settings.local_audio_stream_id"
-                )
-                Toggle("AEC", isOn: $session.localAudioAecEnabled)
-                    .toggleStyle(.switch)
-                    .accessibilityIdentifier("settings.local_audio_aec")
-                ExampleSegmentedField("AGC") {
-                    Picker("localAudioAgcLevel", selection: $session.localAudioAgcLevel) {
-                        Text("关").tag("0")
-                        Text("低").tag("1")
-                        Text("中").tag("2")
-                        Text("高").tag("3")
+                    ExampleSettingsPicker("采样率") {
+                        Picker("localAudioSampleRate", selection: $session.localAudioSampleRate) {
+                            Text("8K").tag(String(ExampleAudioSampleRate.rate8k.rawValue))
+                            Text("16K").tag(String(ExampleAudioSampleRate.rate16k.rawValue))
+                        }
+                        .accessibilityIdentifier("settings.local_audio_sample_rate")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.local_audio_agc")
-                }
-                ExampleSegmentedField("ANS") {
-                    Picker("localAudioAnsLevel", selection: $session.localAudioAnsLevel) {
-                        Text("关").tag("0")
-                        Text("低").tag("1")
-                        Text("中").tag("2")
-                        Text("高").tag("3")
+                    ExampleTextInput(
+                        "local_audio_stream_id",
+                        hint: "播放器页麦克风对讲使用的本地音频流 ID。",
+                        text: $session.localAudioStreamId,
+                        accessibilityIdentifier: "settings.local_audio_stream_id")
+                    Toggle("回声消除（AEC）", isOn: $session.localAudioAecEnabled)
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("settings.local_audio_aec")
+                    ExampleSettingsPicker("自动增益（AGC）") {
+                        Picker("localAudioAgcLevel", selection: $session.localAudioAgcLevel) {
+                            Text("关").tag("0")
+                            Text("低").tag("1")
+                            Text("中").tag("2")
+                            Text("高").tag("3")
+                        }
+                        .accessibilityIdentifier("settings.local_audio_agc")
                     }
-                    .pickerStyle(.segmented)
-                    .accessibilityIdentifier("settings.local_audio_ans")
+                    ExampleSettingsPicker("降噪（ANS）") {
+                        Picker("localAudioAnsLevel", selection: $session.localAudioAnsLevel) {
+                            Text("关").tag("0")
+                            Text("低").tag("1")
+                            Text("中").tag("2")
+                            Text("高").tag("3")
+                        }
+                        .accessibilityIdentifier("settings.local_audio_ans")
+                    }
                 }
-                Toggle("Console Log", isOn: $session.consoleLogEnabled)
-                    .toggleStyle(.switch)
-                    .accessibilityIdentifier("settings.console_log")
-                ExamplePrimaryButton(title: "关闭") {
-                    session.persistCurrentSettings()
-                    session.isSettingsPresented = false
+
+                ExampleSettingsSection(title: "诊断", symbol: "waveform.path.ecg") {
+                    Toggle("Console Log", isOn: $session.consoleLogEnabled)
+                        .frame(minHeight: 44)
+                        .accessibilityIdentifier("settings.console_log")
                 }
             }
             .padding(24)
+            .frame(maxWidth: 680)
+            .frame(maxWidth: .infinity)
         }
-        .frame(minWidth: 320)
+        .frame(minWidth: 320, minHeight: 480)
         .background(ExampleColors.background)
+        .accessibilityIdentifier("settings.page")
+    }
+
+    private func close() {
+        session.persistCurrentSettings()
+        session.isSettingsPresented = false
+    }
+}
+
+private struct ExampleSettingsSection<Content: View>: View {
+    let title: String
+    let symbol: String
+    let content: Content
+
+    init(title: String, symbol: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.symbol = symbol
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label(title, systemImage: symbol)
+                .font(.headline)
+                .foregroundColor(ExampleColors.brandText)
+                .accessibilityAddTraits(.isHeader)
+            content
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(ExampleColors.surface)
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+    }
+}
+
+private struct ExampleSettingsPicker<Content: View>: View {
+    let title: String
+    let content: Content
+
+    init(_ title: String, @ViewBuilder content: () -> Content) {
+        self.title = title
+        self.content = content()
+    }
+
+    var body: some View {
+        HStack {
+            Text(title)
+            Spacer(minLength: 12)
+            content.pickerStyle(.menu)
+        }
+        .frame(minHeight: 44)
     }
 }
 

@@ -1,9 +1,132 @@
 import Foundation
 import TiRTC
 
+func exampleRawDumpEvidenceMarker(
+    event: String, archive: TiRawDumpArchive, code: Int32? = nil, logId: String? = nil
+) -> String? {
+    var payload: [String: Any] = [
+        "capture_id": archive.captureId,
+        "archive_sha256": archive.sha256,
+        "archive_path": archive.path,
+    ]
+    if let code { payload["code"] = code }
+    if let logId { payload["log_id"] = logId }
+    guard JSONSerialization.isValidJSONObject(payload),
+        let data = try? JSONSerialization.data(withJSONObject: payload)
+    else { return nil }
+    let encoded = data.base64EncodedString()
+        .replacingOccurrences(of: "+", with: "-")
+        .replacingOccurrences(of: "/", with: "_")
+        .replacingOccurrences(of: "=", with: "")
+    return "raw_dump_evidence_\(event)_b64=\(encoded)"
+}
+
+func emitExampleRawDumpEvidenceMarker(_ marker: String) {
+    print("[Example] \(marker)")
+    fflush(stdout)
+    guard let data = "\(marker)\n".data(using: .utf8),
+        let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    else { return }
+    let url = cacheRoot.appendingPathComponent("raw-dump-evidence.log")
+    try? FileManager.default.createDirectory(
+        at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    if !FileManager.default.fileExists(atPath: url.path) {
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+    }
+    guard let handle = try? FileHandle(forWritingTo: url) else { return }
+    defer { try? handle.close() }
+    _ = try? handle.seekToEnd()
+    _ = try? handle.write(contentsOf: data)
+}
+
+func resetExampleRawDumpEvidenceMarkers() {
+    guard let cacheRoot = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first
+    else { return }
+    try? FileManager.default.removeItem(
+        at: cacheRoot.appendingPathComponent("raw-dump-evidence.log"))
+}
+
 @MainActor
 extension ExampleSessionController {
     func uploadLogs() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.finalizeRawDump(upload: false)
+            self.beginLogUpload(isRawDumpUpload: false)
+        }
+    }
+
+    func rawDumpButtonTapped() {
+        guard rawDumpButtonState.enabled else { return }
+        if rawDump != nil {
+            Task { @MainActor [weak self] in await self?.finalizeRawDump(upload: true) }
+        } else if rawDumpArchiveReady {
+            beginLogUpload(isRawDumpUpload: true)
+        } else {
+            startRawDump()
+        }
+    }
+
+    func finalizeRawDump(upload: Bool) async {
+        guard let rawDump else {
+            if upload, rawDumpArchiveReady { beginLogUpload(isRawDumpUpload: true) }
+            return
+        }
+        rawDumpButtonState = .finalizing
+        async let firstStop = rawDump.stop()
+        async let secondStop = rawDump.stop()
+        let (result, repeated) = await (firstStop, secondStop)
+        if result.code == 0, repeated.code == 0,
+            result.archive?.captureId == repeated.archive?.captureId, result.archive != nil
+        {
+            guard let archive = result.archive else { return }
+            self.rawDump = nil
+            rawDumpArchiveReady = true
+            rawDumpArchiveEvidence = archive
+            rawDumpButtonState = .completed
+            appendStatusLogLine(
+                "raw_dump_archive_ready capture_id=\(archive.captureId) repeated_stop=true")
+            if let marker = exampleRawDumpEvidenceMarker(event: "stop", archive: archive) {
+                emitExampleRawDumpEvidenceMarker(marker)
+            }
+            if upload { beginLogUpload(isRawDumpUpload: true) }
+        } else {
+            rawDumpButtonState = .captureFailed
+            setStatus("raw dump stop failed: code=\(result.code)")
+        }
+    }
+
+    private func startRawDump() {
+        guard let conn, let configuration = activeClientConfiguration else {
+            rawDumpButtonState = .captureFailed
+            return
+        }
+        rawDumpButtonState = .starting
+        resetExampleRawDumpEvidenceMarkers()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let result = await conn.startRawDump(
+                options: TiRtcRawDumpOptions(
+                    audioStreamIds: configuration.audioStreamId.map { [NSNumber(value: $0)] } ?? [],
+                    videoStreamIds: configuration.videoStreamIds.map { NSNumber(value: $0) },
+                    uplinkAudioStreamIds: UInt8(
+                        self.localAudioStreamId.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ).map { [NSNumber(value: $0)] } ?? []
+                ))
+            guard result.code == 0, let dump = result.dump else {
+                self.rawDumpButtonState = .captureFailed
+                self.setStatus("raw dump start failed: code=\(result.code)")
+                return
+            }
+            self.rawDump = dump
+            self.rawDumpArchiveReady = false
+            self.rawDumpArchiveEvidence = nil
+            self.rawDumpButtonState = .capturing
+            self.appendStatusLogLine("raw_dump_started flow=client")
+        }
+    }
+
+    private func beginLogUpload(isRawDumpUpload: Bool) {
         if isLogUploadInProgress {
             return
         }
@@ -14,40 +137,59 @@ extension ExampleSessionController {
                 self?.isLogUploadInProgress = false
                 let resolvedLogId = result.logId ?? "nil"
                 self?.logUploadResult = ExampleLogUploadResult(code: result.code, logId: result.logId)
-                self?.setStatus("log upload finished: code=\(result.code) log_id=\(resolvedLogId)")
+                let status = "log upload finished: code=\(result.code) log_id=\(resolvedLogId)"
+                self?.setStatus(status)
+                if isRawDumpUpload {
+                    if let self, let archive = self.rawDumpArchiveEvidence,
+                        let marker = exampleRawDumpEvidenceMarker(
+                            event: "upload", archive: archive, code: result.code,
+                            logId: result.logId ?? "")
+                    {
+                        emitExampleRawDumpEvidenceMarker(marker)
+                    }
+                    self?.rawDumpButtonState = result.succeeded ? .idle : .uploadFailed
+                    if result.succeeded {
+                        self?.rawDumpArchiveReady = false
+                        self?.rawDumpArchiveEvidence = nil
+                    }
+                }
                 if !result.succeeded {
                     self?.showUserFacingError(code: result.code, context: "log upload")
                 }
             }
         }
+        if isRawDumpUpload { rawDumpButtonState = .uploading }
         setStatus("log upload started")
         if code != 0 {
             isLogUploadInProgress = false
             logUploadResult = ExampleLogUploadResult(code: code, logId: nil)
+            appendStatusLogLine("log upload finished: code=\(code) log_id=nil")
             showUserFacingError(code: code, context: "log upload")
+            if isRawDumpUpload { rawDumpButtonState = .uploadFailed }
         }
     }
 
     func refreshDiagnostics() {
-        guard let conn, let audioOutput, let videoOutput else {
+        guard let conn else {
             metricsSummary = "metrics unavailable"
             debugSummary = "debug unavailable"
             return
         }
+        let videoOutput = selectedVideoStreamId.flatMap { videoOutputs[$0] }
 
         let connMetrics = conn.getMetricsSnapshot()
-        let audioMetrics = audioOutput.getMetricsSnapshot()
-        let videoMetrics = videoOutput.getMetricsSnapshot()
-        let audioDebug = audioOutput.getDebugSnapshot()
-        let videoDebug = videoOutput.getDebugSnapshot()
+        let audioMetrics = audioOutput?.getMetricsSnapshot()
+        let videoMetrics = videoOutput?.getMetricsSnapshot()
+        let audioDebug = audioOutput?.getDebugSnapshot()
+        let videoDebug = videoOutput?.getDebugSnapshot()
         metricsSummary =
-            "conn=\(connMetrics.code) audio=\(audioMetrics.code) video=\(videoMetrics.code)"
-        let audioSnapshot = audioDebug.snapshot
-        let audioMetricsSnapshot = audioMetrics.snapshot
-        let videoDebugSnapshot = videoDebug.snapshot
-        let videoMetricsSnapshot = videoMetrics.snapshot
+            "conn=\(connMetrics.code) audio=\(audioMetrics?.code ?? 0) video=\(videoMetrics?.code ?? 0)"
+        let audioSnapshot = audioDebug?.snapshot
+        let audioMetricsSnapshot = audioMetrics?.snapshot
+        let videoDebugSnapshot = videoDebug?.snapshot
+        let videoMetricsSnapshot = videoMetrics?.snapshot
         debugSummary =
-            "audio=\(audioDebug.code) audio_codec=\(audioSnapshot?.codec ?? 0) audio_sample_rate_hz=\(audioSnapshot?.sampleRate ?? 0) audio_channels=\(audioSnapshot?.channels ?? 0) video=\(videoDebug.code) video_codec=\(videoDebugSnapshot?.codec ?? 0) width=\(videoDebugSnapshot?.width ?? 0) height=\(videoDebugSnapshot?.height ?? 0) decoder_backend=\(videoDebugSnapshot?.resolvedDecoderBackend ?? 0)"
+            "audio=\(audioDebug?.code ?? 0) audio_codec=\(audioSnapshot?.codec ?? 0) audio_sample_rate_hz=\(audioSnapshot?.sampleRate ?? 0) audio_channels=\(audioSnapshot?.channels ?? 0) video=\(videoDebug?.code ?? 0) video_codec=\(videoDebugSnapshot?.codec ?? 0) width=\(videoDebugSnapshot?.width ?? 0) height=\(videoDebugSnapshot?.height ?? 0) decoder_backend=\(videoDebugSnapshot?.resolvedDecoderBackend ?? 0)"
         mediaParameterSummary =
             "\(displayVideoSize(videoDebugSnapshot)) · \(displayVideoCodec(videoDebugSnapshot?.codec)) · \(displayAudioCodec(audioSnapshot?.codec)) · \(displayVideoDecoder(videoDebugSnapshot))"
         videoReceiveSummary =
@@ -73,7 +215,7 @@ extension ExampleSessionController {
         pendingSummary =
             "audio estimated_output_latency_ms=\(audioMetricsSnapshot?.estimatedOutputLatencyMs ?? -1) video estimated_output_latency_ms=\(videoMetricsSnapshot?.estimatedOutputLatencyMs ?? -1)"
         let debugLine =
-            "debug_stats_ready metrics=\"\(metricsSummary)\" debug=\"\(debugSummary)\" media=\"\(mediaParameterSummary)\" video=\"\(videoReceiveSummary)\" audio=\"\(audioReceiveSummary)\" audio_stutter=\"\(audioStutterSummary)\" video_output_latency=\"\(videoOutputLatencySummary)\" audio_output_latency=\"\(audioOutputLatencySummary)\" pending=\"\(pendingSummary)\""
+            "debug_stats_ready metrics=\"\(metricsSummary)\" debug=\"\(debugSummary)\" media=\"\(mediaParameterSummary)\" video=\"\(videoReceiveSummary)\" audio=\"\(audioReceiveSummary)\" audio_stutter=\"\(audioStutterSummary)\" video_output_latency=\"\(videoOutputLatencySummary)\" audio_output_latency=\"\(audioOutputLatencySummary)\" pending=\"\(pendingSummary)\" audio_output_duration_ms=\(audioMetricsSnapshot?.stutter.outputDurationMs ?? -1) audio_stats_updated_at_ms=\(audioMetricsSnapshot?.statsUpdatedAtMs ?? -1) video_stats_updated_at_ms=\(videoMetricsSnapshot?.statsUpdatedAtMs ?? -1)"
         appendStatusLogLine(debugLine)
         print("[Example] \(debugLine)")
         fflush(stdout)

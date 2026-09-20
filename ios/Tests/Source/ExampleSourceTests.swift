@@ -4,6 +4,41 @@ import XCTest
 @testable import DarwinExampleSupport
 
 final class ExampleSourceTests: XCTestCase {
+    func testRawDumpButtonContractMatchesFlutterBaseline() {
+        XCTAssertEqual(ExampleRawDumpButtonState.idle.label, "抓数据")
+        XCTAssertEqual(ExampleRawDumpButtonState.capturing.label, "结束上传")
+        XCTAssertEqual(ExampleRawDumpButtonState.finalizing.label, "打包中")
+        XCTAssertEqual(ExampleRawDumpButtonState.uploadFailed.label, "重试上传")
+        XCTAssertTrue(ExampleRawDumpButtonState.idle.enabled)
+        XCTAssertFalse(ExampleRawDumpButtonState.starting.enabled)
+        XCTAssertFalse(ExampleRawDumpButtonState.uploading.enabled)
+    }
+
+    func testAuxiliaryLayoutBreakpointsAndCalendarTargets() {
+        XCTAssertEqual(ExampleAuxiliaryLayout.resolve(availableWidth: 839), .stacked)
+        XCTAssertEqual(ExampleAuxiliaryLayout.resolve(availableWidth: 840), .twoColumn)
+        XCTAssertEqual(ExampleAuxiliaryLayout.calendarContentWidth(availableWidth: 280), 356)
+        XCTAssertEqual(ExampleAuxiliaryLayout.calendarContentWidth(availableWidth: 640), 640)
+    }
+
+    func testScannerUnavailableStatesProvideAccessibleNextActions() {
+        XCTAssertTrue(ExampleScannerAvailability.denied.accessibilitySummary.contains("系统设置"))
+        XCTAssertTrue(ExampleScannerAvailability.denied.accessibilitySummary.contains("手动输入"))
+        XCTAssertTrue(ExampleScannerAvailability.restricted.accessibilitySummary.contains("手动输入"))
+        XCTAssertTrue(ExampleScannerAvailability.unavailable.accessibilitySummary.contains("手动输入"))
+    }
+
+    func testPlaybackLayoutHasNoSyntheticFourthLaneAndPromotesSelection() {
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 0, availableWidth: 320), .empty)
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 1, availableWidth: 320), .single)
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 2, availableWidth: 599), .twoVertical)
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 2, availableWidth: 600), .twoHorizontal)
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 3, availableWidth: 599), .threePrimaryTop)
+        XCTAssertEqual(ExamplePlaybackLayout.resolve(itemCount: 3, availableWidth: 600), .threePrimaryLeading)
+        XCTAssertEqual(ExamplePlaybackLayout.promoted([10, 11, 12], selected: 12), [12, 10, 11])
+        XCTAssertEqual(ExamplePlaybackLayout.promoted([10, 11, 12], selected: 99), [10, 11, 12])
+    }
+
     func testClientQRCodeParsesValidPayloadAndPreservesEndpointWhenOmitted() throws {
         let json = """
             {
@@ -90,8 +125,6 @@ final class ExampleSourceTests: XCTestCase {
             appId: "app",
             endpoint: "https://example.invalid",
             remoteId: "remote",
-            audioStreamId: 10,
-            videoStreamId: 11,
             decoderPreference: .software,
             consoleLogEnabled: false
         )
@@ -100,6 +133,20 @@ final class ExampleSourceTests: XCTestCase {
 
         XCTAssertEqual(store.load(), snapshot)
         XCTAssertNil(defaults.string(forKey: "example.token"))
+    }
+
+    func testMediaSelectionIgnoresOldSingleValueKeysAndPreservesCurrentEmptyValues() {
+        let suiteName = "darwin-example-media-selection-tests-\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suiteName)!
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        defaults.set(7, forKey: "example.video_stream_id")
+
+        let store = ExampleSettingsStore(userDefaults: defaults)
+        XCTAssertNil(store.loadMediaSelection())
+
+        store.saveMediaSelection(audio: "", videos: [])
+        XCTAssertEqual(store.loadMediaSelection()?.audio, "")
+        XCTAssertEqual(store.loadMediaSelection()?.videos, [])
     }
 
     func testCommandPanelEventsKeepLatestTwenty() {
@@ -158,7 +205,7 @@ final class ExampleSourceTests: XCTestCase {
         XCTAssertEqual(ExampleTheme.foregroundHex, "#FFFFFF")
         XCTAssertEqual(ExampleTheme.textPrimaryHex, "#666666")
         XCTAssertEqual(ExampleTheme.textSecondaryHex, "#848282")
-        XCTAssertEqual(ExampleTheme.inputSurfaceHex, "#F4F1EA")
+        XCTAssertEqual(ExampleTheme.inputSurfaceHex, "#FFFFFF")
         XCTAssertEqual(ExampleTheme.inputBorderHex, "#E1DBCF")
         XCTAssertEqual(ExampleTheme.videoBackgroundHex, "#252525")
         XCTAssertEqual(ExampleTheme.failureHex, "#B42318")

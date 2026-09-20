@@ -1,8 +1,50 @@
 import SwiftUI
 import TiRTC
 
+extension TiRtcVideoOutputState {
+    fileprivate var exampleAccessibilityLabel: String {
+        switch self {
+        case .idle: "idle"
+        case .buffering: "buffering"
+        case .rendering: "rendering"
+        case .failed: "failed"
+        case .paused: "paused"
+        case .completed: "completed"
+        @unknown default: "unknown"
+        }
+    }
+
+    fileprivate var exampleStatusLabel: String? {
+        switch self {
+        case .idle: "等待视频"
+        case .buffering: "缓冲中"
+        case .rendering: nil
+        case .failed: "播放失败"
+        case .paused: "已暂停"
+        case .completed: "播放完成"
+        @unknown default: "状态更新中"
+        }
+    }
+}
+
 struct ExampleClientPlayer: View {
     @ObservedObject var session: ExampleSessionController
+
+    private var stageStatusLabel: String {
+        if let errorSummary = session.errorSummary { return errorSummary }
+        if session.isClientConnecting { return "连接中" }
+        let configuration = session.activeClientConfiguration
+        if configuration?.videoStreamIds.isEmpty == true {
+            if configuration?.audioStreamId == nil { return "未配置音视频" }
+            return session.isAudioOutputAvailable ? "音频播放中" : "音频不可用"
+        }
+        return "等待视频"
+    }
+
+    private var stageMode: ExampleStageIndicatorMode {
+        if session.errorSummary != nil { return .error }
+        return session.isClientConnecting ? .loading : .running
+    }
 
     var body: some View {
         ExampleVideoPage(
@@ -27,14 +69,21 @@ struct ExampleClientPlayer: View {
                 }
             },
             showStageOverlay: !session.isClientVideoRendering || session.errorSummary != nil,
-            stageStatusLabel: session.errorSummary ?? (session.isClientConnecting ? "连接中" : "加载中"),
-            stageMode: session.errorSummary == nil ? .loading : .error,
+            stageStatusLabel: stageStatusLabel,
+            stageMode: stageMode,
             video: {
-                ExampleVideoSurface(session: session)
+                ExampleMultiVideoSurface(session: session)
             },
             overlay: {
-                if session.isClientVideoRendering {
-                    ExampleMetricsOverlay(session: session)
+                HStack(alignment: .top, spacing: 12) {
+                    ExampleRawDumpButton(
+                        state: session.rawDumpButtonState,
+                        action: session.rawDumpButtonTapped
+                    )
+                    Spacer()
+                    if session.isClientVideoRendering {
+                        ExampleMetricsOverlay(session: session)
+                    }
                 }
             },
             bottomAction: {
@@ -54,71 +103,277 @@ struct ExampleClientPlayer: View {
     }
 }
 
-private struct ExamplePlayerControls: View {
+private struct ExampleMultiVideoSurface: View {
     @ObservedObject var session: ExampleSessionController
 
     var body: some View {
-        if #available(macOS 13.0, iOS 16.0, *) {
-            ViewThatFits(in: .horizontal) {
-                HStack(spacing: 12) { controls }
-                VStack(alignment: .trailing, spacing: 12) {
-                    HStack(spacing: 12) { mediaControls }
-                    HStack(spacing: 12) { playbackControls }
+        let allIds = session.activeClientConfiguration?.videoStreamIds ?? []
+        let visibleIds = session.maximizedVideoStreamId.map { [$0] } ?? allIds
+        GeometryReader { proxy in
+            let ordered = ExamplePlaybackLayout.promoted(
+                visibleIds,
+                selected: session.selectedVideoStreamId
+            )
+            let layout = ExamplePlaybackLayout.resolve(
+                itemCount: ordered.count,
+                availableWidth: Double(proxy.size.width)
+            )
+            videoLayout(ordered, layout: layout, allIds: allIds)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+    }
+
+    @ViewBuilder
+    private func videoLayout(
+        _ ids: [UInt8],
+        layout: ExamplePlaybackLayout,
+        allIds: [UInt8]
+    ) -> some View {
+        switch layout {
+        case .empty:
+            Color.clear
+        case .single:
+            lane(ids[0], allIds: allIds)
+        case .twoVertical:
+            VStack(spacing: 6) {
+                lane(ids[0], allIds: allIds)
+                lane(ids[1], allIds: allIds)
+            }
+        case .twoHorizontal:
+            HStack(spacing: 6) {
+                lane(ids[0], allIds: allIds)
+                lane(ids[1], allIds: allIds)
+            }
+        case .threePrimaryTop:
+            VStack(spacing: 6) {
+                lane(ids[0], allIds: allIds)
+                HStack(spacing: 6) {
+                    lane(ids[1], allIds: allIds)
+                    lane(ids[2], allIds: allIds)
                 }
             }
-        } else {
-            VStack(alignment: .trailing, spacing: 12) {
-                HStack(spacing: 12) { mediaControls }
-                HStack(spacing: 12) { playbackControls }
+        case .threePrimaryLeading:
+            HStack(spacing: 6) {
+                lane(ids[0], allIds: allIds)
+                    .frame(maxWidth: .infinity)
+                VStack(spacing: 6) {
+                    lane(ids[1], allIds: allIds)
+                    lane(ids[2], allIds: allIds)
+                }
+                .frame(maxWidth: .infinity)
             }
         }
     }
 
-    @ViewBuilder private var controls: some View {
-        mediaControls
-        playbackControls
+    private func lane(_ streamId: UInt8, allIds: [UInt8]) -> some View {
+        let laneNumber = (allIds.firstIndex(of: streamId) ?? 0) + 1
+        let isSelected = session.selectedVideoStreamId == streamId
+        let isMaximized = session.maximizedVideoStreamId == streamId
+        return ZStack(alignment: .topLeading) {
+            ExampleVideoSurface(session: session, streamId: streamId)
+                .aspectRatio(16 / 9, contentMode: .fit)
+            if let status = (session.videoStates[streamId] ?? .idle).exampleStatusLabel {
+                Text(status)
+                    .font(.headline)
+                    .foregroundColor(.white)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.black.opacity(0.62))
+            }
+            Text("视频 \(laneNumber) · ID \(streamId)")
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.white)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .background(Color.black.opacity(0.68))
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(8)
+        }
+        .overlay(
+            RoundedRectangle(cornerRadius: 2)
+                .stroke(isSelected ? ExampleColors.primary : .clear, lineWidth: 3)
+        )
+        .contentShape(Rectangle())
+        .onTapGesture { session.selectVideoStream(streamId) }
+        .accessibilityIdentifier("client.video_lane.\(streamId)")
+        .accessibilityLabel("视频 \(laneNumber)，ID \(streamId)")
+        .accessibilityValue(
+            "\(session.videoStates[streamId]?.exampleAccessibilityLabel ?? "idle"), "
+                + "\(isMaximized ? "已最大化" : isSelected ? "已选择" : "未选择")"
+        )
+        .accessibilityHint(isSelected ? "轻点可最大化或恢复" : "轻点可选为主画面")
+    }
+}
+
+private struct ExamplePlayerControls: View {
+    @Environment(\.sizeCategory) private var sizeCategory
+    @ObservedObject var session: ExampleSessionController
+
+    var body: some View {
+        GeometryReader { proxy in
+            let compact =
+                proxy.size.width < CGFloat(ExamplePlaybackLayout.compactBreakpoint)
+                || sizeCategory.isAccessibilityCategory
+
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(session.statusText)
+                    .font(.caption2)
+                    .foregroundColor(ExampleColors.textSecondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("client.playback.status")
+                HStack(spacing: compact ? 8 : 10) {
+                    if compact {
+                        compactVolumeButton
+                        compactMicrophoneButton
+                        secondaryMenu
+                        compactStopButton
+                    } else {
+                        ExampleAudioOutputVolumeButton(
+                            enabled: session.conn?.state == .connected && session.isAudioOutputAvailable,
+                            muted: session.isAudioOutputMuted
+                        ) { session.toggleAudioOutputVolume() }
+                        .accessibilityIdentifier("client.audio_output_volume")
+                        .accessibilityValue(session.audioOutputVolumeStatus)
+
+                        ExampleLocalAudioControlButton(
+                            enabled: session.conn?.state == .connected,
+                            busy: session.isClientLocalAudioBusy,
+                            running: session.isClientLocalAudioRunning
+                        ) { session.toggleClientLocalAudio() }
+                        .accessibilityIdentifier("client.local_audio")
+                        .accessibilityValue(session.clientLocalAudioStatus)
+
+                        mediaButtons
+
+                        ExampleDownlinkControlButton(
+                            connecting: session.isClientConnecting,
+                            playing: session.isClientVideoRendering
+                        ) { session.stopClient() }
+                        .accessibilityIdentifier("client.stop")
+                    }
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 8)
+            .background(ExampleColors.surface.opacity(0.94))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .frame(height: 82)
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("client.control_surface")
     }
 
-    @ViewBuilder private var mediaControls: some View {
-        ExampleMediaIconButton(
-            systemImage: session.isRecording ? "stop.circle" : "record.circle",
-            enabled: session.isClientVideoRendering && !session.isMediaFileBusy,
-            accessibilityLabel: session.isRecording ? "停止本地保存" : "开始本地保存"
-        ) { session.toggleRecording() }
-        .accessibilityIdentifier("client.recording")
-        ExampleMediaIconButton(
-            systemImage: "camera",
-            enabled: session.isClientVideoRendering && !session.isMediaFileBusy,
-            accessibilityLabel: "截图"
-        ) { session.takeSnapshot() }
-        .accessibilityIdentifier("client.snapshot")
-        ExampleMediaIconButton(
-            systemImage: "photo.on.rectangle.angled",
-            enabled: session.hasLatestMedia && !session.isMediaFileBusy,
-            accessibilityLabel: "保存到系统相册"
-        ) { session.saveLatestToGallery() }
-        .accessibilityIdentifier("client.gallery")
-    }
-
-    @ViewBuilder private var playbackControls: some View {
-        ExampleAudioOutputVolumeButton(
-            enabled: session.conn?.state == .connected,
-            muted: session.isAudioOutputMuted
-        ) { session.toggleAudioOutputVolume() }
+    private var compactVolumeButton: some View {
+        Button(action: { session.toggleAudioOutputVolume() }) {
+            Image(systemName: session.isAudioOutputMuted ? "speaker.wave.2.fill" : "speaker.slash.fill")
+                .font(.title3.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(session.conn?.state != .connected || !session.isAudioOutputAvailable)
         .accessibilityIdentifier("client.audio_output_volume")
+        .accessibilityLabel(session.isAudioOutputMuted ? "恢复声音" : "静音")
         .accessibilityValue(session.audioOutputVolumeStatus)
-        ExampleLocalAudioControlButton(
-            enabled: session.conn?.state == .connected,
-            busy: session.isClientLocalAudioBusy,
-            running: session.isClientLocalAudioRunning
-        ) { session.toggleClientLocalAudio() }
+    }
+
+    private var compactMicrophoneButton: some View {
+        Button(action: { session.toggleClientLocalAudio() }) {
+            Group {
+                if session.isClientLocalAudioBusy {
+                    ProgressView()
+                        .progressViewStyle(.circular)
+                } else {
+                    Image(
+                        systemName: session.isClientLocalAudioRunning ? "mic.slash.fill" : "mic.fill"
+                    )
+                    .font(.title3.weight(.semibold))
+                }
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(session.conn?.state != .connected || session.isClientLocalAudioBusy)
         .accessibilityIdentifier("client.local_audio")
+        .accessibilityLabel(session.isClientLocalAudioRunning ? "停止麦克风" : "启动麦克风")
         .accessibilityValue(session.clientLocalAudioStatus)
-        ExampleDownlinkControlButton(
-            connecting: session.isClientConnecting,
-            playing: session.isClientVideoRendering
-        ) { session.stopClient() }
+    }
+
+    private var compactStopButton: some View {
+        Button(action: { session.stopClient() }) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.title3.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(session.isClientConnecting)
+        .opacity(session.isClientConnecting ? 0.72 : 1)
         .accessibilityIdentifier("client.stop")
+        .accessibilityLabel("停止播放")
+    }
+
+    @ViewBuilder
+    private var mediaButtons: some View {
+        recordingButton
+        snapshotButton
+        galleryButton
+    }
+
+    private var secondaryMenu: some View {
+        Menu {
+            recordingButton
+            snapshotButton
+            galleryButton
+        } label: {
+            Image(systemName: "ellipsis.circle")
+                .font(.title3.weight(.semibold))
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityIdentifier("client.more")
+        .accessibilityLabel("更多播放操作")
+        .accessibilityHint("打开本地保存、截图和保存到相册")
+    }
+
+    private var recordingButton: some View {
+        Button(action: { session.toggleRecording() }) {
+            Label(
+                session.isRecording ? "停止本地保存" : "开始本地保存",
+                systemImage: session.isRecording ? "stop.circle" : "record.circle"
+            )
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .disabled(
+            session.isMediaFileBusy
+                || (!session.isRecording && !session.isSelectedVideoRendering)
+        )
+        .accessibilityIdentifier("client.recording")
+        .accessibilityValue(session.isRecording ? "正在保存" : "未保存")
+    }
+
+    private var snapshotButton: some View {
+        Button(action: { session.takeSnapshot() }) {
+            Label("截图", systemImage: "camera")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(!session.isSelectedVideoRendering || session.isMediaFileBusy)
+        .accessibilityIdentifier("client.snapshot")
+    }
+
+    private var galleryButton: some View {
+        Button(action: { session.saveLatestToGallery() }) {
+            Label("保存到系统相册", systemImage: "photo.on.rectangle.angled")
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .disabled(!session.hasLatestMedia || session.isMediaFileBusy)
+        .accessibilityIdentifier("client.gallery")
     }
 }
 
@@ -157,7 +412,9 @@ private struct ExampleMediaIconButton: View {
     }
 }
 
-private struct ExampleVideoPage<Leading: View, Trailing: View, Video: View, Overlay: View, Bottom: View>:
+private struct ExampleVideoPage<
+    Leading: View, Trailing: View, Video: View, Overlay: View, Bottom: View
+>:
     View
 {
     let title: String
@@ -232,14 +489,13 @@ private struct ExampleVideoPage<Leading: View, Trailing: View, Video: View, Over
                         stageStatusLabel: stageStatusLabel,
                         indicatorMode: stageMode
                     )
+                    .accessibilityIdentifier("client.video.stage")
                     ExampleVideoGradient()
                     VStack(alignment: .leading, spacing: 0) {
                         overlay
                         Spacer()
-                        HStack {
-                            Spacer()
-                            bottomAction
-                        }
+                        bottomAction
+                            .frame(maxWidth: .infinity, alignment: .trailing)
                     }
                     .padding(.horizontal, 20)
                     .padding(.top, 18)
@@ -390,21 +646,35 @@ private struct ExampleCenterLoading: View {
 
 private struct ExampleMetricsOverlay: View {
     @ObservedObject var session: ExampleSessionController
-    @State private var expanded = true
+    @State private var expanded = false
 
     var body: some View {
         if !expanded {
-            Button(action: { expanded = true }) {
-                Label("即时统计", systemImage: "chart.bar.fill")
-                    .font(.system(size: 10, weight: .heavy))
-                    .foregroundColor(Color(red: 0.31, green: 0.53, blue: 0.85))
+            VStack {
+                Button(action: { expanded = true }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "chart.bar.fill")
+                        Text(session.metricsSummary)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                        Image(systemName: "chevron.down")
+                    }
+                    .font(.caption.weight(.semibold))
+                    .foregroundColor(ExampleColors.textPrimary)
                     .padding(.horizontal, 12)
-                    .frame(height: 26)
+                    .frame(minHeight: 44)
                     .background(Color.white)
                     .clipShape(Capsule())
                     .shadow(color: Color.black.opacity(0.14), radius: 10, y: 3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("client.metrics.summary")
+                .accessibilityLabel("即时统计摘要")
+                .accessibilityValue(session.metricsSummary)
+                .accessibilityHint("展开指标明细")
             }
-            .buttonStyle(.plain)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("client.metrics.overlay")
         } else {
             VStack(alignment: .leading, spacing: 0) {
                 ExampleStateProbe(identifier: "client.metrics.overlay", value: session.metricsSummary)
@@ -446,10 +716,12 @@ private struct ExampleMetricsOverlay: View {
                     value: session.audioReceiveSummary)
                 ExampleMetricLine(
                     identifier: "client.metrics.latency", label: "估算延迟",
-                    value: "视频 \(session.videoOutputLatencySummary) · 音频 \(session.audioOutputLatencySummary)")
+                    value: "视频 \(session.videoOutputLatencySummary) · 音频 \(session.audioOutputLatencySummary)"
+                )
                 ExampleMetricLine(
                     identifier: "client.metrics.startup", label: "启动耗时",
-                    value: "连接 \(session.connectionDurationSummary) · 首帧 \(session.firstFrameDurationSummary)")
+                    value: "连接 \(session.connectionDurationSummary) · 首帧 \(session.firstFrameDurationSummary)"
+                )
                 ExampleMetricLine(
                     identifier: "client.metrics.stutter", label: "卡顿统计",
                     value:
@@ -614,43 +886,46 @@ private struct ExampleCommandPanel: View {
     @ObservedObject var session: ExampleSessionController
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            ExampleCommandConnectionPill(connected: session.conn?.state == .connected)
-            HStack {
-                Text("命令")
-                    .font(.system(size: 20, weight: .bold))
-                    .foregroundColor(ExampleColors.textPrimary)
-                    .accessibilityIdentifier("client.command_panel")
-                Spacer()
-                Button("关闭") {
-                    session.isCommandPanelPresented = false
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                ExampleCommandConnectionPill(connected: session.conn?.state == .connected)
+                HStack {
+                    Text("命令")
+                        .font(.title2.bold())
+                        .foregroundColor(ExampleColors.textPrimary)
+                        .accessibilityIdentifier("client.command_panel")
+                        .accessibilityAddTraits(.isHeader)
+                    Spacer()
+                    Button("关闭") {
+                        session.isCommandPanelPresented = false
+                    }
+                    .frame(minWidth: 44, minHeight: 44)
+                    .buttonStyle(.plain)
+                    .accessibilityIdentifier("client.command_panel.close")
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("client.command_panel.close")
-            }
-            ExampleCommandTextField(
-                title: "命令 ID",
-                text: $session.commandIdText,
-                accessibilityIdentifier: "client.command_panel.command_id"
-            )
-            ExampleSegmentedCommandField("payload_mode") {
-                Picker("payload_mode", selection: $session.commandPayloadMode) {
-                    Text("HEX").tag(ExampleCommandPanelPayloadMode.hex.rawValue)
-                    Text("文本").tag(ExampleCommandPanelPayloadMode.text.rawValue)
+                ExampleCommandTextField(
+                    title: "命令 ID",
+                    text: $session.commandIdText,
+                    accessibilityIdentifier: "client.command_panel.command_id"
+                )
+                ExampleSegmentedCommandField("payload_mode") {
+                    Picker("payload_mode", selection: $session.commandPayloadMode) {
+                        Text("HEX").tag(ExampleCommandPanelPayloadMode.hex.rawValue)
+                        Text("文本").tag(ExampleCommandPanelPayloadMode.text.rawValue)
+                    }
+                    .pickerStyle(.segmented)
                 }
-                .pickerStyle(.segmented)
-            }
-            ExampleCommandTextField(
-                title: "命令内容",
-                text: $session.commandPayloadText,
-                minHeight: 76,
-                accessibilityIdentifier: "client.command_panel.payload"
-            )
-            VStack(alignment: .leading, spacing: 8) {
+                ExampleCommandTextField(
+                    title: "命令内容",
+                    text: $session.commandPayloadText,
+                    minHeight: 76,
+                    accessibilityIdentifier: "client.command_panel.payload"
+                )
                 Text("常用命令")
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundColor(ExampleColors.textSecondary)
-                HStack(spacing: 8) {
+                    .accessibilityAddTraits(.isHeader)
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 108), spacing: 8)], spacing: 8) {
                     ExampleCommandPresetButton(title: "Echo", identifier: "client.command_panel.echo_preset") {
                         session.applyEchoCommandPreset()
                     }
@@ -673,12 +948,15 @@ private struct ExampleCommandPanel: View {
                         session.applyCallCommandPreset(.callReject)
                     }
                 }
-            }
-            ExamplePrimaryCommandButton(title: "发送", accessibilityIdentifier: "client.command_panel.send") {
-                session.sendCommandFromPanel()
-            }
-            Divider()
-            ScrollView {
+                ExamplePrimaryCommandButton(
+                    title: "发送", accessibilityIdentifier: "client.command_panel.send"
+                ) {
+                    session.sendCommandFromPanel()
+                }
+                Divider()
+                Text("收发记录")
+                    .font(.footnote.weight(.semibold))
+                    .foregroundColor(ExampleColors.textSecondary)
                 VStack(alignment: .leading, spacing: 8) {
                     ForEach(session.commandEvents) { event in
                         Text(
@@ -689,11 +967,13 @@ private struct ExampleCommandPanel: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
+                .frame(maxWidth: .infinity, minHeight: 90, alignment: .topLeading)
             }
-            .frame(minHeight: 90, maxHeight: 180)
+            .padding(20)
+            .frame(maxWidth: 620)
+            .frame(maxWidth: .infinity)
         }
-        .padding(20)
-        .frame(minWidth: 340)
+        .frame(minWidth: 320, minHeight: 480)
         .background(ExampleColors.background)
         .accessibilityElement(children: .contain)
     }
@@ -709,8 +989,8 @@ private struct ExampleCommandPresetButton: View {
             .buttonStyle(.plain)
             .font(.system(size: 12, weight: .semibold))
             .foregroundColor(ExampleColors.primary)
+            .frame(maxWidth: .infinity, minHeight: 44)
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
             .background(ExampleColors.primary.opacity(0.1))
             .clipShape(Capsule())
             .accessibilityIdentifier(identifier)
@@ -791,8 +1071,7 @@ private struct ExamplePrimaryCommandButton: View {
             Text(title)
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundColor(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
+                .frame(maxWidth: .infinity, minHeight: 44)
                 .background(ExampleColors.primary)
                 .clipShape(RoundedRectangle(cornerRadius: 10))
                 .accessibilityIdentifier(accessibilityIdentifier)
@@ -845,33 +1124,35 @@ private struct ExampleVideoGradient: View {
 #if os(iOS)
     private struct ExampleVideoSurface: UIViewRepresentable {
         @ObservedObject var session: ExampleSessionController
+        let streamId: UInt8
 
         func makeUIView(context: Context) -> UIView {
             let view = UIView()
             view.backgroundColor = .black
-            session.attachPlatformVideoView(view)
+            session.attachPlatformVideoView(view, streamId: streamId)
             return view
         }
 
         func updateUIView(_ uiView: UIView, context: Context) {
-            session.attachPlatformVideoView(uiView)
+            session.attachPlatformVideoView(uiView, streamId: streamId)
         }
     }
 
 #elseif os(macOS)
     private struct ExampleVideoSurface: NSViewRepresentable {
         @ObservedObject var session: ExampleSessionController
+        let streamId: UInt8
 
         func makeNSView(context: Context) -> NSView {
             let view = NSView()
             view.wantsLayer = true
             view.layer?.backgroundColor = NSColor.black.cgColor
-            session.attachPlatformVideoView(view)
+            session.attachPlatformVideoView(view, streamId: streamId)
             return view
         }
 
         func updateNSView(_ nsView: NSView, context: Context) {
-            session.attachPlatformVideoView(nsView)
+            session.attachPlatformVideoView(nsView, streamId: streamId)
         }
     }
 

@@ -89,7 +89,7 @@ struct ExampleApp: App {
                 }
             let window = NSWindow(
                 contentRect: ExampleMacOSWindowLayout.initialContentRect,
-                styleMask: [.titled, .closable, .miniaturizable],
+                styleMask: [.titled, .closable, .miniaturizable, .resizable],
                 backing: .buffered,
                 defer: false
             )
@@ -97,6 +97,7 @@ struct ExampleApp: App {
             window.contentView = NSHostingView(rootView: rootView)
             window.delegate = self
             ExampleMacOSWindowLayout.apply(to: window)
+            window.center()
             NSApplication.shared.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             window.makeMain()
@@ -105,31 +106,28 @@ struct ExampleApp: App {
     }
 
     private enum ExampleMacOSWindowLayout {
-        private static let aspectRatio: CGFloat = 19.5 / 9.0
-        private static let screenHeightFactor: CGFloat = 0.82
-        private static let maximumWindowHeight: CGFloat = 900
+        private static let defaultContentSize = NSSize(width: 1024, height: 700)
+        private static let minimumWindowSize = NSSize(width: 360, height: 560)
+        private static let screenMargin: CGFloat = 48
 
         @MainActor
-        static var initialContentRect: NSRect { NSRect(x: 0, y: 0, width: 360, height: 780) }
+        static var initialContentRect: NSRect {
+            guard let screen = NSScreen.main else {
+                return NSRect(origin: .zero, size: defaultContentSize)
+            }
+            let available = screen.visibleFrame.insetBy(dx: screenMargin, dy: screenMargin)
+            return NSRect(
+                origin: .zero,
+                size: NSSize(
+                    width: min(defaultContentSize.width, available.width),
+                    height: min(defaultContentSize.height, available.height)
+                )
+            )
+        }
 
         @MainActor
         static func apply(to window: NSWindow) {
-            guard let screen = NSScreen.main else {
-                return
-            }
-            let screenRect = screen.visibleFrame
-            let windowHeight = min(screenRect.height * screenHeightFactor, maximumWindowHeight)
-            let windowWidth = windowHeight / aspectRatio
-            let frame = NSRect(
-                x: screenRect.midX - (windowWidth / 2),
-                y: screenRect.midY - (windowHeight / 2),
-                width: windowWidth,
-                height: windowHeight
-            )
-
-            window.setFrame(frame, display: true)
-            window.minSize = NSSize(width: windowWidth, height: windowHeight)
-            window.maxSize = NSSize(width: windowWidth, height: windowHeight)
+            window.minSize = minimumWindowSize
             window.backgroundColor = NSColor(
                 calibratedRed: 1.0,
                 green: 0.9725,
@@ -137,7 +135,7 @@ struct ExampleApp: App {
                 alpha: 1.0
             )
             window.isOpaque = true
-            window.standardWindowButton(.zoomButton)?.isEnabled = false
+            window.standardWindowButton(.zoomButton)?.isEnabled = true
             window.isRestorable = false
         }
     }

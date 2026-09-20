@@ -8,6 +8,8 @@
 
 /* Begin PBXBuildFile section */
 		0EC6BE825EC29587E8CAF184 /* ExampleSessionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12A13B5B6E450424020A71 /* ExampleSessionSupport.swift */; };
+		0F5A9A116E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */; };
+		0F5A9A126E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */; };
 		133FDF9D7722E9C8FB067B11 /* ExampleUITestHarnessConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = A425A6DE707ACF6EAEF878E6 /* ExampleUITestHarnessConfig.swift */; };
 		19DF93B0C25B176C34F7A396 /* ExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8284363AAF7DDCE1CF9E726 /* ExampleUITests.swift */; };
 		1B5B625188336074417DFDA9 /* ExampleUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E8284363AAF7DDCE1CF9E726 /* ExampleUITests.swift */; };
@@ -67,6 +69,7 @@
 		00ACA4B9768A65ECAFA832D8 /* ExampleSceneStyle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleSceneStyle.swift; path = Sources/Example/ExampleSceneStyle.swift; sourceTree = "<group>"; };
 		011DBBB8743549AD3536ECCD /* ExampleApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleApp.swift; path = Sources/Example/ExampleApp.swift; sourceTree = "<group>"; };
 		035B9F21ECD2699B72442D9E /* ExampleMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ExampleMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleRawDumpButton.swift; path = Sources/Example/ExampleRawDumpButton.swift; sourceTree = "<group>"; };
 		21688C10276368282EAB6CF6 /* ExampleTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleTheme.swift; path = Sources/Example/ExampleTheme.swift; sourceTree = "<group>"; };
 		26BD31380DD12580F9DB8BE8 /* DarwinIntegrationMacOS.xctestplan */ = {isa = PBXFileReference; includeInIndex = 1; path = DarwinIntegrationMacOS.xctestplan; sourceTree = "<group>"; };
 		2D6C77AEB255D3AA485CECC1 /* ExampleModels.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleModels.swift; path = Sources/Example/ExampleModels.swift; sourceTree = "<group>"; };
@@ -186,6 +189,7 @@
 				011DBBB8743549AD3536ECCD /* ExampleApp.swift */,
 				392E43624911F05C70DFA230 /* ExampleConfigureViews.swift */,
 				2D6C77AEB255D3AA485CECC1 /* ExampleModels.swift */,
+				0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */,
 				849EB88C7CAC1B0636951B40 /* ExampleQRCodeScanner.swift */,
 				EDFDC397EA306C1C6D53C7C5 /* ExampleScene.swift */,
 				00ACA4B9768A65ECAFA832D8 /* ExampleSceneStyle.swift */,
@@ -427,6 +431,7 @@
 				0EC6BE825EC29587E8CAF184 /* ExampleSessionSupport.swift in Sources */,
 				846BF8127C066E600C073522 /* ExampleTheme.swift in Sources */,
 				B2E85882805A8C063902A750 /* ExampleVideoViews.swift in Sources */,
+				0F5A9A116E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -447,6 +452,7 @@
 				E2D01B2C7CF71DC9D5783ECF /* ExampleSessionSupport.swift in Sources */,
 				FAECDB889D85A87500D0FEC4 /* ExampleTheme.swift in Sources */,
 				D674AB4BC51F9B0A2C80A0E6 /* ExampleVideoViews.swift in Sources */,
+				0F5A9A126E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -502,8 +508,6 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphoneos*]" = "ios-arm64";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphonesimulator*]" = "ios-arm64-simulator";
 			};
 			name = Debug;
 		};
@@ -546,8 +550,6 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = ExampleIOS;
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphoneos*]" = "ios-arm64";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphonesimulator*]" = "ios-arm64-simulator";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;
@@ -591,8 +593,6 @@
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
 				TEST_TARGET_NAME = ExampleIOS;
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphoneos*]" = "ios-arm64";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphonesimulator*]" = "ios-arm64-simulator";
 			};
 			name = Debug;
 		};
@@ -630,8 +630,6 @@
 				SUPPORTS_MACCATALYST = NO;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphoneos*]" = "ios-arm64";
-				"TIRTC_IOS_XCFRAMEWORK_SLICE[sdk=iphonesimulator*]" = "ios-arm64-simulator";
 				VALIDATE_PRODUCT = YES;
 			};
 			name = Release;

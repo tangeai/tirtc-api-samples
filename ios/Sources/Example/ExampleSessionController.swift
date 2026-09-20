@@ -38,59 +38,89 @@ final class ExampleSessionController: NSObject, ObservableObject {
         let conn: TiRtcConn?
         let localAudioInput: TiRtcAudioInput?
         let audioOutput: TiRtcAudioOutput?
-        let videoOutput: TiRtcVideoOutput?
-        let audioStreamId: UInt8
-        let videoStreamId: UInt8
+        let videoOutputs: [TiRtcVideoOutput]
+        let audioStreamId: UInt8?
+        let videoStreamIds: [UInt8]
         let shouldShutdownRuntime: Bool
         let statusLogPath: String?
 
         var isEmpty: Bool {
-            conn == nil && localAudioInput == nil && audioOutput == nil && videoOutput == nil
+            conn == nil && localAudioInput == nil && audioOutput == nil && videoOutputs.isEmpty
                 && !shouldShutdownRuntime
         }
 
         // Both cleanup entry points run off the main actor: an in-flight iOS frame may be waiting
         // to present on the main thread while detachView waits for that frame to finish.
         func stopStreamingForConfigureRoute() {
-            _ = videoOutput?.detachView()
+            for output in videoOutputs { _ = output.detachView() }
             if let conn {
                 _ = localAudioInput?.detach(connection: conn)
             }
             _ = localAudioInput?.stop()
-            let videoUnsubscribeCode = conn?.unsubscribeVideo(streamId: videoStreamId) ?? 0
-            let audioUnsubscribeCode = conn?.unsubscribeAudio(streamId: audioStreamId) ?? 0
+            let videoUnsubscribeCodes = videoStreamIds.map { conn?.unsubscribeVideo(streamId: $0) ?? 0 }
+            let audioUnsubscribeCode = audioStreamId.map { conn?.unsubscribeAudio(streamId: $0) ?? 0 } ?? 0
             _ = conn?.disconnect()
-            _ = videoOutput?.detach()
+            for output in videoOutputs { _ = output.detach() }
             _ = audioOutput?.detach()
             localAudioInput?.dispose()
             ExampleSessionController.appendCallbackStatusLogLine(
-                "unsubscribe audio=\(audioUnsubscribeCode) video=\(videoUnsubscribeCode) audio_stream=\(audioStreamId) video_stream=\(videoStreamId)",
+                "unsubscribe audio=\(audioUnsubscribeCode) videos=\(videoUnsubscribeCodes) audio_stream=\(String(describing: audioStreamId)) video_streams=\(videoStreamIds)",
                 path: statusLogPath)
             ExampleSessionController.appendCallbackStatusLogLine("cleaned", path: statusLogPath)
         }
 
-        func cleanUp() {
-            _ = videoOutput?.detachView()
+        func cleanUp() -> Int32 {
+            let videoViewDetachCodes = videoOutputs.map { $0.detachView() }
+            let audioInputDetachCode: Int32
             if let conn {
-                _ = localAudioInput?.detach(connection: conn)
+                audioInputDetachCode = localAudioInput?.detach(connection: conn) ?? 0
+            } else {
+                audioInputDetachCode = 0
             }
-            _ = localAudioInput?.stop()
-            let videoUnsubscribeCode = conn?.unsubscribeVideo(streamId: videoStreamId) ?? 0
-            let audioUnsubscribeCode = conn?.unsubscribeAudio(streamId: audioStreamId) ?? 0
-            _ = conn?.disconnect()
-            _ = videoOutput?.detach()
-            _ = audioOutput?.detach()
-            videoOutput?.dispose()
-            audioOutput?.dispose()
-            localAudioInput?.dispose()
-            conn?.dispose()
-            if shouldShutdownRuntime {
-                _ = TiRtc.shutdown()
-            }
+            let audioInputStopCode = localAudioInput?.stop() ?? 0
+            let videoUnsubscribeCodes = videoStreamIds.map { conn?.unsubscribeVideo(streamId: $0) ?? 0 }
+            let audioUnsubscribeCode = audioStreamId.map { conn?.unsubscribeAudio(streamId: $0) ?? 0 } ?? 0
+            let disconnectCode = conn?.disconnect() ?? 0
+            let videoDetachCodes = videoOutputs.map { $0.detach() }
+            let audioDetachCode = audioOutput?.detach() ?? 0
+            let videoDisposeCodes = videoOutputs.map { $0.dispose() }
+            let audioDisposeCode = audioOutput?.dispose() ?? 0
+            let audioInputDisposeCode = localAudioInput?.dispose() ?? 0
+            let connectionDisposeCode = conn?.dispose() ?? 0
+            let shutdownCode = shouldShutdownRuntime ? TiRtc.shutdown() : 0
+            let cleanupCodes: [Int32] =
+                videoViewDetachCodes + [
+                    audioInputDetachCode,
+                    audioInputStopCode,
+                ] + videoUnsubscribeCodes + [
+                    audioUnsubscribeCode,
+                    disconnectCode,
+                ] + videoDetachCodes + [
+                    audioDetachCode
+                ] + videoDisposeCodes + [
+                    audioDisposeCode,
+                    audioInputDisposeCode,
+                    connectionDisposeCode,
+                    shutdownCode,
+                ]
+            let cleanupCode: Int32 = cleanupCodes.first(where: { $0 != 0 }) ?? 0
             ExampleSessionController.appendCallbackStatusLogLine(
-                "unsubscribe audio=\(audioUnsubscribeCode) video=\(videoUnsubscribeCode) audio_stream=\(audioStreamId) video_stream=\(videoStreamId)",
+                "unsubscribe audio=\(audioUnsubscribeCode) videos=\(videoUnsubscribeCodes) audio_stream=\(String(describing: audioStreamId)) video_streams=\(videoStreamIds)",
                 path: statusLogPath)
-            ExampleSessionController.appendCallbackStatusLogLine("cleaned", path: statusLogPath)
+            ExampleSessionController.appendCallbackStatusLogLine(
+                "client_cleanup_resources_released code=\(cleanupCode) "
+                    + "video_view_detach=\(videoViewDetachCodes) "
+                    + "audio_input_detach=\(audioInputDetachCode) "
+                    + "audio_input_stop=\(audioInputStopCode) "
+                    + "video_unsubscribe=\(videoUnsubscribeCodes) "
+                    + "audio_unsubscribe=\(audioUnsubscribeCode) "
+                    + "disconnect=\(disconnectCode) video_detach=\(videoDetachCodes) "
+                    + "audio_detach=\(audioDetachCode) video_dispose=\(videoDisposeCodes) "
+                    + "audio_dispose=\(audioDisposeCode) "
+                    + "audio_input_dispose=\(audioInputDisposeCode) "
+                    + "connection_dispose=\(connectionDisposeCode) shutdown=\(shutdownCode)",
+                path: statusLogPath)
+            return cleanupCode
         }
     }
 
@@ -103,11 +133,15 @@ final class ExampleSessionController: NSObject, ObservableObject {
     @Published var tokenSource = ExampleTokenSource.oneTime.rawValue
     @Published var tokenIssuerBaseUrl = ""
     @Published var audioStreamId = String(StreamDefaults.audio)
-    @Published var videoStreamId = String(StreamDefaults.video)
+    @Published var videoStreamIds = [String(StreamDefaults.video)]
+    @Published var selectedVideoStreamId: UInt8? = StreamDefaults.video
+    @Published var maximizedVideoStreamId: UInt8?
+    @Published var videoStates: [UInt8: TiRtcVideoOutputState] = [:]
     @Published var statusText = "idle"
     @Published var errorSummary: String?
     @Published var isClientVideoRendering = false
     @Published var isClientConnecting = false
+    @Published var isAudioOutputAvailable = false
     @Published var isClientPlayerActive = false
     @Published var isSettingsPresented = false
     @Published var metricsSummary = "metrics unavailable"
@@ -133,6 +167,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     @Published var commandEvents: [ExampleCommandPanelEvent] = []
     @Published var isLogUploadInProgress = false
     @Published var logUploadResult: ExampleLogUploadResult?
+    @Published var rawDumpButtonState = ExampleRawDumpButtonState.idle
     @Published var isMetricsExplanationPresented = false
     @Published var mediaParameterSummary = "--"
     @Published var videoReceiveSummary = "video receive unavailable"
@@ -156,18 +191,22 @@ final class ExampleSessionController: NSObject, ObservableObject {
     nonisolated(unsafe) var callbackStatusLogPath: String?
     var activeClientConfiguration: ExampleClientConfiguration?
     var conn: TiRtcConn?
+    var rawDump: TiRawDump?
+    var rawDumpArchiveReady = false
+    var rawDumpArchiveEvidence: TiRawDumpArchive?
     var clientLocalAudioInput: TiRtcAudioInput?
     var audioOutput: TiRtcAudioOutput?
-    var videoOutput: TiRtcVideoOutput?
+    var videoOutputs: [UInt8: TiRtcVideoOutput] = [:]
     var recordingTask: TiRtcRecordingTask?
+    private var recordingTargetStreamId: UInt8?
+    private var latestMediaTargetStreamId: UInt8?
     private var latestRecordingFile: TiRtcRecordingFile?
     private var latestSnapshotFile: TiRtcSnapshotFile?
     private var ownedRecordingFiles: [TiRtcRecordingFile] = []
     private var ownedSnapshotFiles: [TiRtcSnapshotFile] = []
     private var mediaOperationTask: Task<Void, Never>?
-    weak var platformVideoView: TiRtcPlatformView?
-    weak var attachedVideoOutput: TiRtcVideoOutput?
-    weak var attachedVideoView: TiRtcPlatformView?
+    var platformVideoViews: [UInt8: TiRtcPlatformView] = [:]
+    var attachedPlatformVideoViews: [UInt8: TiRtcPlatformView] = [:]
     var lastLoggedVideoOutputSize = CGSize.zero
     var initialized = false
     var pendingLocalEchoReplies = 0
@@ -177,6 +216,10 @@ final class ExampleSessionController: NSObject, ObservableObject {
     var audioOutputMuteStartedAt: Date?
     var audioOutputMuteStartDurationMs: Int64?
     var audioOutputMuteStartStatsMs: Int64?
+
+    var isSelectedVideoRendering: Bool {
+        selectedVideoStreamId.map { videoStates[$0] == .rendering } ?? false
+    }
 
     override init() {
         settingsStore = ExampleSettingsStore(userDefaults: .standard)
@@ -204,13 +247,22 @@ final class ExampleSessionController: NSObject, ObservableObject {
         disconnect()
     }
 
-    func attachPlatformVideoView(_ view: TiRtcPlatformView) {
-        platformVideoView = view
+    func attachPlatformVideoView(_ view: TiRtcPlatformView, streamId: UInt8) {
+        platformVideoViews[streamId] = view
         configurePlatformVideoView(view)
-        guard let videoOutput else {
+        guard videoStates[streamId] != .failed, let videoOutput = videoOutputs[streamId] else {
             return
         }
-        attachPlatformVideoViewIfNeeded(view, to: videoOutput)
+        attachPlatformVideoViewIfNeeded(view, to: videoOutput, streamId: streamId)
+    }
+
+    func selectVideoStream(_ streamId: UInt8) {
+        if selectedVideoStreamId == streamId {
+            maximizedVideoStreamId = maximizedVideoStreamId == streamId ? nil : streamId
+        } else {
+            selectedVideoStreamId = streamId
+            maximizedVideoStreamId = nil
+        }
     }
 
     func startClient() {
@@ -232,6 +284,8 @@ final class ExampleSessionController: NSObject, ObservableObject {
         persistClientSettings(configuration)
         isClientConnecting = true
         isClientVideoRendering = false
+        isAudioOutputAvailable = false
+        videoStates.removeAll()
         stopDiagnosticsRefreshLoop()
         isClientPlayerActive = true
         appendStatusLogLine("route_reached flow=client route=player")
@@ -288,7 +342,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
                             endpoint: seedConfiguration.endpoint,
                             remoteId: seedConfiguration.remoteId,
                             audioStreamId: seedConfiguration.audioStreamId,
-                            videoStreamId: seedConfiguration.videoStreamId,
+                            videoStreamIds: seedConfiguration.videoStreamIds,
                             token: token))
                 }
             }.resume()
@@ -314,6 +368,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     func restartClient() {
         Task { @MainActor [weak self] in
             guard let self else { return }
+            await self.finalizeRawDump(upload: false)
             await self.cleanUpLocalMediaFiles()
             await self.finishDisconnect()
             self.startClient()
@@ -324,9 +379,22 @@ final class ExampleSessionController: NSObject, ObservableObject {
         setStatus("teardown_requested flow=client")
         Task { @MainActor [weak self] in
             guard let self else { return }
+            await self.finalizeRawDump(upload: false)
             await self.cleanUpLocalMediaFiles()
-            self.finishStopClient()
+            if ProcessInfo.processInfo.environment["TIRTC_EXAMPLE_FULL_CLEANUP_ON_STOP"] == "1" {
+                await self.finishStopClientWithFullCleanup()
+            } else {
+                self.finishStopClient()
+            }
         }
+    }
+
+    private func finishStopClientWithFullCleanup() async {
+        let resources = takeClientCleanupResources(shouldShutdownRuntime: initialized)
+        resetClientStateAfterStop()
+        appendStatusLogLine("route_reached flow=client route=configure")
+        let cleanupCode = await cleanUpClientResources(resources)
+        finishClientCleanup(code: cleanupCode)
     }
 
     private func finishStopClient() {
@@ -334,12 +402,19 @@ final class ExampleSessionController: NSObject, ObservableObject {
         if let resources {
             retiredClientCleanupResources.append(resources)
         }
+        resetClientStateAfterStop()
+        appendStatusLogLine("route_reached flow=client route=configure")
+        scheduleClientStop(resources)
+    }
+
+    private func resetClientStateAfterStop() {
         isClientConnecting = false
         isClientVideoRendering = false
+        isAudioOutputAvailable = false
         isClientLocalAudioBusy = false
         isClientLocalAudioRunning = false
         isAudioOutputMuted = false
-        audioOutputVolumeStatus = "audible"
+        audioOutputVolumeStatus = "unavailable"
         audioOutputMuteStartedAt = nil
         audioOutputMuteStartDurationMs = nil
         audioOutputMuteStartStatsMs = nil
@@ -347,8 +422,6 @@ final class ExampleSessionController: NSObject, ObservableObject {
         stopDiagnosticsRefreshLoop()
         isClientPlayerActive = false
         clearUserFacingError()
-        appendStatusLogLine("route_reached flow=client route=configure")
-        scheduleClientStop(resources)
     }
 
     func toggleClientLocalAudio() {
@@ -411,6 +484,8 @@ final class ExampleSessionController: NSObject, ObservableObject {
         guard !isMediaFileBusy else { return }
         if let task = recordingTask {
             isMediaFileBusy = true
+            let targetStreamId = recordingTargetStreamId
+            recordingTargetStreamId = nil
             mediaOperationTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 let result = await task.stop()
@@ -419,6 +494,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
                 self.isMediaFileBusy = false
                 if result.code == 0 {
                     self.latestRecordingFile = result.file
+                    self.latestMediaTargetStreamId = targetStreamId
                     self.latestSnapshotFile = nil
                     self.hasLatestMedia = result.file != nil
                     if let file = result.file {
@@ -435,25 +511,30 @@ final class ExampleSessionController: NSObject, ObservableObject {
             }
             return
         }
-        guard let conn, let configuration = activeClientConfiguration else {
+        guard let conn, let configuration = activeClientConfiguration,
+            let targetStreamId = selectedVideoStreamId
+        else {
             setStatus("开始本地保存失败 · 播放未就绪")
             return
         }
         let result = conn.startRecording(
-            videoStreamId: Int32(configuration.videoStreamId),
-            audioStreamId: NSNumber(value: configuration.audioStreamId))
+            videoStreamId: Int32(targetStreamId),
+            audioStreamId: configuration.audioStreamId.map { NSNumber(value: $0) })
         guard result.code == 0, let task = result.task else {
             setStatus("开始本地保存失败 · code=\(result.code)")
             return
         }
         recordingTask = task
+        recordingTargetStreamId = targetStreamId
         isRecording = true
         setStatus("正在本地保存")
         appendStatusLogLine("media_recording_start code=0")
     }
 
     func takeSnapshot() {
-        guard !isMediaFileBusy, let videoOutput else { return }
+        guard !isMediaFileBusy, let streamId = selectedVideoStreamId,
+            let videoOutput = videoOutputs[streamId]
+        else { return }
         isMediaFileBusy = true
         mediaOperationTask = Task { @MainActor [weak self] in
             guard let self else { return }
@@ -466,6 +547,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
                 return
             }
             self.latestSnapshotFile = file
+            self.latestMediaTargetStreamId = streamId
             self.latestRecordingFile = nil
             self.hasLatestMedia = true
             self.ownedSnapshotFiles.append(file)
@@ -484,7 +566,8 @@ final class ExampleSessionController: NSObject, ObservableObject {
         isMediaFileBusy = true
         mediaOperationTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            let publishCode = await Self.publishToPhotos(path: path, isVideo: recording != nil)
+            let publishCode = await Self.publishToPhotos(
+                path: path, isVideo: recording != nil, targetId: latestMediaTargetStreamId ?? 0)
             let deleteCode: Int32
             if publishCode == 0 {
                 deleteCode = recording != nil ? await recording!.delete() : await snapshot!.delete()
@@ -497,6 +580,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
                 self.latestRecordingFile = nil
                 self.latestSnapshotFile = nil
                 self.hasLatestMedia = false
+                self.latestMediaTargetStreamId = nil
             }
             self.isMediaFileBusy = false
             self.setStatus(deleteCode == 0 ? "已保存到系统相册" : "保存到相册失败 · code=\(deleteCode)")
@@ -505,7 +589,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
         }
     }
 
-    nonisolated private static func publishToPhotos(path: String, isVideo: Bool) async -> Int32 {
+    nonisolated private static func publishToPhotos(path: String, isVideo: Bool, targetId: UInt8) async -> Int32 {
         var authorization = PHPhotoLibrary.authorizationStatus(for: .addOnly)
         if authorization == .notDetermined {
             authorization = await withCheckedContinuation { continuation in
@@ -515,18 +599,28 @@ final class ExampleSessionController: NSObject, ObservableObject {
             }
         }
         guard authorization == .authorized || authorization == .limited else { return -1 }
-        return await withCheckedContinuation { continuation in
+        let source = URL(fileURLWithPath: path)
+        let alias = FileManager.default.temporaryDirectory.appendingPathComponent(
+            "tirtc-\(isVideo ? "recording" : "snapshot")-stream-\(targetId).\(isVideo ? "mp4" : "jpg")")
+        do {
+            try? FileManager.default.removeItem(at: alias)
+            try FileManager.default.copyItem(at: source, to: alias)
+        } catch {
+            return -1
+        }
+        let result: Int32 = await withCheckedContinuation { continuation in
             PHPhotoLibrary.shared().performChanges {
-                let url = URL(fileURLWithPath: path)
                 if isVideo {
-                    _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                    _ = PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: alias)
                 } else {
-                    _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: url)
+                    _ = PHAssetChangeRequest.creationRequestForAssetFromImage(atFileURL: alias)
                 }
             } completionHandler: { success, _ in
                 continuation.resume(returning: success ? 0 : -1)
             }
         }
+        try? FileManager.default.removeItem(at: alias)
+        return result
     }
 
     private func startClientLocalAudio() {
@@ -569,7 +663,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
             self.isClientLocalAudioBusy = false
             self.isClientLocalAudioRunning = optionsCode == 0 && startCode == 0 && attachCode == 0
             let status =
-                "client.local_audio started stream=\(streamId) options=\(optionsCode) start=\(startCode) attach=\(attachCode) codec=\(options.codec.rawValue) sample_rate_hz=\(options.sampleRate.rawValue) aec=\(options.aecMode.rawValue) agc=\(options.agcLevel.rawValue) ans=\(options.ansLevel.rawValue)"
+                "client.local_audio started stream=\(streamId) options=\(optionsCode) start=\(startCode) attach=\(attachCode) nano_media=\(options.media) sample_rate_hz=\(options.sampleRate.rawValue) aec=\(options.aecMode.rawValue) agc=\(options.agcLevel.rawValue) ans=\(options.ansLevel.rawValue)"
             self.clientLocalAudioStatus = status
             self.appendStatusLogLine(status)
             if !self.isClientLocalAudioRunning {
@@ -606,32 +700,44 @@ final class ExampleSessionController: NSObject, ObservableObject {
         lastLoggedVideoOutputSize = .zero
 
         let initCode = initializeIfNeeded()
-        guard initCode == 0, let conn, let audioOutput, let videoOutput else {
+        guard initCode == 0, let conn else {
             return
         }
 
         let audioStreamId = configuration.audioStreamId
-        let videoStreamId = configuration.videoStreamId
-        let audioCode = audioOutput.attach(connection: conn, streamId: audioStreamId)
-        let videoCode = videoOutput.attach(connection: conn, streamId: videoStreamId)
-        if let platformVideoView {
-            let viewCode = attachPlatformVideoViewIfNeeded(platformVideoView, to: videoOutput)
-            if viewCode != 0 {
-                showUserFacingError(code: viewCode, context: "attach view")
+        var audioCode: Int32 = 0
+        if let audioStreamId, isAudioOutputAvailable, let audioOutput {
+            audioCode = audioOutput.attach(connection: conn, streamId: audioStreamId)
+        }
+        if audioStreamId != nil, audioCode != 0 {
+            isAudioOutputAvailable = false
+            audioOutputVolumeStatus = "failed attach code=\(audioCode)"
+            appendStatusLogLine("audio-output-failed phase=attach code=\(audioCode)")
+        }
+        var videoCodes: [UInt8: Int32] = [:]
+        for videoStreamId in configuration.videoStreamIds {
+            guard videoStates[videoStreamId] != .failed,
+                let videoOutput = videoOutputs[videoStreamId]
+            else { continue }
+            let videoCode = videoOutput.attach(connection: conn, streamId: videoStreamId)
+            videoCodes[videoStreamId] = videoCode
+            guard videoCode == 0 else {
+                videoStates[videoStreamId] = .failed
+                appendStatusLogLine(
+                    "video-output-failed phase=attach stream_id=\(videoStreamId) code=\(videoCode)")
+                continue
+            }
+            if let platformVideoView = platformVideoViews[videoStreamId] {
+                _ = attachPlatformVideoViewIfNeeded(
+                    platformVideoView, to: videoOutput, streamId: videoStreamId)
             }
         }
         let connectCode = conn.connect(remoteId: configuration.remoteId, token: configuration.token)
         setStatus("connecting to \(configuration.remoteId)")
         appendStatusLogLine(
-            "connect-start remote_id=\(configuration.remoteId) audio=\(audioCode) video=\(videoCode) connect=\(connectCode)"
+            "connect-start remote_id=\(configuration.remoteId) audio=\(audioCode) videos=\(videoCodes) connect=\(connectCode)"
         )
 
-        if audioCode != 0 {
-            showUserFacingError(code: audioCode, context: "audio attach")
-        }
-        if videoCode != 0 {
-            showUserFacingError(code: videoCode, context: "video attach")
-        }
         if connectCode != 0 {
             showUserFacingError(code: connectCode, context: "connect")
         }
@@ -639,17 +745,31 @@ final class ExampleSessionController: NSObject, ObservableObject {
 
     func subscribeDownlink(_ activeConnection: TiRtcConn) {
         let audioStreamId = resolvedAudioStreamId()
-        let videoStreamId = resolvedVideoStreamId()
-        let audioCode = activeConnection.subscribeAudio(streamId: audioStreamId)
-        let videoCode = activeConnection.subscribeVideo(streamId: videoStreamId)
-        appendStatusLogLine(
-            "subscribe audio=\(audioCode) video=\(videoCode) audio_stream=\(audioStreamId) video_stream=\(videoStreamId)"
-        )
-        if audioCode != 0 {
-            showUserFacingError(code: audioCode, context: "audio subscribe")
+        let videoStreamIds = resolvedVideoStreamIds()
+        var audioCode: Int32 = 0
+        if let audioStreamId, isAudioOutputAvailable {
+            audioCode = activeConnection.subscribeAudio(streamId: audioStreamId)
         }
-        if videoCode != 0 {
-            showUserFacingError(code: videoCode, context: "video subscribe")
+        if audioStreamId != nil, audioCode != 0 {
+            isAudioOutputAvailable = false
+            audioOutputVolumeStatus = "failed subscribe code=\(audioCode)"
+            appendStatusLogLine("audio-output-failed phase=subscribe code=\(audioCode)")
+        }
+        var videoCodes: [UInt8: Int32] = [:]
+        for streamId in videoStreamIds where videoStates[streamId] != .failed {
+            let code = activeConnection.subscribeVideo(streamId: streamId)
+            videoCodes[streamId] = code
+            if code != 0 {
+                videoStates[streamId] = .failed
+                appendStatusLogLine(
+                    "video-output-failed phase=subscribe stream_id=\(streamId) code=\(code)")
+            }
+        }
+        appendStatusLogLine(
+            "subscribe audio=\(audioCode) videos=\(videoCodes) audio_stream=\(String(describing: audioStreamId)) video_streams=\(videoStreamIds)"
+        )
+        if !videoStreamIds.contains(where: { videoStates[$0] != .failed }) {
+            isClientConnecting = false
         }
     }
 
@@ -657,6 +777,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
         appendStatusLogLine("teardown_requested flow=client")
         Task { @MainActor [weak self] in
             guard let self else { return }
+            await self.finalizeRawDump(upload: false)
             await self.cleanUpLocalMediaFiles()
             await self.finishDisconnect()
         }
@@ -664,39 +785,54 @@ final class ExampleSessionController: NSObject, ObservableObject {
 
     private func finishDisconnect() async {
         let resources = takeClientCleanupResources(shouldShutdownRuntime: initialized)
-        if let resources {
-            await withCheckedContinuation { continuation in
-                Self.clientCleanupQueue.async {
-                    resources.cleanUp()
-                    continuation.resume()
-                }
+        let cleanupCode = await cleanUpClientResources(resources)
+        finishClientCleanup(code: cleanupCode)
+    }
+
+    private func cleanUpClientResources(_ resources: ClientCleanupResources?) async -> Int32 {
+        guard let resources else { return 0 }
+        return await withCheckedContinuation { continuation in
+            Self.clientCleanupQueue.async {
+                continuation.resume(returning: resources.cleanUp())
             }
         }
-        clearUserFacingError()
-        setStatus("cleaned")
+    }
+
+    private func finishClientCleanup(code: Int32) {
+        if code == 0 {
+            clearUserFacingError()
+            setStatus("cleaned")
+        } else {
+            showUserFacingError(code: code, context: "client cleanup")
+            setStatus("cleanup failed: \(TiRtc.formatError(code))")
+        }
     }
 
     private func takeClientCleanupResources(shouldShutdownRuntime: Bool) -> ClientCleanupResources? {
-        attachedVideoOutput = nil
-        attachedVideoView = nil
+        attachedPlatformVideoViews.removeAll()
         conn?.delegate = nil
         clientLocalAudioInput?.delegate = nil
         audioOutput?.delegate = nil
-        videoOutput?.delegate = nil
+        for output in videoOutputs.values { output.delegate = nil }
         let resources = ClientCleanupResources(
             conn: conn,
             localAudioInput: clientLocalAudioInput,
             audioOutput: audioOutput,
-            videoOutput: videoOutput,
+            videoOutputs: Array(videoOutputs.values),
             audioStreamId: resolvedAudioStreamId(),
-            videoStreamId: resolvedVideoStreamId(),
+            videoStreamIds: resolvedVideoStreamIds(),
             shouldShutdownRuntime: shouldShutdownRuntime,
             statusLogPath: callbackStatusLogPath)
         conn = nil
         clientLocalAudioInput = nil
         audioOutput = nil
-        videoOutput = nil
+        videoOutputs.removeAll()
+        platformVideoViews.removeAll()
         activeClientConfiguration = nil
+        isAudioOutputAvailable = false
+        videoStates.removeAll()
+        selectedVideoStreamId = nil
+        maximizedVideoStreamId = nil
 
         if resources.shouldShutdownRuntime {
             initialized = false
@@ -780,47 +916,71 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     private func prepareClientResourcesIfNeeded() {
-        guard activeClientConfiguration != nil, conn == nil, audioOutput == nil, videoOutput == nil else {
+        guard let configuration = activeClientConfiguration, conn == nil, audioOutput == nil,
+            videoOutputs.isEmpty
+        else {
             return
         }
         let conn = TiRtcConn(delegate: self)
-        let audioOutput = TiRtcAudioOutput()
-        let videoOutput = TiRtcVideoOutput()
-        audioOutput.delegate = self
-        videoOutput.delegate = self
+        let audioOutput = configuration.audioStreamId.map { _ in TiRtcAudioOutput() }
+        let videoOutputs = Dictionary(
+            uniqueKeysWithValues: configuration.videoStreamIds.map { ($0, TiRtcVideoOutput()) })
+        audioOutput?.delegate = self
+        for output in videoOutputs.values { output.delegate = self }
         let audioOptions = TiRtcAudioOutputOptions()
         audioOptions.bufferStrategy = resolvedOutputBufferStrategy()
-        let audioOptionsCode = audioOutput.configure(audioOptions)
+        let audioOptionsCode = audioOutput?.configure(audioOptions) ?? 0
         let videoOptions = TiRtcVideoOutputOptions()
         videoOptions.decoderPreference =
             (ExampleVideoDecoderPreference(rawValue: decoderPreference) ?? .automatic).sdkValue
         videoOptions.bufferStrategy = resolvedOutputBufferStrategy()
-        let videoOptionsCode = videoOutput.setOptions(videoOptions)
+        let videoOptionCodes = videoOutputs.mapValues { $0.setOptions(videoOptions) }
         appendStatusLogLine(
-            "client_output_options audio=\(audioOptionsCode) video=\(videoOptionsCode) decoderPreference=\(decoderPreference)"
+            "client_output_options audio=\(audioOptionsCode) videos=\(videoOptionCodes) decoderPreference=\(decoderPreference)"
         )
         self.conn = conn
         self.audioOutput = audioOutput
-        self.videoOutput = videoOutput
+        self.videoOutputs = videoOutputs
+        selectedVideoStreamId = configuration.videoStreamIds.first
         isAudioOutputMuted = false
-        audioOutputVolumeStatus = "audible"
+        isAudioOutputAvailable = audioOutput != nil && audioOptionsCode == 0
+        audioOutputVolumeStatus = isAudioOutputAvailable ? "audible" : "unavailable"
+        videoStates = videoOptionCodes.mapValues { $0 == 0 ? .idle : .failed }
+        for (streamId, code) in videoOptionCodes where code != 0 {
+            appendStatusLogLine(
+                "video-output-failed phase=configure stream_id=\(streamId) code=\(code)")
+        }
+        if configuration.audioStreamId != nil, audioOptionsCode != 0 {
+            audioOutputVolumeStatus = "failed configure code=\(audioOptionsCode)"
+            appendStatusLogLine("audio-output-failed phase=configure code=\(audioOptionsCode)")
+        }
 
-        if let platformVideoView {
-            let attachCode = attachPlatformVideoViewIfNeeded(platformVideoView, to: videoOutput)
-            if attachCode != 0 {
-                showUserFacingError(code: attachCode, context: "attach view")
+        for (streamId, view) in platformVideoViews {
+            if videoStates[streamId] != .failed, let output = videoOutputs[streamId] {
+                _ = attachPlatformVideoViewIfNeeded(view, to: output, streamId: streamId)
             }
         }
     }
 
     private func applyEnvironmentPayloadIfPresent() {
+        switch ProcessInfo.processInfo.environment["TIRTC_EXAMPLE_DECODER_PREFERENCE"] {
+        case "software":
+            decoderPreference = ExampleVideoDecoderPreference.software.rawValue
+        case "hardware":
+            decoderPreference = ExampleVideoDecoderPreference.hardware.rawValue
+        case "automatic", "auto":
+            decoderPreference = ExampleVideoDecoderPreference.automatic.rawValue
+        default:
+            break
+        }
         guard let configuration = clientConfigurationFromEnvironment() else {
             return
         }
         apply(configuration)
         setStatus("payload loaded for \(configuration.remoteId)")
+        let audioStreamDescription = configuration.audioStreamId.map(String.init) ?? "none"
         appendStatusLogLine(
-            "payload loaded remote_id=\(configuration.remoteId) audio_stream=\(configuration.audioStreamId) video_stream=\(configuration.videoStreamId) message_stream=\(resolvedMessageStreamId())"
+            "payload loaded remote_id=\(configuration.remoteId) audio_stream=\(audioStreamDescription) video_stream=\(configuration.videoStreamId) message_stream=\(resolvedMessageStreamId())"
         )
     }
 
@@ -840,12 +1000,12 @@ final class ExampleSessionController: NSObject, ObservableObject {
         }
     }
 
-    private func resolvedAudioStreamId() -> UInt8 {
-        activeClientConfiguration?.audioStreamId ?? StreamDefaults.audio
+    private func resolvedAudioStreamId() -> UInt8? {
+        activeClientConfiguration?.audioStreamId
     }
 
-    private func resolvedVideoStreamId() -> UInt8 {
-        activeClientConfiguration?.videoStreamId ?? StreamDefaults.video
+    private func resolvedVideoStreamIds() -> [UInt8] {
+        activeClientConfiguration?.videoStreamIds ?? []
     }
 
     private func resolvedMessageStreamId() -> UInt8 {
@@ -861,15 +1021,15 @@ final class ExampleSessionController: NSObject, ObservableObject {
         let options = TiRtcAudioInputOptions()
         switch ExampleAudioCodec(rawValue: localAudioCodec) ?? .g711a {
         case .g711a:
-            options.codec = .g711a
+            options.media = 2
         case .aac:
-            options.codec = .aac
+            options.media = 3
         case .pcm:
-            options.codec = .pcm
+            options.media = 1
         case .opus:
-            options.codec = .opus
+            options.media = 4
         case .amr:
-            options.codec = .amr
+            options.media = 5
         }
         options.sampleRate =
             Int(localAudioSampleRate).flatMap { ExampleAudioSampleRate(rawValue: $0) } == .rate8k
@@ -960,24 +1120,25 @@ final class ExampleSessionController: NSObject, ObservableObject {
 
     @discardableResult
     private func attachPlatformVideoViewIfNeeded(
-        _ view: TiRtcPlatformView, to videoOutput: TiRtcVideoOutput
+        _ view: TiRtcPlatformView, to videoOutput: TiRtcVideoOutput, streamId: UInt8
     ) -> Int32 {
-        if attachedVideoOutput === videoOutput, attachedVideoView === view {
+        if attachedPlatformVideoViews[streamId] === view {
             return 0
         }
-        if let attachedVideoOutput {
-            _ = attachedVideoOutput.detachView()
-        }
-        attachedVideoOutput = nil
-        attachedVideoView = nil
+        if attachedPlatformVideoViews[streamId] != nil { _ = videoOutput.detachView() }
         let attachCode = videoOutput.attachView(view)
         if attachCode != 0 {
-            showUserFacingError(code: attachCode, context: "attach view")
+            videoStates[streamId] = .failed
+            isClientVideoRendering = videoStates.values.contains(.rendering)
+            if !videoStates.values.contains(where: { $0 != .failed }) {
+                isClientConnecting = false
+            }
+            appendStatusLogLine(
+                "video-output-failed phase=attach-view stream_id=\(streamId) code=\(attachCode)")
             return attachCode
         }
-        attachedVideoOutput = videoOutput
-        attachedVideoView = view
-        appendStatusLogLine("render_surface_attached flow=client")
+        attachedPlatformVideoViews[streamId] = view
+        appendStatusLogLine("render_surface_attached flow=client stream_id=\(streamId)")
         return 0
     }
 
