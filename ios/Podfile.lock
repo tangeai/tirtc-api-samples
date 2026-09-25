@@ -1,16 +1,16 @@
 PODS:
-  - TiRTC (2.5.2)
+  - TiRTC (2.5.3)
 
 DEPENDENCIES:
-  - TiRTC (= 2.5.2)
+  - TiRTC (= 2.5.3)
 
 SPEC REPOS:
   https://github.com/CocoaPods/Specs.git:
     - TiRTC
 
 SPEC CHECKSUMS:
-  TiRTC: 1356d3dfc4c430bfcdc23bbba633f994b7c38081
+  TiRTC: fa4f971f56b48d2d87462b8411d7b92aec7d8f5a
 
-PODFILE CHECKSUM: 0fc996e77cf7ad9f49dc2e1af7215a7d389505e9
+PODFILE CHECKSUM: 7eaae1e4172af04b7551c3f7cd8b823d6a1968c6
 
 COCOAPODS: 1.16.2
