@@ -101,7 +101,7 @@ export struct DownlinkPlayerPage {
       logUploadAnchor: 'tirtc_example_player_log_upload_button',
       onBack: this.onBack,
       commandEnabled: this.playing,
-      logUploadEnabled: this.playing,
+      logUploadEnabled: true,
       onSendCommand: () => {
         this.commandPanelVisible = true;
       },

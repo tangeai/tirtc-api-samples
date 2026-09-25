@@ -547,7 +547,8 @@ export class DownlinkRoleSession {
       const result = await TiRtcLogging.upload();
       const elapsedMs = Math.max(0, Date.now() - startedAtMs);
       this.callbacks.onLogUploadStatusChanged?.(
-        result.code === 0 ? 'log_upload=已上传' : `log_upload=失败 #${result.code}`);
+        result.code === 0 ? `log_upload=已上传 · ${result.logId ?? ''}` :
+          `log_upload=失败 #${result.code}`);
       hilog.info(LOG_DOMAIN, LOG_TAG,
         'TIRTC_downlink_log_upload_done code=%{public}d elapsed_ms=%{public}d log_id_present=%{public}s',
         result.code, elapsedMs, result.logId === undefined || result.logId.length === 0 ? 'false' : 'true');

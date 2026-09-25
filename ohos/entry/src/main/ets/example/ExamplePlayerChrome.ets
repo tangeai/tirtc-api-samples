@@ -293,7 +293,9 @@ export struct LogUploadNotice {
       return '';
     }
     if (this.status.indexOf('已上传') >= 0) {
-      return '日志上传成功';
+      const separator = this.status.indexOf('·');
+      const logId = separator >= 0 ? this.status.substring(separator + 1).trim() : '';
+      return logId.length > 0 ? `日志上传成功 · ${logId}` : '日志上传成功';
     }
     if (this.status.indexOf('上传中') >= 0) {
       return '日志上传中';
