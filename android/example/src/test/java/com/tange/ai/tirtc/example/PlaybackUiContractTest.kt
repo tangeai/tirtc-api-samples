@@ -79,6 +79,19 @@ class PlaybackUiContractTest {
     }
 
     @Test
+    fun `gallery cleanup retry does not publish the same media twice`() {
+        var state = GalleryPublishState.NEEDS_PUBLISH
+        var publishCount = 0
+
+        if (shouldPublishToGallery(state)) publishCount += 1
+        state = GalleryPublishState.PUBLISHED_PENDING_DELETE
+        // Source deletion fails. The retained item is retried from its cleanup state.
+        if (shouldPublishToGallery(state)) publishCount += 1
+
+        assertEquals(1, publishCount)
+    }
+
+    @Test
     fun `calendar keeps visual dots and complete accessibility state`() {
         assertEquals("9\n●", calendarDayText(9, available = true))
         assertEquals("2026-09-09，有录像，已选择", calendarDayDescription("2026-09-09", available = true, selected = true))

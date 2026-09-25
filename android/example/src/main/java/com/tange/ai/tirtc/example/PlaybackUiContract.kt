@@ -40,6 +40,10 @@ internal data class PlaybackActionState(
 
 internal enum class PlaybackMediaAction { RECORDING, SNAPSHOT, GALLERY }
 
+internal enum class GalleryPublishState { NEEDS_PUBLISH, PUBLISHED_PENDING_DELETE }
+
+internal fun shouldPublishToGallery(state: GalleryPublishState): Boolean = state == GalleryPublishState.NEEDS_PUBLISH
+
 internal fun rtcActionEnabled(action: PlaybackMediaAction, state: PlaybackActionState): Boolean =
     when (action) {
         PlaybackMediaAction.RECORDING -> !state.busy && (state.recording || state.selectedVideoReady)

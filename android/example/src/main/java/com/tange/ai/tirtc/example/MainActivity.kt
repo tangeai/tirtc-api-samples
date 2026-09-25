@@ -39,6 +39,9 @@ import com.tange.ai.tirtc.TiCloudStorageErrorCode
 import com.tange.ai.tirtc.TiCloudStorageRecordingRange
 import com.tange.ai.tirtc.TiCloudStorageReplaySpeed
 import com.tange.ai.tirtc.TiCloudStorageVideoOutputState
+import com.tange.ai.tirtc.TiRawDump
+import com.tange.ai.tirtc.TiRawDumpArchive
+import com.tange.ai.tirtc.TiRawDumpStartCallback
 import com.tange.ai.tirtc.TiRtc
 import com.tange.ai.tirtc.TiRtcAudioInput
 import com.tange.ai.tirtc.TiRtcAudioOutput
@@ -56,9 +59,6 @@ import com.tange.ai.tirtc.TiRtcInputErrorListener
 import com.tange.ai.tirtc.TiRtcInputStateListener
 import com.tange.ai.tirtc.TiRtcLogUploadCallback
 import com.tange.ai.tirtc.TiRtcLogging
-import com.tange.ai.tirtc.TiRawDump
-import com.tange.ai.tirtc.TiRawDumpArchive
-import com.tange.ai.tirtc.TiRawDumpStartCallback
 import com.tange.ai.tirtc.TiRtcRawDumpOptions
 import com.tange.ai.tirtc.TiRtcRecordingFile
 import com.tange.ai.tirtc.TiRtcRecordingTask
@@ -69,10 +69,10 @@ import com.tange.ai.tirtc.TiRtcVideoOutputOptions
 import com.tange.ai.tirtc.TiRtcVideoOutputRenderSizeListener
 import com.tange.ai.tirtc.TiRtcVideoOutputState
 import com.tange.ai.tirtc.TiRtcVideoOutputStateListener
+import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Locale
-import org.json.JSONObject
 import java.util.TimeZone
 import java.util.Timer
 import java.util.TimerTask
@@ -114,10 +114,16 @@ class MainActivity : AppCompatActivity() {
     private var playerOutputMuted = false
     private var playerRecordingTask: TiRtcRecordingTask? = null
     private var playerLatestMediaFile: Any? = null
+    private var playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
     private var playerGalleryButton: View? = null
     private var playerMoreButton: TextView? = null
     private val playerOwnedMediaFiles = mutableSetOf<Any>()
     private var playerMediaBusy = false
+    private var playerStopPending = false
+    private var playerStopClearPageRefs = false
+    private var playerStopInFlight = false
+    private val playerStopCallbacks = mutableListOf<() -> Unit>()
+    private var navigationGeneration = 0
     private var metricsTimer: Timer? = null
     private var playerSessionGeneration = 0
     private var statusView: TextView? = null
@@ -129,6 +135,8 @@ class MainActivity : AppCompatActivity() {
     private var activeScanner: DecoratedBarcodeView? = null
     private var scannerProcessing = false
     private var cloudStorageFlow: TiCloudStorageExampleFlow? = null
+    private var closingCloudStorageFlow: TiCloudStorageExampleFlow? = null
+    private val cloudStorageCloseCallbacks = mutableListOf<() -> Unit>()
     private var cloudStorageSelectedRange: TiCloudStorageRecordingRange? = null
     private val cloudStorageSelectedDate: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
     private val cloudStorageVisibleMonth: Calendar = Calendar.getInstance(TimeZone.getTimeZone("Asia/Shanghai"))
@@ -180,6 +188,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        navigationGeneration += 1
         clearActiveScanner()
         closeCloudStorageFlow()
         stopPlayer()
@@ -187,14 +196,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showConfigure() {
+        val generation = ++navigationGeneration
         clearActiveScanner()
-        closeCloudStorageFlow()
-        stopPlayer()
         statusView = null
-        if (configureProduct == ConfigureProduct.CLOUD_STORAGE) {
-            showCloudStorageConfigure()
-        } else {
-            showRtcConfigure()
+        closeCloudStorageFlow {
+            stopPlayer {
+                if (generation != navigationGeneration || isFinishing || isDestroyed) return@stopPlayer
+                if (configureProduct == ConfigureProduct.CLOUD_STORAGE) {
+                    showCloudStorageConfigure()
+                } else {
+                    showRtcConfigure()
+                }
+            }
         }
     }
 
@@ -218,6 +231,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }.toMutableList()
         val videoFieldsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
         fun rebuildVideoFields() {
             videoFieldsContainer.removeAllViews()
             videoStreamFields.forEachIndexed { index, field ->
@@ -364,6 +378,7 @@ class MainActivity : AppCompatActivity() {
                     )
                 }.toMutableList()
         val videoChannelsContainer = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
+
         fun rebuildVideoChannels() {
             videoChannelsContainer.removeAllViews()
             videoChannelFields.forEachIndexed { index, field ->
@@ -502,7 +517,7 @@ class MainActivity : AppCompatActivity() {
                 id = R.id.cloud_storage_snapshot_button
             }
         val gallery =
-            playbackControlButton("□", "保存到系统相册") { saveCloudStorageMediaToGallery(flow) }.apply {
+            playbackControlButton("□", "重试保存到系统相册") { saveCloudStorageMediaToGallery(flow) }.apply {
                 id = R.id.cloud_storage_gallery_button
             }
         val mute =
@@ -536,7 +551,8 @@ class MainActivity : AppCompatActivity() {
             playbackMoreButton {
                 showPlaybackActionMenu(
                     more,
-                    listOf(
+                    buildList {
+                        add(
                         PlaybackMenuAction(
                             R.id.cloud_storage_recording_button,
                             if (flow.isRecording) "结束录屏" else "开始录屏",
@@ -545,6 +561,8 @@ class MainActivity : AppCompatActivity() {
                             unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
                             dispatch = { toggleCloudStorageRecording(flow, config) },
                         ),
+                        )
+                        add(
                         PlaybackMenuAction(
                             R.id.cloud_storage_snapshot_button,
                             "截图",
@@ -553,15 +571,20 @@ class MainActivity : AppCompatActivity() {
                             unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
                             dispatch = { takeCloudStorageSnapshot(flow) },
                         ),
-                        PlaybackMenuAction(
-                            R.id.cloud_storage_gallery_button,
-                            "保存到系统相册",
-                            "cloud_storage_action_gallery",
-                            enabled = { cloudActionEnabled(PlaybackMediaAction.GALLERY, cloudPlaybackActionState(flow)) },
-                            unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "还没有可保存的媒体文件" },
-                            dispatch = { saveCloudStorageMediaToGallery(flow) },
-                        ),
-                    ),
+                        )
+                        if (flow.hasLatestMedia) {
+                            add(
+                                PlaybackMenuAction(
+                                    R.id.cloud_storage_gallery_button,
+                                    "重试保存到系统相册",
+                                    "cloud_storage_action_gallery",
+                                    enabled = { cloudActionEnabled(PlaybackMediaAction.GALLERY, cloudPlaybackActionState(flow)) },
+                                    unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "当前没有保存失败的媒体文件" },
+                                    dispatch = { saveCloudStorageMediaToGallery(flow) },
+                                ),
+                            )
+                        }
+                    },
                     ::updateCloudStorageStatus,
                 )
             }.apply { id = R.id.cloud_storage_more_button }
@@ -588,10 +611,8 @@ class MainActivity : AppCompatActivity() {
                 top =
                     cloudStoragePlayerTopBar(
                         onBack = {
-                            closeCloudStorageFlow {
-                                configureProduct = ConfigureProduct.CLOUD_STORAGE
-                                showConfigure()
-                            }
+                            configureProduct = ConfigureProduct.CLOUD_STORAGE
+                            showConfigure()
                         },
                         onSelectRecording = { showCloudStorageRecordingsDialog(flow, config, query = false) },
                         onUploadLogs = { uploadCloudStorageLogs() },
@@ -603,7 +624,14 @@ class MainActivity : AppCompatActivity() {
         )
         cloudStorageRecordingsButton = findViewById(R.id.cloud_storage_recordings_button)
         bindCloudStorageFlowCallbacks(flow)
-        val initCode = flow.initialize(this, config.appId, config.endpoint, config.token)
+        val initCode =
+            flow.initialize(
+                this,
+                config.appId,
+                config.endpoint,
+                config.token,
+                settings.consoleLogEnabled,
+            )
         if (initCode != 0) {
             updateCloudStorageStatus("初始化失败：$initCode")
             updateCloudStorageControls()
@@ -816,10 +844,11 @@ class MainActivity : AppCompatActivity() {
         config: CloudStorageConfiguration,
     ): View {
         val title = body("").apply { gravity = Gravity.CENTER }
-        val grid = GridLayout(this).apply {
-            id = R.id.cloud_storage_calendar_grid
-            columnCount = 7
-        }
+        val grid =
+            GridLayout(this).apply {
+                id = R.id.cloud_storage_calendar_grid
+                columnCount = 7
+            }
         var availableDays: Set<String> = emptySet()
         lateinit var render: () -> Unit
         lateinit var load: () -> Unit
@@ -1074,15 +1103,27 @@ class MainActivity : AppCompatActivity() {
         val code =
             flow.toggleRecording(flow.selectedVideoChannelId ?: return, config.audioChannelId) { started, resultCode, path ->
                 if (cloudStorageFlow !== flow) return@toggleRecording
-                if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
-                updateCloudStorageStatus(
-                    when {
-                        resultCode != 0 -> "边播边录失败：$resultCode"
-                        started -> "边播边录已开始"
-                        else -> "边播边录完成${path?.let { "：$it" }.orEmpty()}"
-                    },
-                )
-                updateCloudStorageControls()
+                when {
+                    resultCode != 0 -> {
+                        if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
+                        updateCloudStorageStatus("边播边录失败：$resultCode")
+                        updateCloudStorageControls()
+                    }
+                    started -> {
+                        if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
+                        updateCloudStorageStatus("边播边录已开始")
+                        updateCloudStorageControls()
+                    }
+                    path != null -> {
+                        updateCloudStorageStatus("边播边录完成，正在保存到系统相册")
+                        saveCloudStorageMediaToGallery(flow)
+                    }
+                    else -> {
+                        if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
+                        updateCloudStorageStatus("边播边录失败：未生成媒体文件")
+                        updateCloudStorageControls()
+                    }
+                }
             }
         if (code != 0) {
             if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
@@ -1102,9 +1143,14 @@ class MainActivity : AppCompatActivity() {
         val code =
             flow.takeSnapshot(flow.selectedVideoChannelId ?: return) { resultCode, path ->
                 if (cloudStorageFlow !== flow) return@takeSnapshot
-                if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
-                updateCloudStorageStatus(if (resultCode == 0) "截图完成${path?.let { "：$it" }.orEmpty()}" else "截图失败：$resultCode")
-                updateCloudStorageControls()
+                if (resultCode == 0 && path != null) {
+                    updateCloudStorageStatus("截图完成，正在保存到系统相册")
+                    saveCloudStorageMediaToGallery(flow)
+                } else {
+                    if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
+                    updateCloudStorageStatus(if (resultCode == 0) "截图失败：未生成媒体文件" else "截图失败：$resultCode")
+                    updateCloudStorageControls()
+                }
             }
         if (code != 0) {
             if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
@@ -1146,14 +1192,15 @@ class MainActivity : AppCompatActivity() {
                 if (cloudStorageFlow !== flow) return@export
                 cloudStorageExportProgress = -1
                 renderCloudStorageRecordings(cloudStorageRecordings, null, flow, config)
-                updateCloudStorageStatus(
-                    if (resultCode == 0) {
-                        "范围下载完成${path?.let { "：$it" }.orEmpty()}，覆盖 ${report?.coveredDurationMs ?: 0} ms，完整 ${report?.complete == true}"
-                    } else {
-                        "范围下载失败：$resultCode，终止 ${report?.termination}"
-                    },
-                )
-                updateCloudStorageControls()
+                if (resultCode == 0 && path != null) {
+                    updateCloudStorageStatus(
+                        "范围下载完成，覆盖 ${report?.coveredDurationMs ?: 0} ms，完整 ${report?.complete == true}；正在保存到系统相册",
+                    )
+                    saveCloudStorageMediaToGallery(flow)
+                } else {
+                    updateCloudStorageStatus("范围下载失败：$resultCode，终止 ${report?.termination}")
+                    updateCloudStorageControls()
+                }
             }
         if (code == 0) {
             updateCloudStorageStatus("范围下载已开始")
@@ -1166,7 +1213,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveCloudStorageMediaToGallery(flow: TiCloudStorageExampleFlow) {
-        if (cloudStorageMediaBusyOwner != null) return
+        if (cloudStorageMediaBusyOwner != null && cloudStorageMediaBusyOwner !== flow) return
         cloudStorageMediaBusyOwner = flow
         updateCloudStorageControls()
         val code =
@@ -1257,7 +1304,10 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun renderRawDumpButton(label: String, enabled: Boolean) {
+    private fun renderRawDumpButton(
+        label: String,
+        enabled: Boolean,
+    ) {
         mainHandler.post {
             rawDumpButton?.apply {
                 text = label
@@ -1360,7 +1410,10 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun emitRawDumpEvidence(event: String, payload: JSONObject) {
+    private fun emitRawDumpEvidence(
+        event: String,
+        payload: JSONObject,
+    ) {
         val encoded =
             Base64.encodeToString(
                 payload.toString().toByteArray(Charsets.UTF_8),
@@ -1429,6 +1482,8 @@ class MainActivity : AppCompatActivity() {
             description = if (flow?.isRecording == true) "结束录屏" else "开始录屏",
         )
         cloudStorageGalleryButton.enabled(cloudActionEnabled(PlaybackMediaAction.GALLERY, actionState))
+        cloudStorageGalleryButton?.visibility =
+            if (actionState.latestMediaAvailable && !actionState.busy) View.VISIBLE else View.GONE
         cloudStorageMuteButton.enabled(playing && flow?.speed == TiCloudStorageReplaySpeed.X1)
         cloudStorageMuteButton?.updatePlaybackControl(
             compactText = if (flow?.muted == true) "🔇" else "🔊",
@@ -1451,12 +1506,15 @@ class MainActivity : AppCompatActivity() {
         flow: TiCloudStorageExampleFlow?,
         state: PlaybackActionState,
     ) {
-        fun summary(action: PlaybackMediaAction, label: String): String {
+        fun summary(
+            action: PlaybackMediaAction,
+            label: String,
+        ): String {
             if (cloudActionEnabled(action, state)) return label
             val reason =
                 when {
                     state.busy -> "媒体操作进行中"
-                    action == PlaybackMediaAction.GALLERY && !state.latestMediaAvailable -> "还没有可保存的媒体文件"
+                    action == PlaybackMediaAction.GALLERY && !state.latestMediaAvailable -> "当前没有保存失败的媒体文件"
                     !state.playing -> "请先选择并播放录像"
                     else -> "当前视频尚未可用"
                 }
@@ -1468,7 +1526,7 @@ class MainActivity : AppCompatActivity() {
             listOf(
                 summary(PlaybackMediaAction.RECORDING, recordingLabel),
                 summary(PlaybackMediaAction.SNAPSHOT, "截图"),
-                summary(PlaybackMediaAction.GALLERY, "相册"),
+                summary(PlaybackMediaAction.GALLERY, "重试相册保存"),
             ).joinToString("；")
     }
 
@@ -1529,6 +1587,8 @@ class MainActivity : AppCompatActivity() {
             finishRawDump(upload = false, completion = { closeCloudStorageFlow(completion) })
             return
         }
+        cloudStorageCloseCallbacks += completion
+        if (closingCloudStorageFlow != null) return
         val flow = cloudStorageFlow
         cloudStorageFlow = null
         if (cloudStorageMediaBusyOwner === flow) cloudStorageMediaBusyOwner = null
@@ -1557,13 +1617,21 @@ class MainActivity : AppCompatActivity() {
         cloudStorageMoreButton = null
         rawDumpButton = null
         if (flow == null) {
-            completion()
+            finishCloudStorageClose()
         } else {
+            closingCloudStorageFlow = flow
             flow.close { code ->
                 if (code != 0) Log.w("TiCloudStorageExample", "cloudStorage cleanup failed code=$code")
-                completion()
+                if (closingCloudStorageFlow === flow) closingCloudStorageFlow = null
+                finishCloudStorageClose()
             }
         }
+    }
+
+    private fun finishCloudStorageClose() {
+        val callbacks = cloudStorageCloseCallbacks.toList()
+        cloudStorageCloseCallbacks.clear()
+        callbacks.forEach { it() }
     }
 
     private fun showSettings() {
@@ -1691,7 +1759,7 @@ class MainActivity : AppCompatActivity() {
                 takePlayerSnapshot()
             }.apply { id = R.id.player_snapshot_button }
         val galleryButton =
-            mediaIconButton(android.R.drawable.ic_menu_gallery, "保存到系统相册") {
+            mediaIconButton(android.R.drawable.ic_menu_gallery, "重试保存到系统相册") {
                 savePlayerLatestToGallery()
             }.apply {
                 id = R.id.player_gallery_button
@@ -1703,7 +1771,8 @@ class MainActivity : AppCompatActivity() {
             playbackMoreButton {
                 showPlaybackActionMenu(
                     moreButton,
-                    listOf(
+                    buildList {
+                        add(
                         PlaybackMenuAction(
                             R.id.player_recording_button,
                             if (playerRecordingTask == null) "开始本地保存" else "结束本地保存",
@@ -1712,6 +1781,8 @@ class MainActivity : AppCompatActivity() {
                             unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
                             dispatch = ::togglePlayerRecording,
                         ),
+                        )
+                        add(
                         PlaybackMenuAction(
                             R.id.player_snapshot_button,
                             "截图",
@@ -1720,15 +1791,20 @@ class MainActivity : AppCompatActivity() {
                             unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
                             dispatch = ::takePlayerSnapshot,
                         ),
-                        PlaybackMenuAction(
-                            R.id.player_gallery_button,
-                            "保存到系统相册",
-                            "player_action_gallery",
-                            enabled = { rtcActionEnabled(PlaybackMediaAction.GALLERY, rtcPlaybackActionState()) },
-                            unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "还没有可保存的媒体文件" },
-                            dispatch = ::savePlayerLatestToGallery,
-                        ),
-                    ),
+                        )
+                        if (playerLatestMediaFile != null) {
+                            add(
+                                PlaybackMenuAction(
+                                    R.id.player_gallery_button,
+                                    "重试保存到系统相册",
+                                    "player_action_gallery",
+                                    enabled = { rtcActionEnabled(PlaybackMediaAction.GALLERY, rtcPlaybackActionState()) },
+                                    unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前没有保存失败的媒体文件" },
+                                    dispatch = ::savePlayerLatestToGallery,
+                                ),
+                            )
+                        }
+                    },
                     ::appendStatus,
                 )
             }.apply { id = R.id.player_more_button }
@@ -1770,10 +1846,7 @@ class MainActivity : AppCompatActivity() {
                 top =
                     playerTopBar(
                         remoteId = config.remoteId,
-                        onBack = {
-                            stopPlayer()
-                            showConfigure()
-                        },
+                        onBack = ::showConfigure,
                         onCommand = { trigger -> showCommandPanel(trigger) },
                         onUploadLogs = { uploadLogs() },
                     ),
@@ -1833,10 +1906,11 @@ class MainActivity : AppCompatActivity() {
         playerVideoStateLabels.clear()
         playerUnavailableVideoStreamIds.clear()
         stage.removeAllViews()
-        val grid = GridLayout(this).apply {
-            columnCount = 1
-            rowCount = 1
-        }
+        val grid =
+            GridLayout(this).apply {
+                columnCount = 1
+                rowCount = 1
+            }
         stage.addView(
             grid,
             FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT),
@@ -1845,18 +1919,23 @@ class MainActivity : AppCompatActivity() {
             addPlayerEmptyVideoState(stage, config.audioStreamId)
         }
         config.videoStreamIds.forEachIndexed { index, streamId ->
-            val lane = FrameLayout(this).apply {
-                contentDescription = "rtc_video_lane_$streamId"
-                setBackgroundColor(ExampleTheme.videoBackground)
-                setPadding(dp(2), dp(2), dp(2), dp(2))
-                setOnClickListener {
-                    maximizedVideoStreamId =
-                        if (selectedVideoStreamId == streamId && maximizedVideoStreamId == null) streamId else null
-                    selectedVideoStreamId = streamId
-                    updatePlayerVideoSelection()
+            val lane =
+                FrameLayout(this).apply {
+                    contentDescription = "rtc_video_lane_$streamId"
+                    setBackgroundColor(ExampleTheme.videoBackground)
+                    setPadding(dp(2), dp(2), dp(2), dp(2))
+                    setOnClickListener {
+                        maximizedVideoStreamId =
+                            if (selectedVideoStreamId == streamId && maximizedVideoStreamId == null) streamId else null
+                        selectedVideoStreamId = streamId
+                        updatePlayerVideoSelection()
+                    }
                 }
-            }
-            val params = GridLayout.LayoutParams().apply { width = 0; height = 0 }
+            val params =
+                GridLayout.LayoutParams().apply {
+                    width = 0
+                    height = 0
+                }
             grid.addView(lane, params)
             playerVideoLanes[streamId] = lane
         }
@@ -2024,12 +2103,13 @@ class MainActivity : AppCompatActivity() {
             retirePlayerAudioOutput(nextAudio, config.audioStreamId, "configure", audioOptionsCode)
         }
         nextVideos.forEach { (streamId, video) ->
-            val optionsCode = video.setOptions(
-                TiRtcVideoOutputOptions(
-                    decoderPreference = settings.decoderPreference.toSdkDecoderPreference(),
-                    bufferStrategy = settings.outputBufferStrategy,
-                ),
-            )
+            val optionsCode =
+                video.setOptions(
+                    TiRtcVideoOutputOptions(
+                        decoderPreference = settings.decoderPreference.toSdkDecoderPreference(),
+                        bufferStrategy = settings.outputBufferStrategy,
+                    ),
+                )
             if (optionsCode != 0) markPlayerVideoUnavailable(streamId, "configure", optionsCode)
         }
         appendStatus("connect=${nextConn.connect(config.remoteId, config.token)}")
@@ -2060,6 +2140,7 @@ class MainActivity : AppCompatActivity() {
         playerGalleryButton?.apply {
             isEnabled = rtcActionEnabled(PlaybackMediaAction.GALLERY, actionState)
             alpha = if (isEnabled) 1f else 0.46f
+            visibility = if (actionState.latestMediaAvailable && !actionState.busy) View.VISIBLE else View.GONE
         }
         updatePlayerMoreSummary()
         downlinkMetricsPanel?.render(conn, audioOutput, selectedVideoStreamId?.let(videoOutputs::get))
@@ -2067,10 +2148,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePlayerMoreSummary() {
         val state = rtcPlaybackActionState()
+
         fun unavailableReason(action: PlaybackMediaAction): String =
             when {
                 state.busy -> "媒体操作进行中"
-                action == PlaybackMediaAction.GALLERY && !state.latestMediaAvailable -> "还没有可保存的媒体文件"
+                action == PlaybackMediaAction.GALLERY && !state.latestMediaAvailable -> "当前没有保存失败的媒体文件"
                 else -> "当前视频尚未可用"
             }
         playerMoreButton?.contentDescription =
@@ -2078,7 +2160,7 @@ class MainActivity : AppCompatActivity() {
             listOf(
                 PlaybackMediaAction.RECORDING to "录制",
                 PlaybackMediaAction.SNAPSHOT to "截图",
-                PlaybackMediaAction.GALLERY to "相册",
+                PlaybackMediaAction.GALLERY to "重试相册保存",
             ).joinToString("；") { (action, label) ->
                 if (rtcActionEnabled(action, state)) label else "${label}不可用：${unavailableReason(action)}"
             }
@@ -2106,7 +2188,11 @@ class MainActivity : AppCompatActivity() {
             playing = cloudStorageSelectedRange != null,
         )
 
-    private fun markPlayerVideoUnavailable(streamId: Int, phase: String, code: Int) {
+    private fun markPlayerVideoUnavailable(
+        streamId: Int,
+        phase: String,
+        code: Int,
+    ) {
         playerUnavailableVideoStreamIds.add(streamId)
         mainHandler.post {
             playerVideoStateLabels[streamId]?.let { label ->
@@ -2136,11 +2222,22 @@ class MainActivity : AppCompatActivity() {
         appendStatus("audio $phase failed code=$code")
     }
 
-    private fun stopPlayer(clearPageRefs: Boolean = true) {
+    private fun stopPlayer(
+        clearPageRefs: Boolean = true,
+        completion: (() -> Unit)? = null,
+    ) {
         if (rawDump != null) {
-            finishRawDump(upload = false, completion = { stopPlayer(clearPageRefs) })
+            finishRawDump(upload = false, completion = { stopPlayer(clearPageRefs, completion) })
             return
         }
+        completion?.let(playerStopCallbacks::add)
+        playerStopClearPageRefs = playerStopClearPageRefs || clearPageRefs
+        if (playerMediaBusy) {
+            playerStopPending = true
+            return
+        }
+        if (playerStopInFlight) return
+        playerStopInFlight = true
         playerSessionGeneration += 1
         metricsTimer?.cancel()
         metricsTimer = null
@@ -2150,11 +2247,12 @@ class MainActivity : AppCompatActivity() {
         playerRecordingTask = null
         playerLatestMediaFile = null
         playerLatestMediaTargetId = null
+        playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
         playerMediaBusy = true
         refreshPlayerMediaControls()
         val finish = {
             deletePlayerMediaFiles(playerOwnedMediaFiles.toList()) {
-                finishStopPlayer(clearPageRefs)
+                finishStopPlayer()
             }
         }
         if (task == null) {
@@ -2168,7 +2266,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun finishStopPlayer(clearPageRefs: Boolean) {
+    private fun finishStopPlayer() {
+        val clearPageRefs = playerStopClearPageRefs
         playerAudioInput?.dispose()
         playerAudioInput = null
         playerTalkbackRunning = false
@@ -2207,8 +2306,14 @@ class MainActivity : AppCompatActivity() {
             playerMoreButton = null
         }
         playerMediaBusy = false
+        playerStopPending = false
+        playerStopClearPageRefs = false
+        playerStopInFlight = false
         refreshPlayerMediaControls()
         TiRtc.shutdown()
+        val callbacks = playerStopCallbacks.toList()
+        playerStopCallbacks.clear()
+        callbacks.forEach { it() }
     }
 
     private fun togglePlayerRecording() {
@@ -2221,22 +2326,26 @@ class MainActivity : AppCompatActivity() {
                 playerRecordingTask = null
                 refreshPlayerMediaControls()
                 val completedFile = result.file
-                deletePlayerMediaFile(playerLatestMediaFile) {
-                    playerMediaBusy = false
-                    refreshPlayerMediaControls()
+                val completedTargetId = recordingVideoStreamId
+                recordingVideoStreamId = null
+                val previous = playerLatestMediaFile
+                deletePlayerMediaFile(previous) { _ ->
+                    if (playerLatestMediaFile === previous) {
+                        playerLatestMediaFile = null
+                        playerLatestMediaTargetId = null
+                        playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
+                    }
                     if (result.code == 0 && completedFile != null) {
                         playerLatestMediaFile = completedFile
-                        playerLatestMediaTargetId = recordingVideoStreamId
-                        recordingVideoStreamId = null
+                        playerLatestMediaTargetId = completedTargetId
+                        playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
                         playerOwnedMediaFiles.add(completedFile)
+                        appendStatus("录像完成，正在保存到系统相册")
+                        publishPlayerLatestMediaToGallery()
+                    } else {
+                        finishPlayerMediaOperation()
+                        appendStatus("本地保存失败 code=${result.code}")
                     }
-                    appendStatus(
-                        if (result.code == 0) {
-                            "本地保存完成 ${completedFile?.path.orEmpty()}"
-                        } else {
-                            "本地保存失败 code=${result.code}"
-                        },
-                    )
                 }
             }
             return
@@ -2264,57 +2373,106 @@ class MainActivity : AppCompatActivity() {
         output.takeSnapshot { result ->
             val file = result.file
             if (result.code != 0 || file == null) {
-                playerMediaBusy = false
-                refreshPlayerMediaControls()
+                finishPlayerMediaOperation()
                 appendStatus("截图失败 code=${result.code}")
                 return@takeSnapshot
             }
-            deletePlayerMediaFile(playerLatestMediaFile) {
+            val previous = playerLatestMediaFile
+            deletePlayerMediaFile(previous) { _ ->
+                if (playerLatestMediaFile === previous) {
+                    playerLatestMediaFile = null
+                    playerLatestMediaTargetId = null
+                    playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
+                }
                 playerLatestMediaFile = file
                 playerLatestMediaTargetId = targetStreamId
+                playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
                 playerOwnedMediaFiles.add(file)
-                playerMediaBusy = false
-                refreshPlayerMediaControls()
-                appendStatus("截图完成 · 视频 Stream ID $targetStreamId · ${file.path}")
+                appendStatus("截图完成，正在保存到系统相册")
+                publishPlayerLatestMediaToGallery()
             }
         }
     }
 
     private fun deletePlayerMediaFile(
         file: Any?,
-        completion: () -> Unit,
+        completion: (Int) -> Unit,
     ) {
         val callback =
             com.tange.ai.tirtc.TiRtcDeleteCallback { code ->
                 if (code == 0 && file != null) playerOwnedMediaFiles.remove(file)
-                completion()
+                completion(code)
             }
         when (file) {
             is TiRtcRecordingFile -> file.delete(callback)
             is TiRtcSnapshotFile -> file.delete(callback)
-            else -> completion()
+            else -> completion(0)
         }
     }
 
     private fun savePlayerLatestToGallery() {
         if (playerMediaBusy) return
-        val file = playerLatestMediaFile ?: return
+        if (playerLatestMediaFile == null) return
+        playerMediaBusy = true
+        refreshPlayerMediaControls()
+        publishPlayerLatestMediaToGallery()
+    }
+
+    private fun publishPlayerLatestMediaToGallery() {
+        val file = playerLatestMediaFile
+        if (file == null) {
+            finishPlayerMediaOperation()
+            return
+        }
         val path =
             when (file) {
                 is TiRtcRecordingFile -> file.path
                 is TiRtcSnapshotFile -> file.path
-                else -> return
+                else -> {
+                    finishPlayerMediaOperation()
+                    return
+                }
             }
-        playerMediaBusy = true
-        refreshPlayerMediaControls()
+        val targetId = playerLatestMediaTargetId ?: -1
+        val publishRequired = shouldPublishToGallery(playerLatestMediaPublishState)
         Thread {
-            val code = copyPathToGallery(this, path, file is TiRtcRecordingFile, playerLatestMediaTargetId ?: -1)
+            val code = if (publishRequired) copyPathToGallery(this, path, file is TiRtcRecordingFile, targetId) else 0
             mainHandler.post {
-                playerMediaBusy = false
-                refreshPlayerMediaControls()
-                appendStatus(if (code == 0) "已保存到系统相册" else "保存到系统相册失败 code=$code")
+                if (code != 0) {
+                    finishPlayerMediaOperation()
+                    appendStatus("保存到系统相册失败 code=$code，可在更多操作中重试")
+                    return@post
+                }
+                if (playerLatestMediaFile === file) {
+                    playerLatestMediaPublishState = GalleryPublishState.PUBLISHED_PENDING_DELETE
+                }
+                deletePlayerMediaFile(file) { deleteCode ->
+                    mainHandler.post {
+                        if (deleteCode == 0 && playerLatestMediaFile === file) {
+                            playerLatestMediaFile = null
+                            playerLatestMediaTargetId = null
+                            playerLatestMediaPublishState = GalleryPublishState.NEEDS_PUBLISH
+                        }
+                        finishPlayerMediaOperation()
+                        appendStatus(
+                            if (deleteCode == 0) {
+                                "已保存到系统相册"
+                            } else {
+                                "已保存到系统相册，缓存清理失败 code=$deleteCode"
+                            },
+                        )
+                    }
+                }
             }
         }.start()
+    }
+
+    private fun finishPlayerMediaOperation() {
+        playerMediaBusy = false
+        refreshPlayerMediaControls()
+        if (!playerStopPending) return
+        playerStopPending = false
+        stopPlayer(playerStopClearPageRefs)
     }
 
     private fun deletePlayerMediaFiles(
@@ -2326,7 +2484,7 @@ class MainActivity : AppCompatActivity() {
             completion()
             return
         }
-        deletePlayerMediaFile(file) {
+        deletePlayerMediaFile(file) { _ ->
             deletePlayerMediaFiles(files.drop(1), completion)
         }
     }
@@ -2456,12 +2614,23 @@ class MainActivity : AppCompatActivity() {
     ) {
         playerRunning = running
         playerDownlinkButton?.apply {
-            val label = when {
-                connecting -> "连接中"
-                running -> "停止播放"
-                else -> "开始播放"
-            }
-            updatePlaybackControl(if (connecting) "…" else if (running) "■" else "▶", label, label)
+            val label =
+                when {
+                    connecting -> "连接中"
+                    running -> "停止播放"
+                    else -> "开始播放"
+                }
+            updatePlaybackControl(
+                if (connecting) {
+                    "…"
+                } else if (running) {
+                    "■"
+                } else {
+                    "▶"
+                },
+                label,
+                label,
+            )
             isEnabled = !connecting
             alpha = if (isEnabled) 1.0f else 0.55f
         }
@@ -2569,9 +2738,12 @@ class MainActivity : AppCompatActivity() {
                     },
                     LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, 0, 1f),
                 )
-                addView(actions, LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
-                    setMargins(dp(16), dp(8), dp(16), dp(16))
-                })
+                addView(
+                    actions,
+                    LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT).apply {
+                        setMargins(dp(16), dp(8), dp(16), dp(16))
+                    },
+                )
             }
         val panelHeight = (resources.displayMetrics.heightPixels * 0.72).toInt()
         root.layoutParams = LinearLayout.LayoutParams(LinearLayout.LayoutParams.MATCH_PARENT, panelHeight)
@@ -2611,7 +2783,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun restoreMediaSelections() {
         val preferences = getSharedPreferences("tirtc_example_media", MODE_PRIVATE)
-        fun videos(listKey: String, fallback: List<Int>): List<Int> {
+
+        fun videos(
+            listKey: String,
+            fallback: List<Int>,
+        ): List<Int> {
             if (preferences.contains(listKey)) {
                 return preferences.getString(listKey, "").orEmpty().split(',')
                     .mapNotNull { it.trim().takeIf(String::isNotEmpty)?.toIntOrNull() }
@@ -2621,20 +2797,22 @@ class MainActivity : AppCompatActivity() {
         }
         clientConfig =
             clientConfig.copy(
-                audioStreamId = if (preferences.contains("rtc_audio_stream_id")) {
-                    preferences.getString("rtc_audio_stream_id", "").orEmpty().toIntOrNull()
-                } else {
-                    clientConfig.audioStreamId
-                },
+                audioStreamId =
+                    if (preferences.contains("rtc_audio_stream_id")) {
+                        preferences.getString("rtc_audio_stream_id", "").orEmpty().toIntOrNull()
+                    } else {
+                        clientConfig.audioStreamId
+                    },
                 videoStreamIds = videos("rtc_video_stream_ids", clientConfig.videoStreamIds),
             )
         cloudStorageConfig =
             cloudStorageConfig.copy(
-                audioChannelId = if (preferences.contains("cloud_audio_channel_id")) {
-                    preferences.getString("cloud_audio_channel_id", "").orEmpty().toIntOrNull()
-                } else {
-                    cloudStorageConfig.audioChannelId
-                },
+                audioChannelId =
+                    if (preferences.contains("cloud_audio_channel_id")) {
+                        preferences.getString("cloud_audio_channel_id", "").orEmpty().toIntOrNull()
+                    } else {
+                        cloudStorageConfig.audioChannelId
+                    },
                 videoChannelIds = videos("cloud_video_channel_ids", cloudStorageConfig.videoChannelIds),
             )
     }
@@ -2734,7 +2912,9 @@ class MainActivity : AppCompatActivity() {
             statusView?.apply {
                 text = message
                 contentDescription = "播放状态：$message"
-                setTextColor(if (message.contains("失败") || message.contains("error", ignoreCase = true)) ExampleTheme.failure else ExampleTheme.textPrimary)
+                setTextColor(
+                    if (message.contains("失败") || message.contains("error", ignoreCase = true)) ExampleTheme.failure else ExampleTheme.textPrimary,
+                )
             }
         }
     }

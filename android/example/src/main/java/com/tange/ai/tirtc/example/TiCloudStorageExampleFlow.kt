@@ -155,9 +155,10 @@ internal class TiCloudStorageExampleFlow {
         appId: String,
         endpoint: String,
         token: String,
+        consoleLogEnabled: Boolean,
     ): Int {
         if (closing || initialized) return TiCloudStorageErrorCode.IN_USE
-        val code = TiCloudStorage.init(context, appId, endpoint)
+        val code = TiCloudStorage.init(context, appId, endpoint, consoleLogEnabled)
         if (code != TiCloudStorageErrorCode.OK) return code
         this.context = context.applicationContext
         initialized = true
@@ -504,15 +505,17 @@ internal class TiCloudStorageExampleFlow {
         val ownerContext = context ?: return TiCloudStorageErrorCode.NOT_INITIALIZED
         val media = latestMedia ?: return TiCloudStorageErrorCode.NOT_STARTED
         if (closing) return TiCloudStorageErrorCode.IN_USE
+        val publishRequired = shouldPublishToGallery(media.galleryPublishState)
         beginOperation()
         thread(name = "ti-cloud-storage-example-gallery", isDaemon = true) {
-            val copyCode = copyToGallery(ownerContext, media)
+            val copyCode = if (publishRequired) copyToGallery(ownerContext, media) else TiCloudStorageErrorCode.OK
             mainHandler.post {
                 if (copyCode != TiCloudStorageErrorCode.OK) {
                     callback(copyCode)
                     endOperation()
                     return@post
                 }
+                media.galleryPublishState = GalleryPublishState.PUBLISHED_PENDING_DELETE
                 media.delete { deleteCode ->
                     if (deleteCode == TiCloudStorageErrorCode.OK) {
                         if (latestMedia === media) latestMedia = null
@@ -679,6 +682,7 @@ internal class TiCloudStorageExampleFlow {
     ): Int = copyPathToGallery(context, media.path, media is RecordingMedia, media.targetId)
 
     private sealed class OwnedMedia(val path: String, val targetId: Int) {
+        var galleryPublishState = GalleryPublishState.NEEDS_PUBLISH
         abstract fun delete(callback: (Int) -> Unit)
     }
 

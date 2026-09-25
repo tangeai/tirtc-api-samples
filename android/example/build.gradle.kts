@@ -16,8 +16,18 @@ android {
         versionName = "1.0"
     }
 
+    signingConfigs {
+        create("internalRelease") {
+            storeFile = project.file("tirtc-android-example-internal-release.keystore")
+            storePassword = "tirtc-internal"
+            keyAlias = "tirtc-android-example-internal-release"
+            keyPassword = "tirtc-internal"
+        }
+    }
+
     buildTypes {
         release {
+            signingConfig = signingConfigs.getByName("internalRelease")
             isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
@@ -37,7 +47,7 @@ android {
 }
 
 dependencies {
-    implementation("com.tange.ai:tirtc:2.5.0")
+    implementation("com.tange.ai:tirtc:2.5.3")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
