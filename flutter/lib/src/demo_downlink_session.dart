@@ -354,9 +354,14 @@ final class DemoDownlinkSession {
     final Resp<TiRtcGalleryAsset> result = await move();
     if (result.success) {
       _ownedMediaFiles.remove(mediaFile);
+      if (identical(_latestMediaFile, mediaFile)) {
+        _latestMediaFile = null;
+      }
     }
     return result;
   }
+
+  bool get hasPendingGalleryMedia => _latestMediaFile != null;
 
   String? get latestMediaPath {
     final Object? mediaFile = _latestMediaFile;

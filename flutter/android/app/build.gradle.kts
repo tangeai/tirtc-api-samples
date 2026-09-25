@@ -5,6 +5,16 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+fun resolveTiRtcFlutterInternalReleaseKeystore(): File {
+    val override = providers.gradleProperty("TIRTC_FLUTTER_ANDROID_INTERNAL_RELEASE_KEYSTORE").orNull
+        ?: System.getenv("TIRTC_FLUTTER_ANDROID_INTERNAL_RELEASE_KEYSTORE")
+    return if (override.isNullOrBlank()) {
+        rootProject.file("tirtc-flutter-example-internal-release.keystore")
+    } else {
+        file(override.trim())
+    }
+}
+
 android {
     namespace = "com.tange.ai.tirtc_example"
     compileSdk = flutter.compileSdkVersion
@@ -30,11 +40,18 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("internalRelease") {
+            storeFile = resolveTiRtcFlutterInternalReleaseKeystore()
+            storePassword = "tirtc-internal"
+            keyAlias = "tirtc-flutter-example-internal-release"
+            keyPassword = "tirtc-internal"
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("internalRelease")
             ndk.abiFilters.clear()
             ndk.abiFilters.addAll(listOf("arm64-v8a"))
         }

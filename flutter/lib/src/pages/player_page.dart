@@ -8,6 +8,7 @@ import '../app_theme.dart';
 import '../demo_configuration.dart';
 import '../demo_downlink_session.dart';
 import '../demo_downlink_support.dart';
+import '../demo_media_operation_barrier.dart';
 import '../demo_permissions.dart';
 import '../demo_route_lifecycle.dart';
 import '../demo_stream_message.dart';
@@ -65,6 +66,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   bool _audioMuted = false;
   bool _audioOutputAvailable = false;
   bool _mediaFileBusy = false;
+  final DemoMediaOperationBarrier _mediaOperationBarrier = DemoMediaOperationBarrier();
   bool _smokeConnectedMarked = false;
   bool _smokeAudioPlayingMarked = false;
   bool _smokeVideoRenderingMarked = false;
@@ -142,6 +144,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   @override
   void dispose() {
     _sessionGeneration += 1;
+    _mediaOperationBarrier.beginClosing();
     _stopMetricsPolling();
     _streamMessageOverlay.dispose();
     _commandButtonFocusNode.dispose();
@@ -150,13 +153,16 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     _commandConnected = false;
     _localAudioController.resetAfterSessionRelease(notify: false);
     final Future<void> rawDumpFinalized = _rawDumpController.finalizeForLeave();
+    final Future<void> mediaFinalized = _mediaOperationBarrier.drain();
     _rawDumpController.dispose();
     _logUploadController.reset(notify: false);
     _commandController.reset(notify: false);
     _clearSessionCallbacks();
     final DemoAutomationMarkerSink? markerSink = widget.smokeMarkerSink;
     unawaited(
-      rawDumpFinalized.then((_) => _session.disposeAsync()).then((int code) {
+      Future.wait(<Future<void>>[rawDumpFinalized, mediaFinalized]).then((_) => _session.disposeAsync()).then((
+        int code,
+      ) {
         if (code == 0) {
           markerSink?.passed(
             'smoke_dispose_completed',
@@ -193,6 +199,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
       return;
     }
 
+    _mediaOperationBarrier.reopen();
     _shouldKeepPlaying = true;
     final int generation = ++_sessionGeneration;
 
@@ -342,6 +349,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
     required bool clearIntent,
     required String nextStatusSummary,
   }) async {
+    _mediaOperationBarrier.beginClosing();
     _sessionGeneration += 1;
     if (!_smokeRenderWindowMarked) {
       _smokeRenderWindowStarted = false;
@@ -366,6 +374,7 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
   }
 
   Future<void> _releaseSession({required String reason}) async {
+    await _mediaOperationBarrier.drain();
     await _session.release(reason: reason);
     _audioSession.releaseIfNeeded(reason: reason);
     _localAudioController.resetAfterSessionRelease(notify: false);
@@ -948,11 +957,13 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                     selectedVideoStreamId: _selectedVideoStreamId,
                     mediaBusy: _mediaFileBusy,
                     recording: _session.isRecording,
+                    galleryRetryAvailable: _session.hasPendingGalleryMedia,
                     canExecuteMedia:
                         () =>
                             _downlinkState == _DownlinkViewState.playing &&
                             _selectedVideoStreamId != null &&
-                            !_mediaFileBusy,
+                            !_mediaFileBusy &&
+                            _mediaOperationBarrier.accepting,
                     onToggleDownlink: _toggleDownlink,
                     onToggleAudioOutput: _toggleAudioOutputVolume,
                     onToggleRecording: _toggleRecording,

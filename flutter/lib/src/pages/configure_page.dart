@@ -303,7 +303,7 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
 
       final String marker = 'FLUTTER_HOME_LOG_UPLOAD_${DateTime.now().toLocal().toIso8601String()}';
       TiRtcLogging.i('flutter_example', 'home_log_upload_marker=$marker');
-      await _logUploader.upload(
+      final ({int code, String? logId})? result = await _logUploader.upload(
         remoteId: _remoteIdController.text.trim(),
         isActive: () => mounted,
         showResult: ({required String title, required String content}) {
@@ -313,6 +313,19 @@ class _DemoConfigurePageState extends State<DemoConfigurePage>
           return context.showNoticeDialog(title: title, content: content);
         },
       );
+      final DemoAutomationMarkerSink? markerSink = DemoExampleSmokeHooks.current?.markerSink;
+      if (result != null && result.code == 0 && (result.logId?.isNotEmpty ?? false)) {
+        markerSink?.passed(
+          'smoke_log_upload_completed',
+          payload: <String, Object?>{'log_id': result.logId, 'code': result.code},
+        );
+      } else if (markerSink != null) {
+        markerSink.failure(
+          failureStage: 'log_upload',
+          message: 'configure page log upload failed',
+          errorCode: result?.code,
+        );
+      }
     } finally {
       final int shutdownCode = await _shutdownRuntimeAfterDisposal();
       if (shutdownCode != 0) {

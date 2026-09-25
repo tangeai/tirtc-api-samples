@@ -1,7 +1,9 @@
 part of 'player_page.dart';
 
 extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
-  Future<void> _toggleRecording() async {
+  Future<void> _toggleRecording() => _mediaOperationBarrier.run(_performToggleRecording);
+
+  Future<void> _performToggleRecording() async {
     _setMediaFileBusy(true);
     if (_session.isRecording) {
       final Resp<TiRtcRecordingFile> result = await _session.stopRecording();
@@ -15,12 +17,11 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
             'video_stream_id': _recordingVideoStreamId,
           },
         );
+        await _saveLatestMediaToGallery();
       } else {
         _smokeFail(failureStage: 'media_recording_stop', message: 'recording stop failed', errorCode: result.code);
+        _showPlayerSnack('停止保存失败 · ${TiRtc.formatError(result.code ?? 0)}');
       }
-      _showPlayerSnack(
-        result.success ? '录像已保存 · ${result.data!.path}' : '停止保存失败 · ${TiRtc.formatError(result.code ?? 0)}',
-      );
       _recordingVideoStreamId = null;
     } else {
       final int? targetStreamId = _selectedVideoStreamId;
@@ -44,7 +45,9 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
     _setMediaFileBusy(false);
   }
 
-  Future<void> _takeSnapshot() async {
+  Future<void> _takeSnapshot() => _mediaOperationBarrier.run(_performTakeSnapshot);
+
+  Future<void> _performTakeSnapshot() async {
     final int? targetStreamId = _selectedVideoStreamId;
     if (targetStreamId == null) return;
     _setMediaFileBusy(true);
@@ -55,19 +58,27 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
         'smoke_snapshot_saved',
         payload: <String, Object?>{'file_path': result.data!.path, 'video_stream_id': targetStreamId},
       );
+      await _saveLatestMediaToGallery();
     } else {
       _smokeFail(failureStage: 'media_snapshot', message: 'snapshot failed', errorCode: result.code);
+      _showPlayerSnack('截图失败 · ${TiRtc.formatError(result.code ?? 0)}');
     }
-    _showPlayerSnack(result.success ? '截图已保存 · ${result.data?.path}' : '截图失败 · ${TiRtc.formatError(result.code ?? 0)}');
     _setMediaFileBusy(false);
   }
 
-  Future<void> _moveLatestMediaToGallery() async {
+  Future<void> _moveLatestMediaToGallery() => _mediaOperationBarrier.run(_performMoveLatestMediaToGallery);
+
+  Future<void> _performMoveLatestMediaToGallery() async {
     _setMediaFileBusy(true);
+    await _saveLatestMediaToGallery();
+    _setMediaFileBusy(false);
+  }
+
+  Future<bool> _saveLatestMediaToGallery() async {
     if (!await const DemoExamplePermissions().requestGalleryWritePermissionIfNeeded()) {
       _showPlayerSnack('保存失败 · 未获得相册写入权限');
-      _setMediaFileBusy(false);
-      return;
+      _smokeFail(failureStage: 'media_gallery_permission', message: 'gallery write permission denied');
+      return false;
     }
     final String? sourcePath = _session.latestMediaPath;
     final String? mediaType = _session.latestMediaType;
@@ -93,6 +104,6 @@ extension _DemoPlayerMediaFileActions on _DemoPlayerPageState {
       _smokeFail(failureStage: 'media_gallery', message: 'media gallery move failed', errorCode: result.code);
     }
     _showPlayerSnack(result.success ? '已保存到系统相册' : '保存失败 · ${TiRtc.formatError(result.code ?? 0)}');
-    _setMediaFileBusy(false);
+    return result.success;
   }
 }

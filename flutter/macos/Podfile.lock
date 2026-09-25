@@ -1,16 +1,12 @@
 PODS:
   - FlutterMacOS (1.0.0)
-  - mobile_scanner (7.0.0):
-    - Flutter
-    - FlutterMacOS
-  - TiRTC (2.5.2)
+  - TiRTC (2.5.3)
   - tirtc_flutter (1.0.0):
     - FlutterMacOS
-    - TiRTC (= 2.5.2)
+    - TiRTC (= 2.5.3)
 
 DEPENDENCIES:
   - FlutterMacOS (from `Flutter/ephemeral`)
-  - mobile_scanner (from `Flutter/ephemeral/.symlinks/plugins/mobile_scanner/darwin`)
   - tirtc_flutter (from `Flutter/ephemeral/.symlinks/plugins/tirtc_flutter/macos`)
 
 SPEC REPOS:
@@ -20,17 +16,14 @@ SPEC REPOS:
 EXTERNAL SOURCES:
   FlutterMacOS:
     :path: Flutter/ephemeral
-  mobile_scanner:
-    :path: Flutter/ephemeral/.symlinks/plugins/mobile_scanner/darwin
   tirtc_flutter:
     :path: Flutter/ephemeral/.symlinks/plugins/tirtc_flutter/macos
 
 SPEC CHECKSUMS:
-  FlutterMacOS: d0db08ddef1a9af05a5ec4b724367152bb0500b1
-  mobile_scanner: 77265f3dc8d580810e91849d4a0811a90467ed5e
-  TiRTC: 1356d3dfc4c430bfcdc23bbba633f994b7c38081
-  tirtc_flutter: 8049247638eb22465899f4fc6f7fc03a589878a8
+  FlutterMacOS: c232990155153907050900a2e175c7773903ba4e
+  TiRTC: fa4f971f56b48d2d87462b8411d7b92aec7d8f5a
+  tirtc_flutter: 82745e72976abe2366485d3cfd16be762de83cc8
 
-PODFILE CHECKSUM: e62b46eef50f94a6e40d4eb0b6f4bbd518353c09
+PODFILE CHECKSUM: 4fc70dec865cd19322464bba8fb2351a5d01afa8
 
 COCOAPODS: 1.16.2

@@ -486,6 +486,7 @@ class PlayerControlPanel extends StatelessWidget {
     required this.selectedVideoStreamId,
     required this.mediaBusy,
     required this.recording,
+    required this.galleryRetryAvailable,
     required this.canExecuteMedia,
     required this.onToggleDownlink,
     required this.onToggleAudioOutput,
@@ -504,6 +505,7 @@ class PlayerControlPanel extends StatelessWidget {
   final int? selectedVideoStreamId;
   final bool mediaBusy;
   final bool recording;
+  final bool galleryRetryAvailable;
   final bool Function() canExecuteMedia;
   final VoidCallback onToggleDownlink;
   final VoidCallback onToggleAudioOutput;
@@ -553,13 +555,13 @@ class PlayerControlPanel extends StatelessWidget {
                   onSnapshot: onSnapshot,
                 );
         final Widget? more =
-            mediaTarget == null
+            mediaTarget == null || !galleryRetryAvailable
                 ? null
                 : PlayerMediaMenuButton(
                   enabled: mediaEnabled,
                   statusLabel:
                       mediaEnabled
-                          ? '$mediaTarget · 可保存到相册'
+                          ? '$mediaTarget · 相册保存失败，可重试'
                           : playing
                           ? '媒体操作进行中'
                           : '播放停止 · 媒体操作不可用',
@@ -704,7 +706,7 @@ class _PlayerMediaMenuButtonState extends State<PlayerMediaMenuButton> {
                 key: DemoWidgetKeys.playerGalleryButton,
                 value: PlayerMediaAction.gallery,
                 enabled: widget.enabled,
-                child: const Text('保存到系统相册'),
+                child: const Text('重试保存到系统相册'),
               ),
             ],
       ),

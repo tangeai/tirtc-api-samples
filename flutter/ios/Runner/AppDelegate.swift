@@ -5,7 +5,7 @@ import Photos
 import UIKit
 
 @main
-@objc class AppDelegate: FlutterAppDelegate {
+@objc class AppDelegate: FlutterAppDelegate, FlutterImplicitEngineDelegate {
   private let preferencesChannelName = "tirtc_example/preferences"
   private let preferencesKeyPrefix = "tirtc_example."
   private let permissionPreflightEnvironmentKey = "TIRTC_FLUTTER_IOS_PERMISSION_PREFLIGHT"
@@ -17,53 +17,6 @@ import UIKit
     _ application: UIApplication,
     didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?
   ) -> Bool {
-    GeneratedPluginRegistrant.register(with: self)
-
-    if let controller = window?.rootViewController as? FlutterViewController {
-      let channel = FlutterMethodChannel(
-        name: "tirtc_example/permissions",
-        binaryMessenger: controller.binaryMessenger
-      )
-      channel.setMethodCallHandler { [weak self] call, result in
-        guard let self else {
-          result(FlutterError(
-            code: "UNAVAILABLE",
-            message: "permissions channel owner unavailable",
-            details: nil
-          ))
-          return
-        }
-        switch call.method {
-        case "checkMicrophonePermission":
-          result(self.capturePermissionGranted(for: .audio))
-        case "requestMicrophonePermission":
-          self.requestCaptureAccessIfNeeded(for: .audio, result: result)
-        case "requestGalleryWritePermission":
-          self.requestPhotoLibraryAddAccessIfNeeded { granted in result(granted) }
-        case "requestLocalNetworkPermission":
-          self.requestLocalNetworkPermission(result: result)
-        default:
-          result(FlutterMethodNotImplemented)
-        }
-      }
-
-      let preferencesChannel = FlutterMethodChannel(
-        name: preferencesChannelName,
-        binaryMessenger: controller.binaryMessenger
-      )
-      preferencesChannel.setMethodCallHandler { [weak self] call, result in
-        guard let self else {
-          result(FlutterError(
-            code: "UNAVAILABLE",
-            message: "preferences channel owner unavailable",
-            details: nil
-          ))
-          return
-        }
-        self.handlePreferencesCall(call, result: result)
-      }
-    }
-
     let launched = super.application(application, didFinishLaunchingWithOptions: launchOptions)
     if ProcessInfo.processInfo.environment[permissionPreflightEnvironmentKey] == "1" {
       DispatchQueue.main.async { [weak self] in
@@ -71,6 +24,53 @@ import UIKit
       }
     }
     return launched
+  }
+
+  func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
+    GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    let messenger = engineBridge.applicationRegistrar.messenger()
+    let channel = FlutterMethodChannel(
+      name: "tirtc_example/permissions",
+      binaryMessenger: messenger
+    )
+    channel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(
+          code: "UNAVAILABLE",
+          message: "permissions channel owner unavailable",
+          details: nil
+        ))
+        return
+      }
+      switch call.method {
+      case "checkMicrophonePermission":
+        result(self.capturePermissionGranted(for: .audio))
+      case "requestMicrophonePermission":
+        self.requestCaptureAccessIfNeeded(for: .audio, result: result)
+      case "requestGalleryWritePermission":
+        self.requestPhotoLibraryAddAccessIfNeeded { granted in result(granted) }
+      case "requestLocalNetworkPermission":
+        self.requestLocalNetworkPermission(result: result)
+      default:
+        result(FlutterMethodNotImplemented)
+      }
+    }
+
+    let preferencesChannel = FlutterMethodChannel(
+      name: preferencesChannelName,
+      binaryMessenger: messenger
+    )
+    preferencesChannel.setMethodCallHandler { [weak self] call, result in
+      guard let self else {
+        result(FlutterError(
+          code: "UNAVAILABLE",
+          message: "preferences channel owner unavailable",
+          details: nil
+        ))
+        return
+      }
+      self.handlePreferencesCall(call, result: result)
+    }
   }
 
   private func handlePreferencesCall(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
