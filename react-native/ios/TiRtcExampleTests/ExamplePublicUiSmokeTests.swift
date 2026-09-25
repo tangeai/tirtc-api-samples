@@ -173,6 +173,7 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     RunLoop.current.run(until: Date().addingTimeInterval(10))
     tapControl("Ti Cloud Storage Raw Dump")
     waitForLogUpload(role: "ti-cloud-storage")
+    marker("ti-cloud-storage-log-upload-ok")
     marker("ti-cloud-storage-raw-dump-upload-ok")
 
     RunLoop.current.run(until: Date().addingTimeInterval(5))
@@ -267,7 +268,11 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     waitClientDownlink()
     waitPlayerDiagnostics()
     runAudioOutputVolumeProbe()
-    if !isSimulatorDownlinkOnly() {
+    if isSimulatorDownlinkOnly() {
+      tapMenuAction(menu: "TiRTC Player More", action: "TiRTC Player Upload Logs")
+      marker("client_log_upload_clicked manual=true")
+      waitForLogUpload(role: "client")
+    } else {
       runTalkbackProbe()
       waitStreamMessageBubble()
       if isIntegrationLayer() {

@@ -9,8 +9,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
   private let localNetworkPermissionServiceType = "_tirtc-demo._tcp"
   private let localNetworkPermissionRetryDelaySeconds: TimeInterval = 12.0
 
-  var window: UIWindow?
-
   var reactNativeDelegate: ReactNativeDelegate?
   var reactNativeFactory: RCTReactNativeFactory?
   private var localNetworkPermissionBrowser: NWBrowser?
@@ -28,24 +26,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     reactNativeDelegate = delegate
     reactNativeFactory = factory
 
-    window = UIWindow(frame: UIScreen.main.bounds)
-
-    factory.startReactNative(
-      withModuleName: "TiRtcExample",
-      in: window,
-      launchOptions: launchOptions
-    )
-
     requestLocalNetworkPermissionIfNeeded()
 
     return true
   }
 
-  func applicationDidBecomeActive(_ application: UIApplication) {
-    requestLocalNetworkPermissionIfNeeded()
+  func application(
+    _ application: UIApplication,
+    configurationForConnecting connectingSceneSession: UISceneSession,
+    options: UIScene.ConnectionOptions
+  ) -> UISceneConfiguration {
+    let configuration = UISceneConfiguration(
+      name: "Default Configuration",
+      sessionRole: connectingSceneSession.role
+    )
+    configuration.delegateClass = SceneDelegate.self
+    return configuration
   }
 
-  private func requestLocalNetworkPermissionIfNeeded() {
+  func requestLocalNetworkPermissionIfNeeded() {
     guard !localNetworkPermissionResolved, localNetworkPermissionBrowser == nil else {
       return
     }
