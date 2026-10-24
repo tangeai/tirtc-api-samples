@@ -943,12 +943,22 @@ class _DemoPlayerPageState extends State<DemoPlayerPage>
                     playing: playing,
                     audioOutputEnabled: _commandConnected && _audioOutputAvailable,
                     audioMuted: _audioMuted,
-                    localAudioControl: LocalAudioControlButton(
-                      key: DemoWidgetKeys.playerLocalAudioButton,
-                      enabled: _commandConnected,
-                      busy: _localAudioController.busy,
-                      running: _localAudioController.running,
-                      onPressed: _localAudioController.toggle,
+                    localAudioControl: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        RobotVoiceToggle(
+                          enabled: _commandConnected && !_localAudioController.busy && !_localAudioController.running,
+                          selected: _localAudioController.robotVoiceEnabled,
+                          onChanged: _localAudioController.setRobotVoiceEnabled,
+                        ),
+                        LocalAudioControlButton(
+                          key: DemoWidgetKeys.playerLocalAudioButton,
+                          enabled: _commandConnected,
+                          busy: _localAudioController.busy,
+                          running: _localAudioController.running,
+                          onPressed: _localAudioController.toggle,
+                        ),
+                      ],
                     ),
                     selectedVideoPosition:
                         _selectedVideoStreamId == null
