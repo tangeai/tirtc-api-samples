@@ -13,24 +13,14 @@ internal fun layoutVideoMosaic(
 ) {
     val cells = videoMosaicCells(orderedIds, selectedId, maximizedId, wide)
 
-    when {
-        maximizedId != null || orderedIds.size <= 1 -> {
-            grid.columnCount = 1
-            grid.rowCount = 1
-        }
-        orderedIds.size == 2 && !wide -> {
-            grid.columnCount = 1
-            grid.rowCount = 2
-        }
-        orderedIds.size == 2 -> {
-            grid.columnCount = 2
-            grid.rowCount = 1
-        }
-        else -> {
-            grid.columnCount = 2
-            grid.rowCount = 2
-        }
+    val (columns, rows) = when {
+        maximizedId != null || orderedIds.size <= 1 -> 1 to 1
+        orderedIds.size == 2 && !wide -> 1 to 2
+        orderedIds.size == 2 -> 2 to 1
+        else -> 2 to 2
     }
+    if (columns > grid.columnCount) grid.columnCount = columns
+    if (rows > grid.rowCount) grid.rowCount = rows
 
     cells.forEach { cell ->
         val lane = lanes[cell.id] ?: return@forEach
@@ -41,6 +31,8 @@ internal fun layoutVideoMosaic(
         lane.layoutParams = params
         lane.alpha = if (cell.primary) 1f else 0.82f
     }
+    grid.columnCount = columns
+    grid.rowCount = rows
     grid.requestLayout()
 }
 

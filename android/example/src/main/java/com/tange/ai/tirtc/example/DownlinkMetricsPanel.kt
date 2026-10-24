@@ -10,6 +10,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import com.tange.ai.tirtc.TiRtcAudioOutput
 import com.tange.ai.tirtc.TiRtcAudioOutputMetricsSnapshot
+import com.tange.ai.tirtc.TiRtcAudioOutputContinuityMetricsSnapshot
 import com.tange.ai.tirtc.TiRtcConn
 import com.tange.ai.tirtc.TiRtcConnMetricsSnapshot
 import com.tange.ai.tirtc.TiRtcVideoOutput
@@ -25,10 +26,11 @@ internal class DownlinkMetricsPanel(
     private val avParameters = metricLine("媒体参数")
     private val videoReceive = metricLine("视频接收")
     private val audioReceive = metricLine("音频接收")
+    private val audioContinuity = metricLine("音频源连续性")
     private val latency = metricLine("估算延迟")
     private val startup = metricLine("启动耗时")
     private val stutter = metricLine("卡顿统计")
-    private val rows = listOf(avParameters, videoReceive, audioReceive, latency, startup, stutter)
+    private val rows = listOf(avParameters, videoReceive, audioReceive, audioContinuity, latency, startup, stutter)
     private val summary = TextView(context)
 
     init {
@@ -106,6 +108,7 @@ internal class DownlinkMetricsPanel(
     ) {
         val connMetrics: TiRtcConnMetricsSnapshot? = connection?.getMetricsSnapshot()?.snapshot
         val audioMetrics: TiRtcAudioOutputMetricsSnapshot? = audio?.getMetricsSnapshot()?.snapshot
+        val continuity: TiRtcAudioOutputContinuityMetricsSnapshot? = audio?.getContinuityMetricsSnapshot()?.snapshot
         val videoMetrics: TiRtcVideoOutputMetricsSnapshot? = video?.getMetricsSnapshot()?.snapshot
         val audioDebug = audio?.getDebugSnapshot()?.snapshot
         val videoDebug: TiRtcVideoOutputDebugSnapshot? = video?.getDebugSnapshot()?.snapshot
@@ -119,6 +122,11 @@ internal class DownlinkMetricsPanel(
         audioReceive.value.text =
             "码率 ${formatKbps(audioMetrics?.audioInputBitrateKbps)} · " +
             "PPS ${formatRate(audioMetrics?.audioInputPacketRate, "/s")}"
+        audioContinuity.value.text =
+            "观察 ${formatFrameCount(continuity?.observedSourceFrameCount)} · " +
+            "接纳 ${formatFrameCount(continuity?.acceptedSourceFrameCount)} · " +
+            "接纳率 ${formatAcceptanceRatio(continuity)} · " +
+            "缺口 ${formatDuration(continuity?.missingSourceDurationMs)}"
         latency.value.text =
             "视频 ${formatDuration(videoMetrics?.estimatedOutputLatencyMs)} · " +
             "音频 ${formatDuration(audioMetrics?.estimatedOutputLatencyMs)}"
@@ -246,6 +254,15 @@ internal class DownlinkMetricsPanel(
             return "--"
         }
         return "$count 次"
+    }
+
+    private fun formatFrameCount(count: Long?): String = if (count == null || count < 0) "--" else "$count 帧"
+
+    private fun formatAcceptanceRatio(metrics: TiRtcAudioOutputContinuityMetricsSnapshot?): String {
+        if (metrics == null || metrics.observedSourceFrameCount <= 0) {
+            return "--"
+        }
+        return formatPercent(metrics.acceptedSourceFrameCount.toDouble() * 100.0 / metrics.observedSourceFrameCount)
     }
 
     private fun Double.toStringWithPrecision(digits: Int): String {
