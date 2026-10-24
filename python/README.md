@@ -1,3 +1,3 @@
 # TiRTC Python API Samples
 
-这两个程序固定消费 `tirtc==2.5.0`。凭据由环境变量传入；运行时必须提供绝对路径的 `--cache-dir` 与 `--output-dir`。
+These canonical Examples use TiRTC 2.6.0-alpha.17 from the exact GitHub wheel URLs and SHA-256 in `requirements.txt`. Run `python install.py` before either program; unsupported Python/platform/libc combinations fail before pip. Credentials enter through environment variables. Provide absolute `--cache-dir` and `--output-dir` paths.
