@@ -410,15 +410,26 @@ export class ClientSession {
       return null;
     }
     const audioDebugResult = audioOutput.getDebugSnapshot();
+    const audioContinuityResult = audioOutput.getContinuityMetricsSnapshot();
     const videoDebugResult = videoOutput.getDebugSnapshot();
     return createDownlinkMetricsOverlayModel({
       connSnapshot,
       videoSnapshot,
       audioSnapshot,
+      audioContinuitySnapshot:
+        audioContinuityResult.code === 0 ? audioContinuityResult.snapshot : null,
       videoDebugSnapshot: videoDebugResult.code === 0 ? videoDebugResult.snapshot : null,
       audioDebugSnapshot: audioDebugResult.code === 0 ? audioDebugResult.snapshot : null,
       requestedDecoderPreference,
     });
+  }
+
+  resetOutputMetricsSession(): boolean {
+    const audioOutput = this.audioOutput;
+    if (audioOutput === null || audioOutput.resetMetricsSession() !== 0) {
+      return false;
+    }
+    return [...this.videoOutputs.values()].every((output) => output.resetMetricsSession() === 0);
   }
 
   async stop() {

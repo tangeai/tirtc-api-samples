@@ -1,5 +1,6 @@
 import type {
   TiRtcAudioCodec,
+  TiRtcAudioOutputContinuityMetricsSnapshot,
   TiRtcAudioOutputDebugSnapshot,
   TiRtcAudioOutputMetricsSnapshot,
   TiRtcConnMetricsSnapshot,
@@ -37,6 +38,9 @@ export type DownlinkMetricsOverlayModel = Readonly<{
   audioStutterAverageMs: number | null;
   audioStutterRate: number | null;
   audioEstimatedOutputLatencyMs: number | null;
+  audioObservedSourceFrameCount: number | null;
+  audioAcceptedSourceFrameCount: number | null;
+  audioMissingSourceDurationMs: number | null;
   videoInputBitrateKbps: number | null;
   videoInputFps: number | null;
   videoDecodedFps: number | null;
@@ -66,6 +70,7 @@ export function createDownlinkMetricsOverlayModel({
   connSnapshot,
   videoSnapshot,
   audioSnapshot,
+  audioContinuitySnapshot,
   videoDebugSnapshot,
   audioDebugSnapshot,
   requestedDecoderPreference,
@@ -73,6 +78,7 @@ export function createDownlinkMetricsOverlayModel({
   connSnapshot: TiRtcConnMetricsSnapshot;
   videoSnapshot: TiRtcVideoOutputMetricsSnapshot;
   audioSnapshot: TiRtcAudioOutputMetricsSnapshot;
+  audioContinuitySnapshot: TiRtcAudioOutputContinuityMetricsSnapshot | null;
   videoDebugSnapshot: TiRtcVideoOutputDebugSnapshot | null;
   audioDebugSnapshot: TiRtcAudioOutputDebugSnapshot | null;
   requestedDecoderPreference: VideoDecoderPreference;
@@ -110,6 +116,9 @@ export function createDownlinkMetricsOverlayModel({
     audioStutterAverageMs: audioSnapshot.stutter.stutterAverageMs,
     audioStutterRate: audioSnapshot.stutter.stutterRatePercent,
     audioEstimatedOutputLatencyMs: nonNegativeOrNull(audioSnapshot.estimatedOutputLatencyMs),
+    audioObservedSourceFrameCount: nonNegativeOrNull(audioContinuitySnapshot?.observedSourceFrameCount),
+    audioAcceptedSourceFrameCount: nonNegativeOrNull(audioContinuitySnapshot?.acceptedSourceFrameCount),
+    audioMissingSourceDurationMs: nonNegativeOrNull(audioContinuitySnapshot?.missingSourceDurationMs),
     videoInputBitrateKbps: videoSnapshot.videoInputBitrateKbps,
     videoInputFps: videoSnapshot.videoInputFps,
     videoDecodedFps: videoSnapshot.videoDecodedFps,
@@ -154,6 +163,18 @@ export function downlinkMetricsOverlayRows(metrics: DownlinkMetricsOverlayModel)
       label: '音频接收',
       value: `码率 ${formatKbps(metrics.audioInputBitrateKbps)} · PPS ${formatPerSecond(
         metrics.audioInputPacketRate,
+      )}`,
+      periodTextPresent: false,
+      periodAvailable: false,
+      unavailableReason: null,
+    },
+    {
+      rowKey: 'audio_source_continuity',
+      label: '音频源连续性',
+      value: `observed ${formatRawCount(metrics.audioObservedSourceFrameCount)} · accepted ${formatRawCount(
+        metrics.audioAcceptedSourceFrameCount,
+      )} · missing ${formatDuration(metrics.audioMissingSourceDurationMs)} · accepted/observed ${formatRatio(
+        downlinkMetricsAudioSourceAcceptanceRatio(metrics),
       )}`,
       periodTextPresent: false,
       periodAvailable: false,
@@ -206,8 +227,20 @@ export function downlinkMetricsAvStatsReady(metrics: DownlinkMetricsOverlayModel
   return audioOutputMetricsReady(metrics) && videoOutputMetricsReady(metrics);
 }
 
-export function downlinkMetricsAudioOutputContinuityRatio(metrics: DownlinkMetricsOverlayModel): number | null {
-  return rateRatio(metrics.audioRenderCallbackRate, metrics.audioInputPacketRate);
+export function downlinkMetricsAudioSourceAcceptanceRatio(metrics: DownlinkMetricsOverlayModel): number | null {
+  const accepted = metrics.audioAcceptedSourceFrameCount;
+  const observed = metrics.audioObservedSourceFrameCount;
+  if (
+    accepted === null ||
+    observed === null ||
+    !Number.isFinite(accepted) ||
+    !Number.isFinite(observed) ||
+    accepted < 0 ||
+    observed <= 0
+  ) {
+    return null;
+  }
+  return accepted / observed;
 }
 
 export function downlinkMetricsAudioOutputHealthOk(metrics: DownlinkMetricsOverlayModel): boolean {
@@ -354,6 +387,20 @@ function formatCount(count: number | null): string {
     return '--';
   }
   return `${Math.round(count)} 次`;
+}
+
+function formatRawCount(count: number | null): string {
+  if (count === null || !Number.isFinite(count) || count < 0) {
+    return '--';
+  }
+  return `${Math.round(count)}`;
+}
+
+function formatRatio(ratio: number | null): string {
+  if (ratio === null || !Number.isFinite(ratio) || ratio < 0) {
+    return '--';
+  }
+  return `${(ratio * 100).toFixed(1)}%`;
 }
 
 function formatStartup(connectDurationMs: number | null, firstOutputMs: number | null): string {

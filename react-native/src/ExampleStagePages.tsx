@@ -121,6 +121,11 @@ export function PlayerScreen({
       setMediaStatus(success ? '诊断数据上传成功' : '诊断数据上传失败 · 点击重试上传');
     }
   };
+  const resetOutputMetrics = () => {
+    const reset = session.resetOutputMetricsSession();
+    setMediaStatus(reset ? '区间指标已重置' : '区间指标重置失败');
+    setMetricsOverlay(session.readMetricsOverlay(config.videoDecoderPreference));
+  };
   const toggleTalkback = async () => {
     if (talkbackBusy) {
       return;
@@ -273,7 +278,7 @@ export function PlayerScreen({
       ) : null}
       {metricsOverlay !== null ? (
         <View style={[styles.metricsWrap, {top: metricsTop}]}>
-          <DownlinkMetricsOverlay metrics={metricsOverlay} />
+          <DownlinkMetricsOverlay metrics={metricsOverlay} onResetMetrics={resetOutputMetrics} />
         </View>
       ) : (
         <View style={[styles.diagnosticsWrap, {top: metricsTop}]}>
