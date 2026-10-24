@@ -3,6 +3,7 @@ package com.tange.ai.tirtc.example;
 import com.tange.ai.tirtc.*;
 import java.io.OutputStream;
 import java.nio.ByteBuffer;
+import java.security.SecureRandom;
 import java.nio.file.*;
 import java.time.Duration;
 import java.util.*;
@@ -20,22 +21,29 @@ public final class RtcExample {
         Properties result = new Properties();
         int audioId = Integer.parseInt(flags.getOrDefault("audio-stream-id","10"));
         int videoId = Integer.parseInt(flags.getOrDefault("video-stream-id","11"));
-        Frames frames = new Frames(); AtomicBoolean command = new AtomicBoolean(), message = new AtomicBoolean();
+        int secondaryId = Integer.parseInt(flags.getOrDefault("secondary-video-stream-id",Integer.toString(videoId)));
+        Frames secondary = new Frames();
+        Frames frames = new Frames(); final MessageProof messages = new MessageProof(videoId, flags.containsKey("verify-message-echo"));
         ClientOptions options = options(flags,"TIRTC_APP_ID","TIRTC_ACCESS_KEY_ID","TIRTC_SECRET_KEY_ID");
         try (RtcClient client = new RtcClient(options);
              Connection connection = client.newConnection(new Connection.Listener() {
                  public void onStateChanged(ConnectionState state, TiRtcException error) { if (error != null) frames.failure.compareAndSet(null,error); }
-                 public void onCommand(long id, ByteBuffer data) { command.set(true); }
-                 public void onStreamMessage(int id, Duration time, ByteBuffer data) { message.set(true); }
+                 public void onCommand(long id, ByteBuffer data) { messages.command(id,data); }
+                 public void onStreamMessage(int id, Duration time, ByteBuffer data) { messages.stream(id,time,data); }
              })) {
             frames.reentry = connection::disconnect;
             try (AudioOutput audio = new AudioOutput(connection,audioId,frames.audio());
                  VideoOutput video = new VideoOutput(connection,videoId,frames.video());
                  EncodedAudioOutput encodedAudio = new EncodedAudioOutput(connection,audioId,frames.encodedAudio());
-                 EncodedVideoOutput encodedVideo = new EncodedVideoOutput(connection,videoId,frames.encodedVideo())) {
+                 EncodedVideoOutput encodedVideo = new EncodedVideoOutput(connection,videoId,frames.encodedVideo());
+                 VideoOutput secondVideo = secondaryId==videoId?null:new VideoOutput(connection,secondaryId,secondary.video());
+                 EncodedVideoOutput secondEncoded = secondaryId==videoId?null:new EncodedVideoOutput(connection,secondaryId,secondary.encodedVideo())) {
+                requireNoFrame(video); if(secondVideo!=null) requireNoFrame(secondVideo);
+                result.setProperty("zeroFrameSnapshot","true");
                 connection.connect(required(flags,"remote-id")).get(90,TimeUnit.SECONDS);
                 result.setProperty("connected","true");
                 connection.subscribeAudio(audioId); connection.subscribeVideo(videoId);
+                if(secondVideo!=null) connection.subscribeVideo(secondaryId);
                 RawDump rawDump=null;
                 long rawDumpStarted=0;
                 boolean rawDumpEnabled=flags.containsKey("raw-dump")||flags.containsKey("raw-dump-seconds");
@@ -46,6 +54,7 @@ public final class RtcExample {
                     rawDumpStarted=System.nanoTime();
                 }
                 await(() -> frames.all(),frames,"four media outputs");
+                if(secondVideo!=null) verifyRoutes(video,encodedVideo,frames,secondary,videoId,secondaryId,() -> connection.requestVideoKeyframe(videoId),result);
                 if(rawDump!=null) {
                     if("integration.raw-dump-recovery".equals(flags.get("case-id"))) {
                         try { connection.startRawDump(new RawDumpOptions(new int[]{audioId},new int[]{videoId})); throw new IllegalStateException("duplicate raw dump start accepted"); }
@@ -67,10 +76,12 @@ public final class RtcExample {
                     if("integration.raw-dump-recovery".equals(flags.get("case-id"))) check(rawDump.stop()==archive,"repeated raw dump stop changed result");
                     rawDump.close();
                 }
-                connection.sendCommand(0x2001,"java-client-command".getBytes("UTF-8"));
-                connection.sendStreamMessage(videoId,Duration.ofMillis(System.currentTimeMillis() & 0xffffffffL),"java-client-message".getBytes("UTF-8"));
+                for(int index=0;index<2;index++) {
+                    connection.sendCommand(messages.commandId(index),messages.commandBytes(index));
+                    if(messages.fixture) connection.sendStreamMessage(videoId,Duration.ofMillis(messages.timestamp(index)),messages.streamBytes(index,false));
+                }
                 int beforeKey = frames.keys.get(); connection.requestVideoKeyframe(videoId);
-                await(() -> command.get() && message.get() && frames.keys.get()>beforeKey,frames,"messages and requested keyframe");
+                await(() -> messages.complete() && frames.keys.get()>beforeKey,frames,"messages and requested keyframe");
                 result.setProperty("command","true"); result.setProperty("streamMessage","true"); result.setProperty("keyFrame","true");
                 try (RecordingTask recording = connection.startRecording(new StartRecordingOptions(videoId,audioId))) {
                     int beforeVideo = frames.v.get(), beforeAudio = frames.a.get(), key = frames.keys.get();
@@ -80,19 +91,86 @@ public final class RtcExample {
                 }
                 try (SnapshotFile file = video.takeSnapshot()) { save(file.path(),output.resolve("rtc-snapshot.jpg"),true); file.delete(); check(!Files.exists(file.path()),"snapshot deleted"); }
                 frames.verify(result);
-                connection.unsubscribeVideo(videoId); connection.unsubscribeAudio(audioId);
+                connection.unsubscribeVideo(videoId); if(secondVideo!=null) connection.unsubscribeVideo(secondaryId); connection.unsubscribeAudio(audioId);
             }
             if(flags.containsKey("upload-logs")) { check(!client.uploadLogs().isEmpty(),"log upload returned identifier"); result.setProperty("uploadLogs","true"); }
         }
+        messages.write(result);
         result.setProperty("filesDeleted","true"); result.setProperty("closed","true"); write(output,result);
+    }
+    static void requireNoFrame(VideoOutput video) {
+        try(SnapshotFile unexpected=video.takeSnapshot()) { throw new IllegalStateException("zero-frame snapshot accepted"); }
+        catch(TiRtcException expected) { check(expected.category()==ErrorCategory.NO_FRAME,"zero-frame snapshot category"); }
+    }
+    static Map<String,Integer> routeCounts(Frames first,Frames second,int firstId,int secondId) {
+        Map<String,Integer> values=new LinkedHashMap<String,Integer>();
+        values.put("video:"+firstId,first.v.get());values.put("encoded_video:"+firstId,first.ev.get());
+        values.put("video:"+secondId,second.v.get());values.put("encoded_video:"+secondId,second.ev.get());return values;
+    }
+    static void routeReceipt(Properties result,String phase,Map<String,Integer> counts) {
+        for(Map.Entry<String,Integer> entry:counts.entrySet()) result.setProperty("routes."+phase+"."+entry.getKey(),entry.getValue().toString());
+    }
+    static void verifyRoutes(VideoOutput video,EncodedVideoOutput encoded,Frames first,Frames second,int firstId,int secondId,Runnable requestKey,Properties result) throws Exception {
+        await(() -> first.v.get()>0&&first.ev.get()>0&&second.v.get()>0&&second.ev.get()>0,first,"both independent routes");
+        Map<String,Integer> common=routeCounts(first,second,firstId,secondId);
+        await(() -> first.v.get()>common.get("video:"+firstId)&&first.ev.get()>common.get("encoded_video:"+firstId)&&second.v.get()>common.get("video:"+secondId)&&second.ev.get()>common.get("encoded_video:"+secondId),first,"common route window");
+        routeReceipt(result,"common_before",common);routeReceipt(result,"common_after",routeCounts(first,second,firstId,secondId));
+        encoded.detach();video.detach();
+        Map<String,Integer> isolated=routeCounts(first,second,firstId,secondId);
+        await(() -> second.v.get()>isolated.get("video:"+secondId)&&second.ev.get()>isolated.get("encoded_video:"+secondId),second,"unaffected route continues");
+        check(first.v.get()==isolated.get("video:"+firstId)&&first.ev.get()==isolated.get("encoded_video:"+firstId),"detached output callback barrier");
+        routeReceipt(result,"isolated_before",isolated);routeReceipt(result,"isolated_after",routeCounts(first,second,firstId,secondId));
+        video.attach(firstId);encoded.attach(firstId);Map<String,Integer> restored=routeCounts(first,second,firstId,secondId);requestKey.run();
+        await(() -> first.v.get()>restored.get("video:"+firstId)&&first.ev.get()>restored.get("encoded_video:"+firstId)&&second.v.get()>restored.get("video:"+secondId)&&second.ev.get()>restored.get("encoded_video:"+secondId),first,"both routes after restoration");
+        check(second.failure.get()==null,"independent output errors");
+        routeReceipt(result,"restored_before",restored);routeReceipt(result,"restored_after",routeCounts(first,second,firstId,secondId));result.setProperty("multiRoute","true");
+    }
+    static final class MessageProof {
+        static final byte[] PREFIX = new byte[]{116,105,114,116,99,45,115,116,114,101,97,109,45,118,49,0};
+        final byte[] nonce = new byte[16]; final int streamId; final boolean fixture;
+        final List<byte[]> commands = new ArrayList<byte[]>(), streams = new ArrayList<byte[]>();
+        String failure;
+        MessageProof(int streamId,boolean fixture) { this.streamId=streamId;this.fixture=fixture;new SecureRandom().nextBytes(nonce); }
+        long commandId(int index) { return index==0?0x2001L:0xffffffffL; }
+        long timestamp(int index) { return index==0?0L:0xffffffffL; }
+        byte[] commandBytes(int index) { return ByteBuffer.allocate(20).put(nonce).put((byte)index).put((byte)0).put((byte)255).put((byte)128).array(); }
+        byte[] streamBytes(int index,boolean response) { return ByteBuffer.allocate(PREFIX.length+1+16+4+3).put(PREFIX).put((byte)(response?1:0)).put(nonce).putInt(index).put((byte)0).put((byte)255).put((byte)128).array(); }
+        static byte[] copy(ByteBuffer buffer) { ByteBuffer view=buffer.duplicate();byte[] bytes=new byte[view.remaining()];view.get(bytes);return bytes; }
+        synchronized void command(long id,ByteBuffer buffer) {
+            byte[] bytes=copy(buffer);int index=commands.size();
+            if(index>=2||id!=commandId(index)||!Arrays.equals(bytes,commandBytes(index))) failure="command ID/order/binary mismatch";
+            commands.add(bytes);
+        }
+        synchronized void stream(int id,Duration timestamp,ByteBuffer buffer) {
+            byte[] bytes=copy(buffer);
+            if(!fixture||bytes.length<PREFIX.length||!Arrays.equals(PREFIX,Arrays.copyOf(bytes,PREFIX.length)))return;
+            int index=streams.size();
+            if(index>=2||id!=streamId||timestamp.toMillis()!=timestamp(index)||!Arrays.equals(bytes,streamBytes(index,true))) failure="stream ID/timestamp/order/binary mismatch";
+            streams.add(bytes);
+        }
+        synchronized boolean complete() { if(failure!=null)throw new IllegalStateException(failure);return commands.size()==2&&(!fixture||streams.size()==2); }
+        static String hex(byte[] bytes) { StringBuilder out=new StringBuilder();for(byte b:bytes)out.append(String.format("%02x",b & 255));return out.toString(); }
+        synchronized void write(Properties result) {
+            check(complete(),"exact remote message delivery");result.setProperty("messagePeerMode",fixture?"stream-echo":"device");
+            for(int index=0;index<commands.size();index++) {result.setProperty("command"+index+"Id",Long.toString(commandId(index)));result.setProperty("command"+index+"Bytes",hex(commands.get(index)));}
+            for(int index=0;index<streams.size();index++) {result.setProperty("stream"+index+"Id",Integer.toString(streamId));result.setProperty("stream"+index+"Timestamp",Long.toString(timestamp(index)));result.setProperty("stream"+index+"Bytes",hex(streams.get(index)));}
+        }
     }
     static Map<String,String> flags(String[] args) {
         Map<String,String> flags = new HashMap<String,String>();
         for(int i=0;i<args.length;i++) {
             if(!args[i].startsWith("--")) throw new IllegalArgumentException("expected named option");
             String name=args[i].substring(2);
-            if(name.equals("help")||name.equals("upload-logs")||name.equals("raw-dump")) flags.put(name,"true");
-            else { if(++i==args.length) throw new IllegalArgumentException("missing option value"); flags.put(name,args[i]); }
+            if(name.equals("help")||name.equals("upload-logs")||name.equals("raw-dump")||name.equals("verify-message-echo")) flags.put(name,"true");
+            else {
+                if(++i==args.length) throw new IllegalArgumentException("missing option value");
+                // The Cloud bootstrap supplies one --video-channel-id per uploaded
+                // route. The canonical Java Example keeps the first route as the
+                // primary and receives the independently selected secondary route
+                // through --secondary-video-channel-id.
+                if(name.equals("video-channel-id")) flags.putIfAbsent(name,args[i]);
+                else flags.put(name,args[i]);
+            }
         }
         return flags;
     }
