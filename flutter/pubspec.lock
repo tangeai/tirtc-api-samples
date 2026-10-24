@@ -1,0 +1,10 @@
+packages:
+  tirtc_flutter:
+    dependency: direct main
+    description:
+      path: .
+      ref: v2.6.0-alpha.17
+      resolved-ref: 4b8a40c92a68da13f955276eb848130b6ebcc656
+      url: https://github.com/tangeai/tirtc-sdk-flutter.git
+    source: git
+    version: 2.6.0-alpha.17

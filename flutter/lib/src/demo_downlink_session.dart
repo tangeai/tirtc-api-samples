@@ -228,6 +228,12 @@ final class DemoDownlinkSession {
 
   Future<int> stopLocalAudio() => _audioInput.stop();
 
+  void setLocalAudioPcmCallback(TiRtcOnPcmCaptured? callback) {
+    _audioInput.onPcmCaptured = callback;
+  }
+
+  Future<int> submitLocalAudioPcm(Uint8List pcm) => _audioInput.submitPcm(pcm);
+
   Future<void> detachLocalAudioFromBoundConnection() async {
     if (!_localAudioAttached) {
       return;
@@ -473,6 +479,7 @@ final class DemoDownlinkSession {
       }
       recordError(code);
     }
+    _audioInput.onPcmCaptured = null;
     recordError(await _audioInput.stop());
     if (_localAudioAttached) {
       final int detachCode = await _audioInput.detach(connection: _connection);

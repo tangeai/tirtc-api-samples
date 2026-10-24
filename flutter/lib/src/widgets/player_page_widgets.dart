@@ -371,6 +371,30 @@ class LocalAudioControlButton extends StatelessWidget {
   }
 }
 
+class RobotVoiceToggle extends StatelessWidget {
+  const RobotVoiceToggle({super.key, required this.enabled, required this.selected, required this.onChanged});
+
+  final bool enabled;
+  final bool selected;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '机器人变声',
+      toggled: selected,
+      child: FilterChip(
+        key: DemoWidgetKeys.playerRobotVoiceToggle,
+        label: const Text('机器人', style: TextStyle(fontSize: 11)),
+        selected: selected,
+        showCheckmark: false,
+        avatar: const Icon(Icons.smart_toy_outlined, size: 16),
+        onSelected: enabled ? onChanged : null,
+      ),
+    );
+  }
+}
+
 class AudioOutputVolumeButton extends StatelessWidget {
   const AudioOutputVolumeButton({super.key, required this.enabled, required this.muted, required this.onPressed});
 
@@ -598,8 +622,8 @@ class PlayerControlPanel extends StatelessWidget {
                                 recording: recording,
                               ),
                             ),
-                            captureControls!,
-                            more!,
+                            if (captureControls != null) captureControls,
+                            if (more != null) more,
                           ],
                         ],
                       )
