@@ -33,7 +33,9 @@
                     .accessibilityHidden(true)
                 VStack(spacing: 16) {
                     HStack {
-                        Button(action: { presentationMode.wrappedValue.dismiss() }) {
+                        Button {
+                            presentationMode.wrappedValue.dismiss()
+                        } label: {
                             Image(systemName: "xmark")
                                 .font(.headline)
                                 .frame(width: 44, height: 44)

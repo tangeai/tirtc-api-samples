@@ -65,19 +65,30 @@ final class InputMediaCaptureCase: NSObject, TiRtcConnServiceDelegate, @unchecke
                     domain: "InputMediaCapture", code: Int(code), userInfo: [NSLocalizedDescriptionKey: operation])
             }
         }
-        status("input_media_permission_request")
-        #if targetEnvironment(simulator)
-            let cameraAvailable = AVCaptureDevice.default(for: .video) != nil
-            if !cameraAvailable { status("input_media_camera_unavailable") }
-        #else
-            let cameraAvailable = true
-        #endif
-        let microphoneGranted = await AVCaptureDevice.requestAccess(for: .audio)
-        let cameraGranted = cameraAvailable ? await AVCaptureDevice.requestAccess(for: .video) : true
-        guard microphoneGranted && cameraGranted else {
-            throw NSError(
-                domain: "InputMediaCapture", code: 6024,
-                userInfo: [NSLocalizedDescriptionKey: "capture permission denied"])
+        let customNoCapture = payload["input_mode"] == "custom-no-capture"
+        let cameraAvailable: Bool
+        if customNoCapture {
+            cameraAvailable = false
+            status("input_media_no_capture_ready")
+        } else {
+            status("input_media_permission_request")
+            #if targetEnvironment(simulator)
+                cameraAvailable = AVCaptureDevice.default(for: .video) != nil
+                if !cameraAvailable { status("input_media_camera_unavailable") }
+            #else
+                cameraAvailable = true
+            #endif
+            let microphoneGranted = await AVCaptureDevice.requestAccess(for: .audio)
+            #if targetEnvironment(simulator)
+                let cameraGranted = cameraAvailable ? await AVCaptureDevice.requestAccess(for: .video) : true
+            #else
+                let cameraGranted = await AVCaptureDevice.requestAccess(for: .video)
+            #endif
+            guard microphoneGranted && cameraGranted else {
+                throw NSError(
+                    domain: "InputMediaCapture", code: 6024,
+                    userInfo: [NSLocalizedDescriptionKey: "capture permission denied"])
+            }
         }
         let initOptions = TiRtcInitOptions(appId: try required("app_id"))
         initOptions.endpoint = try required("endpoint")
@@ -114,53 +125,93 @@ final class InputMediaCaptureCase: NSObject, TiRtcConnServiceDelegate, @unchecke
                 throw NSError(domain: "InputMediaCapture", code: 6028)
             }
             let audioOptions = TiRtcAudioInputOptions()
-            audioOptions.media = 2
-            try requireOk("warm configure", audio.setOptions(audioOptions))
-            try requireOk("warm attach", audio.attach(connection: conn, streamId: 13))
-            try requireOk("warm start", audio.start())
-            try await Task.sleep(nanoseconds: 300_000_000)
-            try requireOk("warm stop", audio.stop())
-            try requireOk("warm detach", audio.detach(connection: conn))
+            if !customNoCapture {
+                audioOptions.media = 2
+                try requireOk("warm configure", audio.setOptions(audioOptions))
+                try requireOk("warm attach", audio.attach(connection: conn, streamId: 13))
+                try requireOk("warm start", audio.start())
+                try await Task.sleep(nanoseconds: 300_000_000)
+                try requireOk("warm stop", audio.stop())
+                try requireOk("warm detach", audio.detach(connection: conn))
+            }
             audioOptions.media = Int(try required("audio_media"))!
+            if customNoCapture {
+                audioOptions.mode = .custom
+                audioOptions.captureEnabled = false
+            }
             if audioOptions.media == -1 { audioOptions.setValue(2, forKey: "codec") }
             try requireOk("audio configure", audio.setOptions(audioOptions))
             let invalidAudio = TiRtcAudioInputOptions()
             invalidAudio.media = 65
             try requireOk("invalid audio", audio.setOptions(invalidAudio), expected: 6000)
             let videoOptions = TiRtcVideoInputOptions()
-            videoOptions.media = Int(try required("video_media"))!
-            try requireOk("video configure", video.setOptions(videoOptions))
-            let invalidVideo = TiRtcVideoInputOptions()
-            invalidVideo.media = 67
-            try requireOk("invalid video", video.setOptions(invalidVideo), expected: 6000)
+            if !customNoCapture {
+                videoOptions.media = Int(try required("video_media"))!
+                try requireOk("video configure", video.setOptions(videoOptions))
+                let invalidVideo = TiRtcVideoInputOptions()
+                invalidVideo.media = 67
+                try requireOk("invalid video", video.setOptions(invalidVideo), expected: 6000)
+            }
             try requireOk("audio attach", audio.attach(connection: conn, streamId: 14))
             if cameraAvailable { try requireOk("video attach", video.attach(connection: conn, streamId: 15)) }
             try requireOk("audio start", audio.start())
             if cameraAvailable { try requireOk("video start", video.start()) }
             try requireOk("running audio", audio.setOptions(audioOptions), expected: 6026)
             if cameraAvailable { try requireOk("running video", video.setOptions(videoOptions), expected: 6026) }
-            status("input_media_started audio=\(audioOptions.media) video=\(videoOptions.media)")
-            try await Task.sleep(nanoseconds: 20_000_000_000)
+            status(
+                "input_media_started audio=\(audioOptions.media) video=\(videoOptions.media) "
+                    + "custom_no_capture=\(customNoCapture)")
+            if customNoCapture {
+                try await Task.sleep(nanoseconds: 1_000_000_000)
+                let pcm = Data(base64Encoded: try required("pcm_base64")) ?? Data()
+                guard pcm.count == 32_000 else {
+                    throw NSError(domain: "InputMediaCapture PCM", code: 6000)
+                }
+                try requireOk("submit pcm", audio.submitPCM(pcm))
+                status("input_media_pcm_submitted bytes=32000 calls=1")
+                try await Task.sleep(nanoseconds: 5_000_000_000)
+            } else {
+                try await Task.sleep(nanoseconds: 20_000_000_000)
+            }
         } catch { primaryError = error }
-        var codes = [audio.stop()]
-        if cameraAvailable { codes.insert(video.stop(), at: 0) }
+        var codes = ["audio_stop": audio.stop()]
+        if cameraAvailable { codes["video_stop"] = video.stop() }
         if let conn = lock.withLock({ acceptedConnection }) {
-            if cameraAvailable { codes.append(video.detach(connection: conn)) }
-            codes += [audio.detach(connection: conn), video.dispose(), audio.dispose(), conn.disconnect()]
+            if cameraAvailable { codes["video_detach"] = video.detach(connection: conn) }
+            codes["audio_detach"] = audio.detach(connection: conn)
+            codes["video_dispose"] = video.dispose()
+            codes["audio_dispose"] = audio.dispose()
+            codes["connection_disconnect"] = conn.disconnect()
             let deadline = Date().addingTimeInterval(5)
             while conn.state != .disconnected && conn.state != .idle && Date() < deadline {
                 try await Task.sleep(nanoseconds: 100_000_000)
             }
-            codes.append(await releaseAfterCallbacks { conn.dispose() })
+            codes["connection_dispose"] = await releaseAfterCallbacks { conn.dispose() }
         } else {
-            codes += [video.dispose(), audio.dispose()]
+            codes["video_dispose"] = video.dispose()
+            codes["audio_dispose"] = audio.dispose()
         }
-        codes += [await releaseAfterCallbacks { service.dispose() }, await releaseAfterCallbacks { TiRtc.shutdown() }]
+        codes["service_dispose"] = await releaseAfterCallbacks { service.dispose() }
+        codes["shutdown"] = await releaseAfterCallbacks { TiRtc.shutdown() }
+        if let resultPath = payload["result_path"] {
+            let result: [String: Any] = [
+                "schema": "tirtc.darwin-input-media/v1",
+                "case_id": payload["case_id"] ?? "", "process_id": ProcessInfo.processInfo.processIdentifier,
+                "status": primaryError == nil && codes.values.allSatisfy({ $0 == 0 }) ? "passed" : "failed",
+                "camera_available": cameraAvailable, "cleanup_codes": codes,
+                "input_mode": customNoCapture ? "custom-no-capture" : "built-in",
+                "microphone_permission_request": customNoCapture ? "not-requested" : "requested",
+                "submitted_pcm_bytes": customNoCapture ? 32_000 : 0,
+                "submit_calls": customNoCapture ? 1 : 0,
+            ]
+            let data = try JSONSerialization.data(withJSONObject: result, options: [.sortedKeys])
+            try data.write(to: URL(fileURLWithPath: resultPath), options: .atomic)
+        }
         if let primaryError { throw primaryError }
-        guard codes.allSatisfy({ $0 == 0 }) else {
+        guard codes.values.allSatisfy({ $0 == 0 }) else {
             throw NSError(
                 domain: "InputMediaCapture cleanup \(codes)",
-                code: Int(codes.first(where: { $0 != 0 })!))
+                code: Int(codes.values.first(where: { $0 != 0 })!))
         }
         status("input_media_teardown")
     }

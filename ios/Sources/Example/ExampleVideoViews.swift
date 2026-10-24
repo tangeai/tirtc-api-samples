@@ -66,6 +66,7 @@ struct ExampleClientPlayer: View {
                         session.uploadLogs()
                     }
                     .accessibilityIdentifier("client.upload_logs")
+                    .disabled(!session.canUploadLogs || session.isLogUploadInProgress)
                 }
             },
             showStageOverlay: !session.isClientVideoRendering || session.errorSummary != nil,
@@ -96,6 +97,7 @@ struct ExampleClientPlayer: View {
                 session.logUploadResult = nil
             }
         )
+        .disabled(session.isClientCleanupInProgress)
         .sheet(isPresented: $session.isCommandPanelPresented) {
             ExampleCommandPanel(session: session)
                 .modifier(ExampleCommandPanelDetentModifier())
@@ -226,6 +228,7 @@ private struct ExamplePlayerControls: View {
                     if compact {
                         compactVolumeButton
                         compactMicrophoneButton
+                        robotVoiceToggle
                         secondaryMenu
                         compactStopButton
                     } else {
@@ -243,6 +246,8 @@ private struct ExamplePlayerControls: View {
                         ) { session.toggleClientLocalAudio() }
                         .accessibilityIdentifier("client.local_audio")
                         .accessibilityValue(session.clientLocalAudioStatus)
+
+                        robotVoiceToggle
 
                         mediaButtons
 
@@ -266,7 +271,9 @@ private struct ExamplePlayerControls: View {
     }
 
     private var compactVolumeButton: some View {
-        Button(action: { session.toggleAudioOutputVolume() }) {
+        Button {
+            session.toggleAudioOutputVolume()
+        } label: {
             Image(systemName: session.isAudioOutputMuted ? "speaker.wave.2.fill" : "speaker.slash.fill")
                 .font(.title3.weight(.semibold))
                 .frame(minWidth: 44, minHeight: 44)
@@ -280,7 +287,9 @@ private struct ExamplePlayerControls: View {
     }
 
     private var compactMicrophoneButton: some View {
-        Button(action: { session.toggleClientLocalAudio() }) {
+        Button {
+            session.toggleClientLocalAudio()
+        } label: {
             Group {
                 if session.isClientLocalAudioBusy {
                     ProgressView()
@@ -302,8 +311,17 @@ private struct ExamplePlayerControls: View {
         .accessibilityValue(session.clientLocalAudioStatus)
     }
 
+    private var robotVoiceToggle: some View {
+        Toggle("机器人变声", isOn: $session.isRobotVoiceEnabled)
+            .toggleStyle(.switch)
+            .disabled(session.isClientLocalAudioBusy || session.isClientLocalAudioRunning)
+            .accessibilityIdentifier("client.robot_voice")
+    }
+
     private var compactStopButton: some View {
-        Button(action: { session.stopClient() }) {
+        Button {
+            session.stopClient()
+        } label: {
             Image(systemName: "xmark.circle.fill")
                 .font(.title3.weight(.semibold))
                 .frame(minWidth: 44, minHeight: 44)
@@ -340,7 +358,9 @@ private struct ExamplePlayerControls: View {
     }
 
     private var recordingButton: some View {
-        Button(action: { session.toggleRecording() }) {
+        Button {
+            session.toggleRecording()
+        } label: {
             Label(
                 session.isRecording ? "停止本地保存" : "开始本地保存",
                 systemImage: session.isRecording ? "stop.circle" : "record.circle"
@@ -357,7 +377,9 @@ private struct ExamplePlayerControls: View {
     }
 
     private var snapshotButton: some View {
-        Button(action: { session.takeSnapshot() }) {
+        Button {
+            session.takeSnapshot()
+        } label: {
             Label("截图", systemImage: "camera")
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -367,7 +389,9 @@ private struct ExamplePlayerControls: View {
     }
 
     private var galleryButton: some View {
-        Button(action: { session.saveLatestToGallery() }) {
+        Button {
+            session.saveLatestToGallery()
+        } label: {
             Label("保存到系统相册", systemImage: "photo.on.rectangle.angled")
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -513,7 +537,7 @@ private struct ExampleVideoPage<
     }
 }
 
-private struct ExampleLogUploadResultDialog: View {
+struct ExampleLogUploadResultDialog: View {
     let result: ExampleLogUploadResult
     let dismiss: () -> Void
 
@@ -651,7 +675,9 @@ private struct ExampleMetricsOverlay: View {
     var body: some View {
         if !expanded {
             VStack {
-                Button(action: { expanded = true }) {
+                Button {
+                    expanded = true
+                } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "chart.bar.fill")
                         Text(session.metricsSummary)
@@ -684,13 +710,17 @@ private struct ExampleMetricsOverlay: View {
                         .font(.system(size: 11, weight: .black))
                         .foregroundColor(Color.black.opacity(0.87))
                     Spacer()
-                    Button(action: { session.isMetricsExplanationPresented = true }) {
+                    Button {
+                        session.isMetricsExplanationPresented = true
+                    } label: {
                         Image(systemName: "questionmark.circle")
                             .font(.system(size: 16))
                             .foregroundColor(ExampleColors.primary)
                     }
                     .buttonStyle(.plain)
-                    Button(action: { expanded = false }) {
+                    Button {
+                        expanded = false
+                    } label: {
                         Label("收起", systemImage: "chevron.up")
                             .font(.system(size: 10, weight: .heavy))
                             .foregroundColor(.white)
@@ -714,6 +744,11 @@ private struct ExampleMetricsOverlay: View {
                     identifier: "client.metrics.audio_receive",
                     label: "音频接收",
                     value: session.audioReceiveSummary)
+                ExampleMetricLine(
+                    identifier: "client.metrics.audio_continuity",
+                    label: "音频源连续性",
+                    value: session.audioContinuitySummary,
+                    maxLines: 2)
                 ExampleMetricLine(
                     identifier: "client.metrics.latency", label: "估算延迟",
                     value: "视频 \(session.videoOutputLatencySummary) · 音频 \(session.audioOutputLatencySummary)"
@@ -799,7 +834,7 @@ private struct ExamplePlayerCommandButton: View {
     }
 }
 
-private struct ExamplePlayerLogUploadButton: View {
+struct ExamplePlayerLogUploadButton: View {
     let title: String
     let isUploading: Bool
     let action: () -> Void

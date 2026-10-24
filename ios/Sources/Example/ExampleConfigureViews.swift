@@ -62,6 +62,16 @@ struct ExampleClientConfigure: View {
                 )
                 .padding(.bottom, 16)
 
+                HStack {
+                    Spacer()
+                    ExamplePlayerLogUploadButton(
+                        title: "上传日志", isUploading: session.isLogUploadInProgress
+                    ) { session.uploadLogs() }
+                    .accessibilityIdentifier("client.upload_logs")
+                    .disabled(!session.canUploadLogs || session.isLogUploadInProgress)
+                }
+                .padding(.bottom, 12)
+
                 ExampleProductTabs(selectedProduct: $selectedProduct)
                     .padding(.bottom, 20)
                     .accessibilityIdentifier("product.tabs")
@@ -70,6 +80,13 @@ struct ExampleClientConfigure: View {
         }
         .accessibilityIdentifier("client.configure.page")
         .accessibilityValue(session.statusText)
+        .overlay(
+            Group {
+                if let result = session.logUploadResult {
+                    ExampleLogUploadResultDialog(result: result) { session.logUploadResult = nil }
+                }
+            }
+        )
         .sheet(isPresented: $session.isSettingsPresented) {
             ExampleSettingsSheet(session: session)
         }
@@ -180,6 +197,7 @@ struct ExampleClientConfigure: View {
                     session.startClient()
                 }
                 .accessibilityIdentifier("client.enter_player")
+                .disabled(!session.canStartClient)
             } else {
                 ExampleScanFirstButton(
                     enabled: ExamplePlatform.scanSupported,
@@ -200,8 +218,8 @@ struct ExampleClientConfigure: View {
                     openCloudStorage()
                 }
                 .accessibilityIdentifier("ti-cloud-storage.enter_player")
-                .disabled(!cloudStorageConfigurationValid || cloudStorageOpening)
-                .opacity(cloudStorageConfigurationValid && !cloudStorageOpening ? 1 : 0.55)
+                .disabled(!cloudStorageConfigurationValid || cloudStorageOpening || !session.canStartClient)
+                .opacity(cloudStorageConfigurationValid && !cloudStorageOpening && session.canStartClient ? 1 : 0.55)
             }
         }
     }
@@ -273,6 +291,7 @@ struct ExampleClientConfigure: View {
     }
 
     private func openCloudStorage() {
+        guard session.canStartClient else { return }
         guard cloudStorageConfigurationValid, !cloudStorageOpening else { return }
         UserDefaults.standard.set(cloudStorageAudioChannelId, forKey: "example.cloud.audio_channel_id")
         UserDefaults.standard.set(
@@ -283,6 +302,7 @@ struct ExampleClientConfigure: View {
             defer { cloudStorageOpening = false }
             do {
                 resolvedCloudStorageToken = try await resolveCloudStorageToken(cloudStorageToken)
+                guard session.canStartClient else { return }
                 isCloudStoragePresented = true
             } catch {
                 #if DEBUG
@@ -497,7 +517,9 @@ private struct ExampleProductTabs: View {
     }
 
     private func tab(_ title: String, value: String) -> some View {
-        Button(action: { selectedProduct = value }) {
+        Button {
+            selectedProduct = value
+        } label: {
             Text(title)
                 .font(.system(size: 14, weight: selectedProduct == value ? .bold : .semibold))
                 .foregroundColor(selectedProduct == value ? .white : ExampleColors.textSecondary)
