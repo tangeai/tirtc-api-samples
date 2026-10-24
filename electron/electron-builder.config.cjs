@@ -32,16 +32,19 @@ module.exports = {
     'package.json',
     'node_modules/tirtc-electron/package.json',
     'node_modules/tirtc-electron/identity.json',
-    'node_modules/tirtc-electron/README.md',
-    'node_modules/tirtc-electron/api/**/*',
     'node_modules/tirtc-electron/dist/**/*',
-    'node_modules/tirtc-electron/licenses/**/*',
+    '!node_modules/tirtc-electron/licenses{,/**/*}',
     ...[...supportedTuples]
       .filter((candidate) => candidate !== tuple)
       .map((candidate) => `!node_modules/tirtc-electron/native/${candidate}{,/**/*}`),
     `node_modules/tirtc-electron/native/${tuple}/**/*`,
   ],
   asarUnpack: [`node_modules/tirtc-electron/native/${tuple}/**/*`],
+  extraResources: [{
+    from: 'node_modules/tirtc-electron/licenses',
+    to: 'tirtc-licenses',
+    filter: ['**/*'],
+  }],
   mac: {
     target: [{target: 'dir', arch: [targetArch]}],
     extendInfo: {NSMicrophoneUsageDescription: 'TiRTC uses the microphone for RTC audio.'},
