@@ -14,12 +14,14 @@ public final class StorageExample {
     public static void main(String[] args) throws Exception {
         Map<String,String> flags=flags(args);
         applyRawDumpCase(flags, true);
-        if(flags.containsKey("help")) { System.out.println("--endpoint --cache-dir --output-dir --start-ms --end-ms --audio-channel-id --video-channel-id [--raw-dump --raw-dump-seconds 10 --raw-dump-copy-to ABSOLUTE_ZIP] [--upload-logs] [--case-id ti-cloud-storage.raw-dump.smoke-upload|ti-cloud-storage.raw-dump.integration-recovery]; credentials/device use TI_CLOUD_STORAGE_* environment"); return; }
+        if(flags.containsKey("help")) { System.out.println("--endpoint --cache-dir --output-dir --start-ms --end-ms --audio-channel-id --video-channel-id [--secondary-video-channel-id ID] [--raw-dump --raw-dump-seconds 10 --raw-dump-copy-to ABSOLUTE_ZIP] [--upload-logs] [--case-id ti-cloud-storage.raw-dump.smoke-upload|ti-cloud-storage.raw-dump.integration-recovery]; credentials/device use TI_CLOUD_STORAGE_* environment"); return; }
         Path output=Paths.get(required(flags,"output-dir")).toAbsolutePath(); Files.createDirectories(output);
         String device=env("TI_CLOUD_STORAGE_DEVICE_ID");
         Instant start=Instant.ofEpochMilli(Long.parseLong(required(flags,"start-ms")));
         Instant end=Instant.ofEpochMilli(Long.parseLong(required(flags,"end-ms")));
         int audioId=Integer.parseInt(required(flags,"audio-channel-id")),videoId=Integer.parseInt(required(flags,"video-channel-id"));
+        int secondaryId=Integer.parseInt(flags.getOrDefault("secondary-video-channel-id",Integer.toString(videoId)));
+        Frames secondary=new Frames();
         Properties result=new Properties(); Frames frames=new Frames();
         ClientOptions options=options(flags,"TI_CLOUD_STORAGE_APP_ID","TI_CLOUD_STORAGE_ACCESS_KEY_ID","TI_CLOUD_STORAGE_ACCESS_KEY_SECRET");
         ExportTask retainedTask=null;
@@ -43,7 +45,10 @@ public final class StorageExample {
                 try (VideoOutput video=new VideoOutput(replay,videoId,frames.video());
                      AudioOutput audio=new AudioOutput(replay,audioId,frames.audio());
                      EncodedVideoOutput encodedVideo=new EncodedVideoOutput(replay,videoId,frames.encodedVideo());
-                     EncodedAudioOutput encodedAudio=new EncodedAudioOutput(replay,audioId,frames.encodedAudio())) {
+                     EncodedAudioOutput encodedAudio=new EncodedAudioOutput(replay,audioId,frames.encodedAudio());
+                     VideoOutput secondVideo=secondaryId==videoId?null:new VideoOutput(replay,secondaryId,secondary.video());
+                     EncodedVideoOutput secondEncoded=secondaryId==videoId?null:new EncodedVideoOutput(replay,secondaryId,secondary.encodedVideo())) {
+                    requireNoFrame(video);if(secondVideo!=null)requireNoFrame(secondVideo);result.setProperty("zeroFrameSnapshot","true");
                     replay.play(selected.startTime(),selected.endTime());
                     com.tange.ai.tirtc.RawDump rawDump=null;
                     long rawDumpStarted=0;
@@ -63,6 +68,7 @@ public final class StorageExample {
                     await(() -> frames.v.get()>baseline,frames,"video after seek at half speed");
                     replay.setSpeed(ReplaySpeed.X1); check(replay.speed()==ReplaySpeed.X1,"normal speed restored");
                     result.setProperty("replayControls","true");
+                    if(secondVideo!=null)verifyRoutes(video,encodedVideo,frames,secondary,videoId,secondaryId,() -> {},result);
                     if(rawDump!=null) {
                         if("ti-cloud-storage.raw-dump.integration-recovery".equals(flags.get("case-id"))) {
                             try { replay.startRawDump(new com.tange.ai.tirtc.storage.RawDumpOptions(new int[]{audioId},new int[]{videoId})); throw new IllegalStateException("duplicate raw dump start accepted"); }
@@ -85,6 +91,12 @@ public final class StorageExample {
                         if("ti-cloud-storage.raw-dump.integration-recovery".equals(flags.get("case-id"))) check(rawDump.stop()==archive,"repeated raw dump stop changed result");
                         rawDump.close();
                     }
+                    pauseForInspection(replay,selected,completed,frames);
+                    check(replay.currentTime().isPresent(),"paused replay position");
+                    try(SnapshotFile file=video.takeSnapshot()) {
+                        save(file.path(),output.resolve("ti-cloud-storage-paused-snapshot.jpg"),true);file.delete();check(!Files.exists(file.path()),"paused snapshot deleted");
+                    }
+                    replay.resume();
                     try (RecordingTask task=replay.startRecording(new com.tange.ai.tirtc.storage.StartRecordingOptions(videoId,audioId))) {
                         final int recordedBaseline=frames.v.get(), audioBaseline=frames.a.get();
                         replay.seek(selected.startTime());
@@ -104,9 +116,14 @@ public final class StorageExample {
             try (ExportTask task=client.exportRecording(device,fullOptions)) {
                 ExportResult full=task.completion().toCompletableFuture().get(90,TimeUnit.SECONDS);
                 try (RecordingFile file=full.file()) {
-                    check(full.report().complete(),"full export covers the requested recording interval");
+                    ExportReport report=full.report();
+                    check(report.complete()&&report.termination()==ExportTermination.EXHAUSTED
+                            &&report.unprocessedRanges().isEmpty(),
+                            "full export exhausts the requested recording interval");
                     check(task.progress().fraction()==1,"full export final progress");
-                    result.setProperty("fullExportComplete",Boolean.toString(full.report().complete()));
+                    result.setProperty("fullExportComplete",Boolean.toString(report.complete()));
+                    result.setProperty("fullExportTermination",report.termination().name());
+                    result.setProperty("fullExportUnprocessedRanges",Integer.toString(report.unprocessedRanges().size()));
                     saveDelete(file,output.resolve("ti-cloud-storage-range-export.mp4"));
                 }
             }
@@ -127,8 +144,12 @@ public final class StorageExample {
                 ExportResult partial=task.completion().toCompletableFuture().get(90,TimeUnit.SECONDS);
                 try (RecordingFile file=partial.file()) {
                     ExportReport report=partial.report();
-                    check(!report.complete()&&!report.gaps().isEmpty()&&!report.segments().isEmpty(),"partial export provides coverage and gaps");
+                    check(!report.complete()&&report.termination()==ExportTermination.EXHAUSTED
+                            &&!report.gaps().isEmpty()&&!report.segments().isEmpty()
+                            &&report.unprocessedRanges().isEmpty(),
+                            "partial export exhausts the recorded tail and confirmed empty window");
                     result.setProperty("partialExportComplete",Boolean.toString(report.complete()));
+                    result.setProperty("partialExportTermination",report.termination().name());
                     result.setProperty("partialExportGaps",Integer.toString(report.gaps().size()));
                     result.setProperty("partialExportSegments",Integer.toString(report.segments().size()));
                     result.setProperty("partialExportUnprocessedRanges",Integer.toString(report.unprocessedRanges().size()));
@@ -154,5 +175,22 @@ public final class StorageExample {
     }
     private static void saveDelete(RecordingFile file,Path target) throws Exception {
         save(file.path(),target,false); file.delete(); check(!Files.exists(file.path()),"temporary export or recording deleted");
+    }
+    private static void pauseForInspection(Replay replay,RecordingRange selected,AtomicBoolean completed,Frames frames) throws Exception {
+        long deadline=System.nanoTime()+TimeUnit.SECONDS.toNanos(5);
+        for(int restartAttempt=0;restartAttempt<2;) {
+            try { replay.pause(); return; }
+            catch(TiRtcException error) {
+                if(error.category()==ErrorCategory.IN_USE&&System.nanoTime()<deadline) {
+                    TimeUnit.MILLISECONDS.sleep(10); continue;
+                }
+                if(error.category()!=ErrorCategory.NOT_STARTED||restartAttempt++!=0) throw error;
+            }
+            int baseline=frames.v.get();
+            completed.set(false);
+            replay.play(selected.startTime(),selected.endTime());
+            await(() -> frames.v.get()>baseline&&replay.currentTime().isPresent(),frames,"replay restart before paused snapshot");
+        }
+        throw new IllegalStateException("replay pause recovery exhausted");
     }
 }
