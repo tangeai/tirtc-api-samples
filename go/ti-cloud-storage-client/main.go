@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -280,6 +283,15 @@ func run() error {
 			return fmt.Errorf("attach encoded video %d: %w", channelID, err)
 		}
 	}
+	for _, pair := range videos {
+		image, err := pair.decoded.TakeSnapshot()
+		if !errors.Is(err, storage.ErrNoFrame) {
+			if err == nil {
+				_ = image.Delete()
+			}
+			return fmt.Errorf("zero-frame snapshot: %w", errors.Join(err, errors.New("ErrNoFrame required")))
+		}
+	}
 	if err := replay.Play(selected.StartTime, selected.EndTime); err != nil {
 		return fmt.Errorf("play replay: %w", err)
 	}
@@ -308,11 +320,14 @@ func run() error {
 		}
 	}
 	for _, pair := range videos {
-		if err := pair.decoded.Attach(replay, pair.channelID); err != nil {
+		if err := callWhenIdle(ctx, func() error { return pair.decoded.Attach(replay, pair.channelID) }); err != nil {
 			return fmt.Errorf("attach decoded video %d: %w", pair.channelID, err)
 		}
 	}
 	if err := waitSelectedDecodedFrames(ctx, audioFrames, config.audioChannelID != nil, videos, failures); err != nil {
+		return err
+	}
+	if err := verifyRoutes(ctx, replay, videos, failures, config.outputDir); err != nil {
 		return err
 	}
 	if rawDump != nil {
@@ -374,6 +389,22 @@ func run() error {
 	if err := callWhenIdle(ctx, replay.Pause); err != nil {
 		return fmt.Errorf("pause replay: %w", err)
 	}
+	if len(videos) > 0 {
+		image, err := videos[0].decoded.TakeSnapshot()
+		if err != nil {
+			return fmt.Errorf("paused retained-frame snapshot: %w", err)
+		}
+		target := filepath.Join(config.outputDir, "ti-cloud-storage-paused-snapshot.jpg")
+		if err := saveTemporaryMedia(image.Path, target, []byte{0xff, 0xd8}, 0); err != nil {
+			return errors.Join(err, image.Delete())
+		}
+		if err := image.Delete(); err != nil {
+			return err
+		}
+		if err := recordMediaDeletion(image.Path, target); err != nil {
+			return err
+		}
+	}
 	if err := callWhenIdle(ctx, replay.Resume); err != nil {
 		return fmt.Errorf("resume replay: %w", err)
 	}
@@ -405,6 +436,9 @@ func run() error {
 		if deleteErr := replayRecording.Delete(); deleteErr != nil {
 			return fmt.Errorf("delete temporary replay recording: %w", deleteErr)
 		}
+		if err := recordMediaDeletion(replayRecording.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-replay-recording-channel-%d.mp4", pair.channelID))); err != nil {
+			return err
+		}
 		snapshot, snapshotErr := takeSnapshotWhenReady(ctx, pair.decoded.TakeSnapshot, pair.frames.video, failures)
 		if snapshotErr != nil {
 			return fmt.Errorf("take channel %d snapshot: %w", pair.channelID, snapshotErr)
@@ -414,6 +448,9 @@ func run() error {
 		}
 		if deleteErr := snapshot.Delete(); deleteErr != nil {
 			return fmt.Errorf("delete temporary snapshot: %w", deleteErr)
+		}
+		if err := recordMediaDeletion(snapshot.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-snapshot-channel-%d.jpg", pair.channelID))); err != nil {
+			return err
 		}
 		fmt.Printf("consumed video channel %d\n", pair.channelID)
 	}
@@ -484,6 +521,7 @@ func run() error {
 		return cleanup()
 	}
 	var retainedReport storage.ExportReport
+	fullExportProofs := make([]map[string]any, 0, len(videos))
 	for index, pair := range videos {
 		channelID := pair.channelID
 		exportStart, exportEnd := selected.StartTime, selected.EndTime
@@ -523,15 +561,108 @@ func run() error {
 		if exported.File == nil {
 			return fmt.Errorf("successful channel %d export returned no file", channelID)
 		}
-		if saveErr := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-range-export-channel-%d.mp4", channelID)), []byte("ftyp"), 4); saveErr != nil {
+		if !exported.Report.Complete || exported.Report.Termination != storage.ExportExhausted ||
+			len(exported.Report.UnprocessedRanges) != 0 || exported.Report.CoveredDuration <= 0 {
+			return errors.Join(
+				fmt.Errorf("channel %d full export did not exhaust complete coverage", channelID),
+				exported.File.Delete(),
+			)
+		}
+		fullName := fmt.Sprintf("ti-cloud-storage-range-export-channel-%d.mp4", channelID)
+		if saveErr := saveTemporaryMedia(exported.File.Path, filepath.Join(config.outputDir, fullName), []byte("ftyp"), 4); saveErr != nil {
 			return errors.Join(saveErr, exported.File.Delete())
 		}
 		if deleteErr := exported.File.Delete(); deleteErr != nil {
 			return fmt.Errorf("delete temporary range export: %w", deleteErr)
 		}
+		if err := recordMediaDeletion(exported.File.Path, filepath.Join(config.outputDir, fullName)); err != nil {
+			return err
+		}
+		fullExportProofs = append(fullExportProofs, map[string]any{
+			"channel_id": int(channelID), "complete": true, "termination": "EXHAUSTED",
+			"unprocessed_ranges": 0, "saved_name": fullName, "source_deleted": true,
+		})
 		if index == 0 {
 			retainedReport = exported.Report
 		}
+	}
+
+	mediaTail := selected
+	gapTail := selected
+	emptyStart, emptyEnd := gapTail.EndTime, gapTail.EndTime.Add(time.Minute)
+	following, err := client.ListRecordings(ctx, deviceID, emptyStart, emptyEnd)
+	if err != nil {
+		return fmt.Errorf("confirm empty window after recording tail: %w", err)
+	}
+	if len(following) > 0 {
+		gapTail = newestFirstRecordingRanges(following)[0]
+		emptyStart, emptyEnd = gapTail.EndTime, gapTail.EndTime.Add(time.Minute)
+		following, err = client.ListRecordings(ctx, deviceID, emptyStart, emptyEnd)
+		if err != nil {
+			return fmt.Errorf("confirm shifted empty window after recording tail: %w", err)
+		}
+	}
+	if len(following) != 0 {
+		return errors.New("partial export fixture needs a confirmed empty following minute")
+	}
+	partialStart := mediaTail.EndTime.Add(-12 * time.Second)
+	if partialStart.Before(mediaTail.StartTime) {
+		partialStart = mediaTail.StartTime
+	}
+	if !partialStart.Before(mediaTail.EndTime) {
+		return errors.New("partial export fixture has no valid recorded tail")
+	}
+	partialChannel := videos[0].channelID
+	partialTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+		StartTime: partialStart, EndTime: emptyEnd, VideoChannelID: partialChannel,
+	})
+	if err != nil {
+		return fmt.Errorf("start partial export for channel %d: %w", partialChannel, err)
+	}
+	partial, err := partialTask.Wait()
+	if err != nil {
+		if partial.File != nil {
+			err = errors.Join(err, partial.File.Delete())
+		}
+		return fmt.Errorf("wait for partial export: %w", err)
+	}
+	if partial.File == nil {
+		return errors.New("successful partial export returned no file")
+	}
+	if partial.Report.Complete || partial.Report.Termination != storage.ExportExhausted ||
+		len(partial.Report.Segments) == 0 || len(partial.Report.Gaps) == 0 ||
+		len(partial.Report.UnprocessedRanges) != 0 || partial.Report.CoveredDuration <= 0 ||
+		partialTask.Progress().Fraction != 1 {
+		return errors.Join(
+			errors.New("partial export did not exhaust the recorded tail and confirmed empty window"),
+			partial.File.Delete(),
+		)
+	}
+	partialName := fmt.Sprintf("ti-cloud-storage-partial-export-channel-%d.mp4", partialChannel)
+	if err := saveTemporaryMedia(partial.File.Path, filepath.Join(config.outputDir, partialName), []byte("ftyp"), 4); err != nil {
+		return errors.Join(err, partial.File.Delete())
+	}
+	if err := partial.File.Delete(); err != nil {
+		return fmt.Errorf("delete temporary partial export: %w", err)
+	}
+	if err := recordMediaDeletion(partial.File.Path, filepath.Join(config.outputDir, partialName)); err != nil {
+		return err
+	}
+	exportProof, err := json.Marshal(map[string]any{
+		"full": map[string]any{"status": "passed", "exports": fullExportProofs},
+		"partial": map[string]any{
+			"status": "passed", "complete": false, "termination": "EXHAUSTED",
+			"segments": len(partial.Report.Segments), "gaps": len(partial.Report.Gaps),
+			"unprocessed_ranges": 0, "confirmed_empty_window": true,
+			"video_channel_id": int(partialChannel), "audio_channel_selected": false,
+			"saved_name": partialName, "source_deleted": true,
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(filepath.Join(config.outputDir, "export-proof.json"), append(exportProof, '\n'), 0600); err != nil {
+		return err
 	}
 	retainedRange, available := coveredExportRange(retainedReport)
 	if !available {
@@ -599,6 +730,9 @@ func run() error {
 	}
 	if err := copied.File.Delete(); err != nil {
 		return fmt.Errorf("delete copied export result: %w", err)
+	}
+	if err := recordMediaDeletion(retained.File.Path, filepath.Join(config.outputDir, fmt.Sprintf("ti-cloud-storage-export-after-close-channel-%d.mp4", videos[0].channelID))); err != nil {
+		return err
 	}
 	fmt.Println("completed export collected, saved and deleted after client close")
 	return nil
@@ -995,4 +1129,94 @@ func equalBytes(left, right []byte) bool {
 		}
 	}
 	return true
+}
+
+// Observe deletion after the public SDK call; keep the application copy as evidence.
+func recordMediaDeletion(sourcePath, savedPath string) error {
+	if _, err := os.Stat(sourcePath); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("SDK temporary media remains or cannot be inspected: %s", sourcePath)
+	}
+	saved, err := os.Open(savedPath)
+	if err != nil {
+		return err
+	}
+	defer saved.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, io.LimitReader(saved, maximumMediaFileSize+1))
+	if err != nil {
+		return err
+	}
+	if size <= 0 || size > maximumMediaFileSize {
+		return errors.New("saved media size invalid")
+	}
+	payload, err := json.Marshal(map[string]any{"source_path": sourcePath, "deleted": true,
+		"saved_name": filepath.Base(savedPath), "sha256": hex.EncodeToString(hash.Sum(nil)), "bytes": size})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(savedPath+".receipt.json", append(payload, '\n'), 0600)
+}
+
+func routeCounts(videos []videoOutputPair) map[string]uint64 {
+	counts := map[string]uint64{}
+	for _, pair := range videos[:2] {
+		counts[fmt.Sprintf("video:%d", pair.channelID)] = pair.frames.video.count.Load()
+		counts[fmt.Sprintf("encoded_video:%d", pair.channelID)] = pair.frames.encodedVideo.count.Load()
+	}
+	return counts
+}
+func verifyRoutes(ctx context.Context, source *storage.Replay, videos []videoOutputPair, failures <-chan error, output string) error {
+	if len(videos) < 2 {
+		return nil
+	}
+	wait := func(before map[string]uint64, first int) error {
+		for _, pair := range videos[first:2] {
+			if err := waitFrameAfter(ctx, "route decoded progress", pair.frames.video, before[fmt.Sprintf("video:%d", pair.channelID)], failures); err != nil {
+				return err
+			}
+			if err := waitFrameAfter(ctx, "route encoded progress", pair.frames.encodedVideo, before[fmt.Sprintf("encoded_video:%d", pair.channelID)], failures); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	commonBefore := routeCounts(videos)
+	if err := wait(commonBefore, 0); err != nil {
+		return err
+	}
+	commonAfter := routeCounts(videos)
+	first := videos[0]
+	if err := callWhenIdle(ctx, first.encoded.Detach); err != nil {
+		return err
+	}
+	if err := callWhenIdle(ctx, first.decoded.Detach); err != nil {
+		return err
+	}
+	isolatedBefore := routeCounts(videos)
+	if err := wait(isolatedBefore, 1); err != nil {
+		return err
+	}
+	isolatedAfter := routeCounts(videos)
+	for _, name := range []string{fmt.Sprintf("video:%d", first.channelID), fmt.Sprintf("encoded_video:%d", first.channelID)} {
+		if isolatedAfter[name] != isolatedBefore[name] {
+			return errors.New("detached route continued callbacks")
+		}
+	}
+	if err := callWhenIdle(ctx, func() error { return first.decoded.Attach(source, first.channelID) }); err != nil {
+		return err
+	}
+	if err := callWhenIdle(ctx, func() error { return first.encoded.Attach(source, first.channelID) }); err != nil {
+		return err
+	}
+	restoredBefore := routeCounts(videos)
+
+	if err := wait(restoredBefore, 0); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"status": "passed", "ids": []int{int(videos[0].channelID), int(videos[1].channelID)}, "zero_frame_rejected": []int{int(videos[0].channelID), int(videos[1].channelID)},
+		"common_before": commonBefore, "common_after": commonAfter, "isolated_before": isolatedBefore, "isolated_after": isolatedAfter, "restored_before": restoredBefore, "restored_after": routeCounts(videos)})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(output, "route-proof.json"), append(payload, '\n'), 0600)
 }

@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,17 +27,18 @@ const (
 )
 
 type clientConfig struct {
-	endpoint       string
-	remoteID       string
-	cacheDir       string
-	outputDir      string
-	audioStreamID  *uint8
-	videoStreamIDs []uint8
-	rawDumpSeconds uint
-	rawDump        bool
-	rawDumpCopyTo  string
-	uploadLogs     bool
-	caseID         string
+	endpoint          string
+	remoteID          string
+	cacheDir          string
+	outputDir         string
+	audioStreamID     *uint8
+	videoStreamIDs    []uint8
+	rawDumpSeconds    uint
+	rawDump           bool
+	rawDumpCopyTo     string
+	uploadLogs        bool
+	caseID            string
+	verifyMessageEcho bool
 }
 
 type optionalUintFlag struct {
@@ -172,8 +176,11 @@ func run() error {
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	commandReceived := make(chan struct{}, 1)
-	messageReceived := make(chan struct{}, 1)
+	messages, err := newMessageProof(config.videoStreamIDs, config.verifyMessageEcho)
+	if err != nil {
+		_ = client.Close()
+		return err
+	}
 	failures := make(chan error, 16)
 	audioFrames := newFrameSignals()
 	connection, err := client.NewConnection(tirtc.ConnOptions{
@@ -182,10 +189,8 @@ func run() error {
 				notifyError(failures, err)
 			}
 		},
-		OnCommand: func(uint32, []byte) { notify(commandReceived) },
-		OnStreamMessage: func(uint8, time.Duration, []byte) {
-			notify(messageReceived)
-		},
+		OnCommand:       messages.command,
+		OnStreamMessage: messages.stream,
 	})
 	if err != nil {
 		_ = client.Close()
@@ -264,6 +269,15 @@ func run() error {
 			return fmt.Errorf("attach encoded video %d: %w", pair.streamID, err)
 		}
 	}
+	for _, pair := range videos {
+		image, err := pair.decoded.TakeSnapshot()
+		if !errors.Is(err, tirtc.ErrNoFrame) {
+			if err == nil {
+				_ = image.Delete()
+			}
+			return fmt.Errorf("zero-frame snapshot: %w", errors.Join(err, errors.New("ErrNoFrame required")))
+		}
+	}
 	if err := connection.Connect(ctx, config.remoteID); err != nil {
 		return fmt.Errorf("connect: %w", err)
 	}
@@ -299,24 +313,23 @@ func run() error {
 	if err := waitSelectedFrames(ctx, audioFrames, config.audioStreamID != nil, videos, failures); err != nil {
 		return err
 	}
-
-	if err := connection.SendCommand(0x2001, []byte("go-client-command")); err != nil {
-		return fmt.Errorf("send command: %w", err)
-	}
-	timestamp := time.Duration(uint32(time.Now().UnixMilli())) * time.Millisecond
-	messageStreamID := uint8(0)
-	if len(videos) > 0 {
-		messageStreamID = videos[0].streamID
-	} else if config.audioStreamID != nil {
-		messageStreamID = *config.audioStreamID
-	}
-	if err := connection.SendStreamMessage(messageStreamID, timestamp, []byte("go-client-message")); err != nil {
-		return fmt.Errorf("send stream message: %w", err)
-	}
-	if err := waitSignal(ctx, "remote command", commandReceived, failures); err != nil {
+	if err := verifyRoutes(ctx, connection, videos, failures, config.outputDir); err != nil {
 		return err
 	}
-	if err := waitSignal(ctx, "remote stream message", messageReceived, failures); err != nil {
+
+	for index := 0; index < 2; index++ {
+		id, payload := messages.commandInput(index)
+		if err := connection.SendCommand(id, payload); err != nil {
+			return err
+		}
+		if messages.fixture {
+			stream, stamp, data := messages.streamInput(index)
+			if err := connection.SendStreamMessage(stream, stamp, data); err != nil {
+				return err
+			}
+		}
+	}
+	if err := messages.wait(ctx); err != nil {
 		return err
 	}
 	if rawDump != nil {
@@ -399,6 +412,9 @@ func run() error {
 		if deleteErr := recordingFile.Delete(); deleteErr != nil {
 			return fmt.Errorf("delete temporary recording: %w", deleteErr)
 		}
+		if err := recordMediaDeletion(recordingFile.Path, filepath.Join(config.outputDir, fmt.Sprintf("rtc-recording-stream-%d.mp4", pair.streamID))); err != nil {
+			return err
+		}
 		snapshot, snapshotErr := pair.decoded.TakeSnapshot()
 		if snapshotErr != nil {
 			return fmt.Errorf("take stream %d snapshot: %w", pair.streamID, snapshotErr)
@@ -408,6 +424,9 @@ func run() error {
 		}
 		if deleteErr := snapshot.Delete(); deleteErr != nil {
 			return fmt.Errorf("delete temporary snapshot: %w", deleteErr)
+		}
+		if err := recordMediaDeletion(snapshot.Path, filepath.Join(config.outputDir, fmt.Sprintf("rtc-snapshot-stream-%d.jpg", pair.streamID))); err != nil {
+			return err
 		}
 		fmt.Printf("consumed video stream %d\n", pair.streamID)
 	}
@@ -428,7 +447,10 @@ func run() error {
 		}
 		fmt.Printf("log_id=%s\n", logID)
 	}
-	return cleanup()
+	if err := cleanup(); err != nil {
+		return err
+	}
+	return messages.save(filepath.Join(config.outputDir, "message-proof.json"))
 }
 
 func parseConfig() (clientConfig, error) {
@@ -437,7 +459,7 @@ func parseConfig() (clientConfig, error) {
 	var videoStreamIDs uintListFlag
 	var noReceiveAudio, noReceiveVideo bool
 	var rawDumpSeconds uint
-	var rawDump, uploadLogs bool
+	var rawDump, uploadLogs, verifyMessageEcho bool
 	var rawDumpCopyTo, caseID string
 	flag.StringVar(&endpoint, "endpoint", "", "TiRTC endpoint")
 	flag.StringVar(&remoteID, "remote-id", "", "remote device ID")
@@ -451,6 +473,7 @@ func parseConfig() (clientConfig, error) {
 	flag.UintVar(&rawDumpSeconds, "raw-dump-seconds", 10, "capture selected encoded inputs for this many seconds before continuing")
 	flag.StringVar(&rawDumpCopyTo, "raw-dump-copy-to", "", "copy the stopped diagnostic ZIP before upload")
 	flag.BoolVar(&uploadLogs, "upload-logs", false, "upload logs and the stopped raw dump attachment")
+	flag.BoolVar(&verifyMessageEcho, "verify-message-echo", false, "verify the explicitly selected capability-probe stream peer")
 	flag.StringVar(&caseID, "case-id", "", "smoke.raw-dump-upload or integration.raw-dump-recovery")
 	flag.Parse()
 	if caseID != "" {
@@ -498,7 +521,7 @@ func parseConfig() (clientConfig, error) {
 		cacheDir: filepath.Clean(cacheDir), outputDir: filepath.Clean(outputDir),
 		audioStreamID: resolvedAudioID, videoStreamIDs: resolvedVideoIDs,
 		rawDumpSeconds: rawDumpSeconds,
-		rawDump:        rawDump, rawDumpCopyTo: rawDumpCopyTo, uploadLogs: uploadLogs, caseID: caseID,
+		rawDump:        rawDump, rawDumpCopyTo: rawDumpCopyTo, uploadLogs: uploadLogs, caseID: caseID, verifyMessageEcho: verifyMessageEcho,
 	}, nil
 }
 
@@ -744,4 +767,96 @@ func equalBytes(left, right []byte) bool {
 		}
 	}
 	return true
+}
+
+// Observe deletion after the public SDK call; keep the application copy as evidence.
+func recordMediaDeletion(sourcePath, savedPath string) error {
+	if _, err := os.Stat(sourcePath); !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("SDK temporary media remains or cannot be inspected: %s", sourcePath)
+	}
+	saved, err := os.Open(savedPath)
+	if err != nil {
+		return err
+	}
+	defer saved.Close()
+	hash := sha256.New()
+	size, err := io.Copy(hash, io.LimitReader(saved, maximumMediaFileSize+1))
+	if err != nil {
+		return err
+	}
+	if size <= 0 || size > maximumMediaFileSize {
+		return errors.New("saved media size invalid")
+	}
+	payload, err := json.Marshal(map[string]any{"source_path": sourcePath, "deleted": true,
+		"saved_name": filepath.Base(savedPath), "sha256": hex.EncodeToString(hash.Sum(nil)), "bytes": size})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(savedPath+".receipt.json", append(payload, '\n'), 0600)
+}
+
+func routeCounts(videos []videoOutputPair) map[string]uint64 {
+	counts := map[string]uint64{}
+	for _, pair := range videos[:2] {
+		counts[fmt.Sprintf("video:%d", pair.streamID)] = pair.frames.video.count.Load()
+		counts[fmt.Sprintf("encoded_video:%d", pair.streamID)] = pair.frames.encodedVideo.count.Load()
+	}
+	return counts
+}
+func verifyRoutes(ctx context.Context, source *tirtc.Conn, videos []videoOutputPair, failures <-chan error, output string) error {
+	if len(videos) < 2 {
+		return nil
+	}
+	wait := func(before map[string]uint64, first int) error {
+		for _, pair := range videos[first:2] {
+			if err := waitFrameAfter(ctx, "route decoded progress", pair.frames.video, before[fmt.Sprintf("video:%d", pair.streamID)], failures); err != nil {
+				return err
+			}
+			if err := waitFrameAfter(ctx, "route encoded progress", pair.frames.encodedVideo, before[fmt.Sprintf("encoded_video:%d", pair.streamID)], failures); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	commonBefore := routeCounts(videos)
+	if err := wait(commonBefore, 0); err != nil {
+		return err
+	}
+	commonAfter := routeCounts(videos)
+	first := videos[0]
+	if err := first.encoded.Detach(); err != nil {
+		return err
+	}
+	if err := first.decoded.Detach(); err != nil {
+		return err
+	}
+	isolatedBefore := routeCounts(videos)
+	if err := wait(isolatedBefore, 1); err != nil {
+		return err
+	}
+	isolatedAfter := routeCounts(videos)
+	for _, name := range []string{fmt.Sprintf("video:%d", first.streamID), fmt.Sprintf("encoded_video:%d", first.streamID)} {
+		if isolatedAfter[name] != isolatedBefore[name] {
+			return errors.New("detached route continued callbacks")
+		}
+	}
+	if err := first.decoded.Attach(source, first.streamID); err != nil {
+		return err
+	}
+	if err := first.encoded.Attach(source, first.streamID); err != nil {
+		return err
+	}
+	restoredBefore := routeCounts(videos)
+	if err := source.RequestVideoKeyframe(first.streamID); err != nil {
+		return err
+	}
+	if err := wait(restoredBefore, 0); err != nil {
+		return err
+	}
+	payload, err := json.Marshal(map[string]any{"status": "passed", "ids": []int{int(videos[0].streamID), int(videos[1].streamID)}, "zero_frame_rejected": []int{int(videos[0].streamID), int(videos[1].streamID)},
+		"common_before": commonBefore, "common_after": commonAfter, "isolated_before": isolatedBefore, "isolated_after": isolatedAfter, "restored_before": restoredBefore, "restored_after": routeCounts(videos)})
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(filepath.Join(output, "route-proof.json"), append(payload, '\n'), 0600)
 }
