@@ -661,6 +661,7 @@ export class ExampleSession {
       this.update({metrics: {
         connection: this.#connection.getMetricsSnapshot(),
         audio: this.#audioOutput?.getMetricsSnapshot() ?? null,
+        audioContinuity: this.#audioOutput?.getContinuityMetricsSnapshot() ?? null,
         video: videoOutput?.getMetricsSnapshot() ?? null,
       }});
     } catch {}

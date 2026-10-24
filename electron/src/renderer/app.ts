@@ -424,6 +424,7 @@ function updateMetrics(state: ExampleState): void {
   const connection = allMetrics?.connection;
   const video = allMetrics?.video;
   const audio = allMetrics?.audio;
+  const audioContinuity = allMetrics?.audioContinuity;
   const videoStartup = objectValue(video, 'startup');
   const videoStutter = objectValue(video, 'stutter');
   const audioStutter = objectValue(audio, 'stutter');
@@ -446,6 +447,14 @@ function updateMetrics(state: ExampleState): void {
   document.querySelector('#metric-audio-receive')!.textContent =
     `码率 ${rate(metricValue(audio, 'audioInputBitrateKbps'), 'kbps')} · ` +
     `PPS ${rate(metricValue(audio, 'audioInputPacketRate'), '/s')}`;
+  const observed = finiteNumber(metricValue(audioContinuity, 'observedSourceFrameCount'));
+  const accepted = finiteNumber(metricValue(audioContinuity, 'acceptedSourceFrameCount'));
+  const acceptance = observed !== null && accepted !== null && observed > 0
+    ? `${(accepted * 100 / observed).toFixed(1)}%` : '--';
+  document.querySelector('#metric-audio-continuity')!.textContent =
+    `观察 ${observed === null ? '--' : `${Math.round(observed)} 帧`} · ` +
+    `接纳 ${accepted === null ? '--' : `${Math.round(accepted)} 帧`} · ` +
+    `接纳率 ${acceptance} · 缺口 ${duration(metricValue(audioContinuity, 'missingSourceDurationMs'))}`;
   document.querySelector('#metric-latency')!.textContent =
     `视频 ${duration(metricValue(video, 'estimatedOutputLatencyMs'))} · ` +
     `音频 ${duration(metricValue(audio, 'estimatedOutputLatencyMs'))}`;

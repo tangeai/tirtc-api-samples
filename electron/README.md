@@ -1,7 +1,7 @@
 # TiRTC Electron API Sample
 
 This is the canonical RTC and Ti Cloud Storage desktop Sample for exactly
-`tirtc-electron@2.5.0`. The checked-in lockfile is the install
+`tirtc-electron@2.6.0-alpha.17`. The checked-in lockfile is the install
 contract: use `npm ci`, then `npm run build` and `npm start`.
 
 ## Credentials
@@ -36,6 +36,9 @@ Sample checkout.
 3. Saved recording, export, and snapshot files use the same copy-then-delete ownership as RTC.
 4. Stop replay, detach/dispose outputs, dispose replay and storage, then call
    `TiCloudStorage.shutdown()`.
+
+macOS arm64 and x64 are supported. The included Windows x64 closure is cross-built
+and statically checked; Windows runtime is not validated.
 
 The Sample requests only the macOS microphone permission used by local audio input; it
 does not request camera access. Production macOS distribution still requires your own
