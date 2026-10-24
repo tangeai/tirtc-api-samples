@@ -20,8 +20,6 @@ if linkage != nil
 end
 
 target 'TiRtcExample' do
-  pod 'TiRTC', '2.5.3'
-
   config = use_native_modules!
 
   use_react_native!(

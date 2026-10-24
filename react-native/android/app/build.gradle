@@ -88,7 +88,7 @@ android {
         applicationId "com.tange.ai.tirtc.reactnative.example"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
+        versionCode providers.gradleProperty("tirtcExampleBuildNumber").map { it.toInteger() }.getOrElse(1)
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -107,7 +107,7 @@ android {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
-    androidTestImplementation("com.tange.ai:tirtc:${rootProject.ext.tirtcAndroidVersion}")
+    androidTestImplementation("com.tange.ai:tirtc:2.6.0-alpha.17")
     androidTestImplementation("androidx.test:core-ktx:1.6.1")
     androidTestImplementation("androidx.test.ext:junit-ktx:1.2.1")
     androidTestImplementation("androidx.test:runner:1.6.2")

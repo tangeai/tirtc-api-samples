@@ -28,10 +28,18 @@ export const downlinkMetricsExplanationContent =
   '这里只表达下行输入侧事实，不混入解码、渲染或音频输出回调。\n\n' +
   '【音频卡顿】：音频不用“帧率”判断体验。' +
   '这里展示最近窗口内，系统输出回调取不到可播放数据而产生的停滞次数和最长停滞。\n\n' +
+  '【音频源连续性】：observed、accepted 与 missing 分别来自当前 RTC attachment 的源帧观察数、队列接纳数和源 PTS 缺口时长。' +
+  'accepted/observed 只在面板中临时计算。\n\n' +
     '【估算延迟】：来自 runtime 当前输出延迟估算，综合最近到达帧的单向传输延迟和本地待输出缓冲时长。' +
     '面板按秒刷新；还没有有效数据时显示“--”。';
 
-export function DownlinkMetricsOverlay({metrics}: {metrics: DownlinkMetricsOverlayModel}) {
+export function DownlinkMetricsOverlay({
+  metrics,
+  onResetMetrics,
+}: {
+  metrics: DownlinkMetricsOverlayModel;
+  onResetMetrics: () => void;
+}) {
   const [expanded, setExpanded] = useState(false);
   const rows = useMemo(() => downlinkMetricsOverlayRows(metrics), [metrics]);
   if (!expanded) {
@@ -61,6 +69,15 @@ export function DownlinkMetricsOverlay({metrics}: {metrics: DownlinkMetricsOverl
       style={styles.panel}>
       <View style={styles.header}>
         <Text style={styles.title}>即时统计</Text>
+        <Pressable
+          accessible
+          accessibilityRole="button"
+          accessibilityLabel="TiRTC Downlink Metrics Reset"
+          testID={automationTestId('TiRTC Downlink Metrics Reset')}
+          onPress={onResetMetrics}
+          style={styles.resetButton}>
+          <Text style={styles.resetText}>重置区间</Text>
+        </Pressable>
         <Pressable
           accessible
           accessibilityRole="button"
@@ -136,6 +153,16 @@ const styles = StyleSheet.create({
     borderRadius: Platform.OS === 'ios' ? 22 : 24,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  resetButton: {
+    minHeight: Platform.OS === 'ios' ? 44 : 48,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  resetText: {
+    color: exampleTheme.primary,
+    fontSize: 12,
+    fontWeight: '700',
   },
   helpText: {
     color: exampleTheme.primary,

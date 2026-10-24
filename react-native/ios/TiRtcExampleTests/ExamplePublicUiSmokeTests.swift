@@ -101,16 +101,29 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   }
 
   func testInputMediaCase() throws {
+    let customNoCapture = env("TIRTC_RN_INPUT_MODE") == "custom-no-capture"
     app.launch()
     let deadline = Date().addingTimeInterval(90)
     while Date() < deadline {
-      dismissSystemAlertsIfPresent()
+      if customNoCapture {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.alerts.firstMatch.waitForExistence(timeout: 0.2) {
+          attachScreenshot(name: "input-media-unexpected-permission-alert")
+          XCTFail("custom no-capture input displayed a system permission alert")
+          return
+        }
+      } else {
+        dismissSystemAlertsIfPresent()
+      }
       if labelContains("Input Media Case Failed") {
         attachScreenshot(name: "input-media-failed")
         XCTFail("input media fixture failed")
         return
       }
       if labelContains("Input Media Case Passed") {
+        if customNoCapture {
+          marker("input-media-no-microphone-permission-alert")
+        }
         if labelContains("camera unavailable 6110") { marker("input-media-camera-unavailable") }
         marker("input-media-completed")
         return
