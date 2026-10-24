@@ -34,91 +34,84 @@ final class ExampleSessionController: NSObject, ObservableObject {
         static let decoderBackendHardware: Int32 = 2
     }
 
-    struct ClientCleanupResources: @unchecked Sendable {
-        let conn: TiRtcConn?
-        let localAudioInput: TiRtcAudioInput?
-        let audioOutput: TiRtcAudioOutput?
-        let videoOutputs: [TiRtcVideoOutput]
+    enum ClientCleanupState: Equatable {
+        case idle
+        case stopping
+        case stopped
+        case failed(Int32)
+    }
+
+    final class ClientCleanupResources: @unchecked Sendable {
+        var conn: TiRtcConn?
+        var localAudioInput: TiRtcAudioInput?
+        var audioOutput: TiRtcAudioOutput?
+        var videoOutputs: [TiRtcVideoOutput]
         let audioStreamId: UInt8?
         let videoStreamIds: [UInt8]
-        let shouldShutdownRuntime: Bool
         let statusLogPath: String?
+        var platformViews: [TiRtcPlatformView]
+
+        init(
+            conn: TiRtcConn?, localAudioInput: TiRtcAudioInput?, audioOutput: TiRtcAudioOutput?,
+            videoOutputs: [TiRtcVideoOutput], audioStreamId: UInt8?, videoStreamIds: [UInt8],
+            statusLogPath: String?, platformViews: [TiRtcPlatformView]
+        ) {
+            self.conn = conn
+            self.localAudioInput = localAudioInput
+            self.audioOutput = audioOutput
+            self.videoOutputs = videoOutputs
+            self.audioStreamId = audioStreamId
+            self.videoStreamIds = videoStreamIds
+            self.statusLogPath = statusLogPath
+            self.platformViews = platformViews
+        }
 
         var isEmpty: Bool {
             conn == nil && localAudioInput == nil && audioOutput == nil && videoOutputs.isEmpty
-                && !shouldShutdownRuntime
         }
 
-        // Both cleanup entry points run off the main actor: an in-flight iOS frame may be waiting
-        // to present on the main thread while detachView waits for that frame to finish.
-        func stopStreamingForConfigureRoute() {
-            for output in videoOutputs { _ = output.detachView() }
-            if let conn {
-                _ = localAudioInput?.detach(connection: conn)
-            }
-            _ = localAudioInput?.stop()
-            let videoUnsubscribeCodes = videoStreamIds.map { conn?.unsubscribeVideo(streamId: $0) ?? 0 }
-            let audioUnsubscribeCode = audioStreamId.map { conn?.unsubscribeAudio(streamId: $0) ?? 0 } ?? 0
-            _ = conn?.disconnect()
-            for output in videoOutputs { _ = output.detach() }
-            _ = audioOutput?.detach()
-            localAudioInput?.dispose()
-            ExampleSessionController.appendCallbackStatusLogLine(
-                "unsubscribe audio=\(audioUnsubscribeCode) videos=\(videoUnsubscribeCodes) audio_stream=\(String(describing: audioStreamId)) video_streams=\(videoStreamIds)",
-                path: statusLogPath)
-            ExampleSessionController.appendCallbackStatusLogLine("cleaned", path: statusLogPath)
-        }
-
+        // Only clientCleanupQueue mutates SDK references; MainActor releases retained platform views after joining.
+        // detachView must stay off MainActor while a frame may be waiting to present there.
         func cleanUp() -> Int32 {
             let videoViewDetachCodes = videoOutputs.map { $0.detachView() }
-            let audioInputDetachCode: Int32
-            if let conn {
-                audioInputDetachCode = localAudioInput?.detach(connection: conn) ?? 0
-            } else {
-                audioInputDetachCode = 0
-            }
+            let audioInputDetachCode = conn.map { localAudioInput?.detach(connection: $0) ?? 0 } ?? 0
             let audioInputStopCode = localAudioInput?.stop() ?? 0
             let videoUnsubscribeCodes = videoStreamIds.map { conn?.unsubscribeVideo(streamId: $0) ?? 0 }
             let audioUnsubscribeCode = audioStreamId.map { conn?.unsubscribeAudio(streamId: $0) ?? 0 } ?? 0
             let disconnectCode = conn?.disconnect() ?? 0
             let videoDetachCodes = videoOutputs.map { $0.detach() }
             let audioDetachCode = audioOutput?.detach() ?? 0
-            let videoDisposeCodes = videoOutputs.map { $0.dispose() }
+            var videoDisposeCodes: [Int32] = []
+            var remainingVideoOutputs: [TiRtcVideoOutput] = []
+            for output in videoOutputs {
+                let code = output.dispose()
+                videoDisposeCodes.append(code)
+                if code != 0 { remainingVideoOutputs.append(output) }
+            }
+            videoOutputs = remainingVideoOutputs
             let audioDisposeCode = audioOutput?.dispose() ?? 0
+            if audioDisposeCode == 0 { audioOutput = nil }
             let audioInputDisposeCode = localAudioInput?.dispose() ?? 0
+            if audioInputDisposeCode == 0 { localAudioInput = nil }
             let connectionDisposeCode = conn?.dispose() ?? 0
-            let shutdownCode = shouldShutdownRuntime ? TiRtc.shutdown() : 0
-            let cleanupCodes: [Int32] =
-                videoViewDetachCodes + [
-                    audioInputDetachCode,
-                    audioInputStopCode,
-                ] + videoUnsubscribeCodes + [
-                    audioUnsubscribeCode,
-                    disconnectCode,
-                ] + videoDetachCodes + [
-                    audioDetachCode
-                ] + videoDisposeCodes + [
-                    audioDisposeCode,
-                    audioInputDisposeCode,
-                    connectionDisposeCode,
-                    shutdownCode,
-                ]
-            let cleanupCode: Int32 = cleanupCodes.first(where: { $0 != 0 }) ?? 0
+            if connectionDisposeCode == 0 { conn = nil }
+            let cleanupCodeGroups: [[Int32]] = [
+                videoViewDetachCodes, [audioInputDetachCode, audioInputStopCode],
+                videoUnsubscribeCodes, [audioUnsubscribeCode, disconnectCode], videoDetachCodes,
+                [audioDetachCode], videoDisposeCodes,
+                [audioDisposeCode, audioInputDisposeCode, connectionDisposeCode],
+            ]
+            let cleanupCode = cleanupCodeGroups.joined().first(where: { $0 != 0 }) ?? 0
+            let event = cleanupCode == 0 ? "client_cleanup_resources_released" : "client_cleanup_failed"
             ExampleSessionController.appendCallbackStatusLogLine(
-                "unsubscribe audio=\(audioUnsubscribeCode) videos=\(videoUnsubscribeCodes) audio_stream=\(String(describing: audioStreamId)) video_streams=\(videoStreamIds)",
-                path: statusLogPath)
-            ExampleSessionController.appendCallbackStatusLogLine(
-                "client_cleanup_resources_released code=\(cleanupCode) "
+                "\(event) code=\(cleanupCode) "
                     + "video_view_detach=\(videoViewDetachCodes) "
-                    + "audio_input_detach=\(audioInputDetachCode) "
-                    + "audio_input_stop=\(audioInputStopCode) "
-                    + "video_unsubscribe=\(videoUnsubscribeCodes) "
-                    + "audio_unsubscribe=\(audioUnsubscribeCode) "
+                    + "audio_input_detach=\(audioInputDetachCode) audio_input_stop=\(audioInputStopCode) "
+                    + "video_unsubscribe=\(videoUnsubscribeCodes) audio_unsubscribe=\(audioUnsubscribeCode) "
                     + "disconnect=\(disconnectCode) video_detach=\(videoDetachCodes) "
                     + "audio_detach=\(audioDetachCode) video_dispose=\(videoDisposeCodes) "
-                    + "audio_dispose=\(audioDisposeCode) "
-                    + "audio_input_dispose=\(audioInputDisposeCode) "
-                    + "connection_dispose=\(connectionDisposeCode) shutdown=\(shutdownCode)",
+                    + "audio_dispose=\(audioDisposeCode) audio_input_dispose=\(audioInputDisposeCode) "
+                    + "connection_dispose=\(connectionDisposeCode)",
                 path: statusLogPath)
             return cleanupCode
         }
@@ -157,6 +150,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     @Published var isClientLocalAudioRunning = false
     @Published var isClientLocalAudioBusy = false
     @Published var clientLocalAudioStatus = "local audio idle"
+    @Published var isRobotVoiceEnabled = false
     @Published var isAudioOutputMuted = false
     @Published var audioOutputVolumeStatus = "audible"
     @Published var consoleLogEnabled = true
@@ -172,6 +166,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     @Published var mediaParameterSummary = "--"
     @Published var videoReceiveSummary = "video receive unavailable"
     @Published var audioReceiveSummary = "audio receive unavailable"
+    @Published var audioContinuitySummary = "audio continuity unavailable"
     @Published var audioStutterSummary = "--"
     @Published var videoOutputLatencySummary = "--"
     @Published var audioOutputLatencySummary = "--"
@@ -195,6 +190,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     var rawDumpArchiveReady = false
     var rawDumpArchiveEvidence: TiRawDumpArchive?
     var clientLocalAudioInput: TiRtcAudioInput?
+    private var clientRobotVoiceEffect: ExampleRobotVoiceEffect?
     var audioOutput: TiRtcAudioOutput?
     var videoOutputs: [UInt8: TiRtcVideoOutput] = [:]
     var recordingTask: TiRtcRecordingTask?
@@ -211,7 +207,36 @@ final class ExampleSessionController: NSObject, ObservableObject {
     var initialized = false
     var pendingLocalEchoReplies = 0
     var didApplyEnvironmentPayload = false
-    var retiredClientCleanupResources: [ClientCleanupResources] = []
+    @Published private(set) var clientCleanupState = ClientCleanupState.idle
+    private var clientCleanupTask: Task<Int32, Never>?
+    private var runtimeShutdownRequested = false
+    private var pendingClientCleanupResources: ClientCleanupResources?
+    private var sceneCloseRequested = false
+    private var clientIssuerRequestID: UUID?
+    private var clientIssuerTask: URLSessionDataTask?
+    private var localAudioRequestID: UUID?
+    // Closing invalidates the request but keeps the OS permission holder busy until it returns.
+    private var localAudioPermissionTask: (id: UUID, task: Task<Void, Never>)?
+    var logUploadTask: Task<Int32, Never>?
+    var rawDumpOperationTask: Task<Void, Never>?
+
+    var isClientCleanupInProgress: Bool { clientCleanupState == .stopping }
+
+    private var canOperateClientResources: Bool {
+        !sceneCloseRequested && !isClientCleanupInProgress
+    }
+
+    var canUploadLogs: Bool {
+        initialized && !sceneCloseRequested && !isClientCleanupInProgress && rawDumpOperationTask == nil
+    }
+
+    var canStartClient: Bool {
+        guard !sceneCloseRequested, !isClientCleanupInProgress, !isLogUploadInProgress,
+            rawDumpOperationTask == nil, clientIssuerRequestID == nil, pendingClientCleanupResources == nil
+        else { return false }
+        if case .failed = clientCleanupState { return false }
+        return true
+    }
     var diagnosticsRefreshGeneration = 0
     var audioOutputMuteStartedAt: Date?
     var audioOutputMuteStartDurationMs: Int64?
@@ -237,6 +262,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func handleSceneAppear() {
+        sceneCloseRequested = false
         if !didApplyEnvironmentPayload {
             didApplyEnvironmentPayload = true
             applyEnvironmentPayloadIfPresent()
@@ -244,10 +270,12 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func handleSceneDisappear() {
+        sceneCloseRequested = true
         disconnect()
     }
 
     func attachPlatformVideoView(_ view: TiRtcPlatformView, streamId: UInt8) {
+        guard canOperateClientResources else { return }
         platformVideoViews[streamId] = view
         configurePlatformVideoView(view)
         guard videoStates[streamId] != .failed, let videoOutput = videoOutputs[streamId] else {
@@ -266,6 +294,8 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func startClient() {
+        cancelClientIssuerRequest()
+        guard canStartClient else { return }
         if (ExampleTokenSource(rawValue: tokenSource) ?? .oneTime) == .issuer {
             startClientWithIssuerToken()
             return
@@ -280,6 +310,9 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     private func startClient(_ configuration: ExampleClientConfiguration) {
+        guard canStartClient else { return }
+        clientCleanupState = .idle
+        logUploadResult = nil
         activeClientConfiguration = configuration
         persistClientSettings(configuration)
         isClientConnecting = true
@@ -311,11 +344,15 @@ final class ExampleSessionController: NSObject, ObservableObject {
             isClientPlayerActive = true
             setStatus("token issuer requesting")
             appendStatusLogLine("token_source=issuer request_started remote_id=\(seedConfiguration.remoteId)")
-            URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-                DispatchQueue.main.async {
-                    guard let self else {
+            let requestID = UUID()
+            clientIssuerRequestID = requestID
+            let task = URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, self.clientIssuerRequestID == requestID else {
                         return
                     }
+                    self.clientIssuerRequestID = nil
+                    self.clientIssuerTask = nil
                     if let error {
                         self.isClientConnecting = false
                         self.isClientPlayerActive = false
@@ -345,7 +382,21 @@ final class ExampleSessionController: NSObject, ObservableObject {
                             videoStreamIds: seedConfiguration.videoStreamIds,
                             token: token))
                 }
-            }.resume()
+            }
+            clientIssuerTask = task
+            task.resume()
+        }
+    }
+
+    private func cancelClientIssuerRequest() {
+        let task = clientIssuerTask
+        let hadRequest = clientIssuerRequestID != nil
+        clientIssuerRequestID = nil
+        clientIssuerTask = nil
+        task?.cancel()
+        if hadRequest {
+            isClientConnecting = false
+            isClientPlayerActive = false
         }
     }
 
@@ -366,65 +417,101 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func restartClient() {
+        beginClientCleanup()
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.finalizeRawDump(upload: false)
-            await self.cleanUpLocalMediaFiles()
-            await self.finishDisconnect()
-            self.startClient()
-        }
-    }
-
-    func stopClient() {
-        setStatus("teardown_requested flow=client")
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.finalizeRawDump(upload: false)
-            await self.cleanUpLocalMediaFiles()
-            if ProcessInfo.processInfo.environment["TIRTC_EXAMPLE_FULL_CLEANUP_ON_STOP"] == "1" {
-                await self.finishStopClientWithFullCleanup()
-            } else {
-                self.finishStopClient()
+            if await self.finishDisconnect() == 0, self.clientCleanupState == .stopped {
+                self.startClient()
             }
         }
     }
 
-    private func finishStopClientWithFullCleanup() async {
-        let resources = takeClientCleanupResources(shouldShutdownRuntime: initialized)
-        resetClientStateAfterStop()
-        appendStatusLogLine("route_reached flow=client route=configure")
-        let cleanupCode = await cleanUpClientResources(resources)
-        finishClientCleanup(code: cleanupCode)
+    func stopClient() {
+        beginClientCleanup()
+        setStatus("teardown_requested flow=client")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            let code = await self.closeClientResources()
+            if code == 0, self.clientCleanupState == .stopped {
+                self.resetClientStateAfterStop()
+                self.appendStatusLogLine("route_reached flow=client route=configure")
+                self.finishClientCleanup(code: code)
+            } else if self.clientCleanupState == .failed(code) {
+                self.finishClientCleanup(code: code)
+            }
+        }
     }
 
-    private func finishStopClient() {
-        let resources = takeClientCleanupResources(shouldShutdownRuntime: false)
-        if let resources {
-            retiredClientCleanupResources.append(resources)
+    private func beginClientCleanup() {
+        clientCleanupState = .stopping
+        cancelClientIssuerRequest()
+        localAudioRequestID = nil
+    }
+
+    private func closeClientResources(shutdownRuntime: Bool = false) async -> Int32 {
+        beginClientCleanup()
+        // A scene/restart request upgrades an in-flight Stop without launching another shutdown.
+        runtimeShutdownRequested = runtimeShutdownRequested || shutdownRuntime
+        if let clientCleanupTask { return await clientCleanupTask.value }
+        let task = Task { @MainActor in
+            if let operation = self.rawDumpOperationTask { await operation.value }
+            if let upload = self.logUploadTask { _ = await upload.value }
+            await self.finalizeRawDump()
+            await self.cleanUpLocalMediaFiles()
+            let resources = self.pendingClientCleanupResources ?? self.takeClientCleanupResources()
+            self.pendingClientCleanupResources = resources
+            var code: Int32
+            if let resources {
+                code = await withCheckedContinuation { continuation in
+                    Self.clientCleanupQueue.async {
+                        continuation.resume(returning: resources.cleanUp())
+                    }
+                }
+            } else {
+                code = 0
+            }
+            if code == 0 {
+                resources?.platformViews.removeAll()
+                self.pendingClientCleanupResources = nil
+                if self.runtimeShutdownRequested, self.initialized {
+                    code = await withCheckedContinuation { continuation in
+                        Self.clientCleanupQueue.async {
+                            continuation.resume(returning: TiRtc.shutdown())
+                        }
+                    }
+                    self.appendStatusLogLine("client_runtime_shutdown code=\(code)")
+                    if code == 0 { self.initialized = false }
+                }
+            }
+            // Busy and the shared task cover the optional shutdown as well as child cleanup.
+            self.clientCleanupState = code == 0 ? .stopped : .failed(code)
+            self.runtimeShutdownRequested = false
+            self.clientCleanupTask = nil
+            return code
         }
-        resetClientStateAfterStop()
-        appendStatusLogLine("route_reached flow=client route=configure")
-        scheduleClientStop(resources)
+        clientCleanupTask = task
+        return await task.value
     }
 
     private func resetClientStateAfterStop() {
         isClientConnecting = false
         isClientVideoRendering = false
         isAudioOutputAvailable = false
-        isClientLocalAudioBusy = false
+        isClientLocalAudioBusy = localAudioPermissionTask != nil
         isClientLocalAudioRunning = false
         isAudioOutputMuted = false
         audioOutputVolumeStatus = "unavailable"
         audioOutputMuteStartedAt = nil
         audioOutputMuteStartDurationMs = nil
         audioOutputMuteStartStatsMs = nil
-        clientLocalAudioStatus = "local audio idle"
+        clientLocalAudioStatus = localAudioPermissionTask == nil ? "local audio idle" : "local audio permission pending"
         stopDiagnosticsRefreshLoop()
         isClientPlayerActive = false
         clearUserFacingError()
     }
 
     func toggleClientLocalAudio() {
+        guard canOperateClientResources, !isClientLocalAudioBusy else { return }
         if isClientLocalAudioRunning || clientLocalAudioInput != nil {
             stopClientLocalAudio()
         } else {
@@ -433,6 +520,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func toggleAudioOutputVolume() {
+        guard canOperateClientResources else { return }
         guard let audioOutput else {
             audioOutputVolumeStatus = "failed output unavailable"
             appendStatusLogLine("audio_output_volume_toggle status=failed reason=output_unavailable")
@@ -481,7 +569,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func toggleRecording() {
-        guard !isMediaFileBusy else { return }
+        guard canOperateClientResources, !isMediaFileBusy else { return }
         if let task = recordingTask {
             isMediaFileBusy = true
             let targetStreamId = recordingTargetStreamId
@@ -532,7 +620,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func takeSnapshot() {
-        guard !isMediaFileBusy, let streamId = selectedVideoStreamId,
+        guard canOperateClientResources, !isMediaFileBusy, let streamId = selectedVideoStreamId,
             let videoOutput = videoOutputs[streamId]
         else { return }
         isMediaFileBusy = true
@@ -559,7 +647,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func saveLatestToGallery() {
-        guard !isMediaFileBusy else { return }
+        guard canOperateClientResources, !isMediaFileBusy else { return }
         let recording = latestRecordingFile
         let snapshot = latestSnapshotFile
         guard let path = recording?.path ?? snapshot?.path else { return }
@@ -624,7 +712,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     private func startClientLocalAudio() {
-        guard !isClientLocalAudioBusy else {
+        guard canOperateClientResources, !isClientLocalAudioBusy, localAudioPermissionTask == nil else {
             return
         }
         guard let conn else {
@@ -640,13 +728,28 @@ final class ExampleSessionController: NSObject, ObservableObject {
         isClientLocalAudioBusy = true
         clientLocalAudioStatus = "local audio permission checking"
         appendStatusLogLine("client.local_audio permission_requested")
-        Task { @MainActor [weak self] in
+        let requestID = UUID()
+        let connectionIdentity = ObjectIdentifier(conn)
+        localAudioRequestID = requestID
+        let task = Task { @MainActor [weak self] in
             guard let self else {
                 return
             }
+            defer {
+                if self.localAudioPermissionTask?.id == requestID {
+                    self.localAudioPermissionTask = nil
+                    if self.localAudioRequestID == requestID { self.localAudioRequestID = nil }
+                    self.isClientLocalAudioBusy = false
+                }
+            }
+            guard self.localAudioRequestID == requestID, self.canOperateClientResources, self.initialized,
+                self.conn.map({ ObjectIdentifier($0) }) == connectionIdentity
+            else { return }
             let microphone = await self.requestMediaPermission(.audio)
+            guard self.localAudioRequestID == requestID, self.canOperateClientResources, self.initialized,
+                let currentConnection = self.conn, ObjectIdentifier(currentConnection) == connectionIdentity
+            else { return }
             guard microphone == "granted" else {
-                self.isClientLocalAudioBusy = false
                 self.clientLocalAudioStatus = "microphone permission denied"
                 self.errorSummary = "microphone permission denied"
                 self.setStatus("microphone permission denied")
@@ -656,21 +759,47 @@ final class ExampleSessionController: NSObject, ObservableObject {
             let input = TiRtcAudioInput()
             input.delegate = self
             let options = self.resolvedClientLocalAudioOptions()
+            let robotEnabled = self.isRobotVoiceEnabled
+            options.mode = robotEnabled ? .custom : .builtIn
+            options.captureEnabled = true
+            let effect =
+                robotEnabled
+                ? ExampleRobotVoiceEffect(sampleRate: options.sampleRate.rawValue) : nil
+            effect?.reset()
+            if let effect {
+                input.onPCMCaptured = { [weak self, weak input] pcm in
+                    guard let self, let input, self.clientLocalAudioInput === input else { return }
+                    let submitCode = input.submitPCM(effect.process(pcm))
+                    if submitCode != 0 {
+                        self.appendStatusLogLine(
+                            "client.local_audio robot_submit_failed code=\(submitCode)")
+                    }
+                }
+            }
             let optionsCode = input.setOptions(options)
-            let startCode = input.start()
-            let attachCode = input.attach(connection: conn, streamId: streamId)
             self.clientLocalAudioInput = input
-            self.isClientLocalAudioBusy = false
+            self.clientRobotVoiceEffect = effect
+            let attachCode =
+                optionsCode == 0
+                ? input.attach(connection: currentConnection, streamId: streamId) : optionsCode
+            let startCode = optionsCode == 0 && attachCode == 0 ? input.start() : attachCode
             self.isClientLocalAudioRunning = optionsCode == 0 && startCode == 0 && attachCode == 0
             let status =
-                "client.local_audio started stream=\(streamId) options=\(optionsCode) start=\(startCode) attach=\(attachCode) nano_media=\(options.media) sample_rate_hz=\(options.sampleRate.rawValue) aec=\(options.aecMode.rawValue) agc=\(options.agcLevel.rawValue) ans=\(options.ansLevel.rawValue)"
+                "client.local_audio started stream=\(streamId) options=\(optionsCode) attach=\(attachCode) start=\(startCode) robot=\(robotEnabled) nano_media=\(options.media) sample_rate_hz=\(options.sampleRate.rawValue) aec=\(options.aecMode.rawValue) agc=\(options.agcLevel.rawValue) ans=\(options.ansLevel.rawValue)"
             self.clientLocalAudioStatus = status
             self.appendStatusLogLine(status)
             if !self.isClientLocalAudioRunning {
                 let errorCode = optionsCode != 0 ? optionsCode : (startCode != 0 ? startCode : attachCode)
                 self.showUserFacingError(code: errorCode, context: "local audio")
+                input.onPCMCaptured = nil
+                if startCode == 0 { _ = input.stop() }
+                if attachCode == 0 { _ = input.detach(connection: currentConnection) }
+                _ = input.dispose()
+                self.clientLocalAudioInput = nil
+                self.clientRobotVoiceEffect = nil
             }
         }
+        localAudioPermissionTask = (id: requestID, task: task)
     }
 
     private func stopClientLocalAudio() {
@@ -681,14 +810,41 @@ final class ExampleSessionController: NSObject, ObservableObject {
             return
         }
         isClientLocalAudioBusy = true
-        let detachCode = conn.map { input.detach(connection: $0) } ?? 0
+        input.onPCMCaptured = nil
         let stopCode = input.stop()
+        let detachCode = stopCode == 0 ? (conn.map { input.detach(connection: $0) } ?? 0) : stopCode
         input.delegate = nil
-        input.dispose()
-        clientLocalAudioInput = nil
-        isClientLocalAudioBusy = false
-        isClientLocalAudioRunning = false
-        let status = "client.local_audio stopped detach=\(detachCode) stop=\(stopCode)"
+        let disposeCode = stopCode == 0 && detachCode == 0 ? input.dispose() : stopCode
+        if disposeCode == 0 {
+            finishClientLocalAudioStop(
+                input: input, detachCode: detachCode, stopCode: stopCode, disposeCode: disposeCode)
+            return
+        }
+        let status =
+            "client.local_audio stopping detach=\(detachCode) stop=\(stopCode) dispose=\(disposeCode)"
+        clientLocalAudioStatus = status
+        appendStatusLogLine(status)
+        guard stopCode == 0, detachCode == 0 else { return }
+        DispatchQueue.main.async { [weak self, weak input] in
+            guard let self, let input, self.clientLocalAudioInput === input else { return }
+            let retryCode = input.dispose()
+            self.finishClientLocalAudioStop(
+                input: input, detachCode: detachCode, stopCode: stopCode,
+                disposeCode: retryCode)
+        }
+    }
+
+    private func finishClientLocalAudioStop(
+        input: TiRtcAudioInput, detachCode: Int32, stopCode: Int32, disposeCode: Int32
+    ) {
+        if disposeCode == 0, clientLocalAudioInput === input {
+            clientLocalAudioInput = nil
+            clientRobotVoiceEffect = nil
+            isClientLocalAudioBusy = false
+            isClientLocalAudioRunning = false
+        }
+        let status =
+            "client.local_audio stopped detach=\(detachCode) stop=\(stopCode) dispose=\(disposeCode)"
         clientLocalAudioStatus = status
         appendStatusLogLine(status)
     }
@@ -744,6 +900,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func subscribeDownlink(_ activeConnection: TiRtcConn) {
+        guard canOperateClientResources else { return }
         let audioStreamId = resolvedAudioStreamId()
         let videoStreamIds = resolvedVideoStreamIds()
         var audioCode: Int32 = 0
@@ -774,28 +931,20 @@ final class ExampleSessionController: NSObject, ObservableObject {
     }
 
     func disconnect() {
+        beginClientCleanup()
         appendStatusLogLine("teardown_requested flow=client")
         Task { @MainActor [weak self] in
             guard let self else { return }
-            await self.finalizeRawDump(upload: false)
-            await self.cleanUpLocalMediaFiles()
-            await self.finishDisconnect()
+            _ = await self.finishDisconnect()
         }
     }
 
-    private func finishDisconnect() async {
-        let resources = takeClientCleanupResources(shouldShutdownRuntime: initialized)
-        let cleanupCode = await cleanUpClientResources(resources)
-        finishClientCleanup(code: cleanupCode)
-    }
-
-    private func cleanUpClientResources(_ resources: ClientCleanupResources?) async -> Int32 {
-        guard let resources else { return 0 }
-        return await withCheckedContinuation { continuation in
-            Self.clientCleanupQueue.async {
-                continuation.resume(returning: resources.cleanUp())
-            }
+    private func finishDisconnect() async -> Int32 {
+        let code = await closeClientResources(shutdownRuntime: true)
+        if clientCleanupState == .stopped || clientCleanupState == .failed(code) {
+            finishClientCleanup(code: code)
         }
+        return code
     }
 
     private func finishClientCleanup(code: Int32) {
@@ -808,7 +957,8 @@ final class ExampleSessionController: NSObject, ObservableObject {
         }
     }
 
-    private func takeClientCleanupResources(shouldShutdownRuntime: Bool) -> ClientCleanupResources? {
+    private func takeClientCleanupResources() -> ClientCleanupResources? {
+        let platformViews = Array(platformVideoViews.values) + Array(attachedPlatformVideoViews.values)
         attachedPlatformVideoViews.removeAll()
         conn?.delegate = nil
         clientLocalAudioInput?.delegate = nil
@@ -821,8 +971,7 @@ final class ExampleSessionController: NSObject, ObservableObject {
             videoOutputs: Array(videoOutputs.values),
             audioStreamId: resolvedAudioStreamId(),
             videoStreamIds: resolvedVideoStreamIds(),
-            shouldShutdownRuntime: shouldShutdownRuntime,
-            statusLogPath: callbackStatusLogPath)
+            statusLogPath: callbackStatusLogPath, platformViews: platformViews)
         conn = nil
         clientLocalAudioInput = nil
         audioOutput = nil
@@ -834,9 +983,6 @@ final class ExampleSessionController: NSObject, ObservableObject {
         selectedVideoStreamId = nil
         maximizedVideoStreamId = nil
 
-        if resources.shouldShutdownRuntime {
-            initialized = false
-        }
         return resources.isEmpty ? nil : resources
     }
 
@@ -875,19 +1021,6 @@ final class ExampleSessionController: NSObject, ObservableObject {
             hasLatestMedia = false
         }
         isMediaFileBusy = false
-    }
-
-    private func scheduleClientStop(_ resources: ClientCleanupResources?) {
-        guard let resources else {
-            statusText = "cleaned"
-            return
-        }
-        Self.clientCleanupQueue.async { [weak self] in
-            resources.stopStreamingForConfigureRoute()
-            Task { @MainActor [weak self] in
-                self?.statusText = "cleaned"
-            }
-        }
     }
 
     func initializeIfNeeded() -> Int32 {
