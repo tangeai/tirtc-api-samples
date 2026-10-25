@@ -9,7 +9,7 @@
     "package:dir": "electron-builder --dir --config electron-builder.config.cjs"
   },
   "dependencies": {
-    "tirtc-electron": "https://github.com/tangeai/tirtc-sdk-electron/releases/download/v2.6.0-alpha.17/tirtc-electron-2.6.0-alpha.17.tgz"
+    "tirtc-electron": "https://github.com/tangeai/tirtc-sdk-electron/releases/download/v2.6.0-alpha.18/tirtc-electron-2.6.0-alpha.18.tgz"
   },
   "devDependencies": {
     "electron": "43.3.0",

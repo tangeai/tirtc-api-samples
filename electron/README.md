@@ -1,7 +1,7 @@
 # TiRTC Electron API Sample
 
 This is the canonical RTC and Ti Cloud Storage desktop Sample for exactly
-`tirtc-electron@2.6.0-alpha.17`. The checked-in lockfile is the install
+`tirtc-electron@2.6.0-alpha.18`. The checked-in lockfile is the install
 contract: use `npm ci`, then `npm run build` and `npm start`.
 
 ## Credentials
