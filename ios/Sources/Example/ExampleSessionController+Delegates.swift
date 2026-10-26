@@ -3,7 +3,7 @@ import Foundation
 import TiRTC
 
 extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
-    TiRtcVideoOutputDelegate, @preconcurrency TiRtcAudioInputDelegate
+    TiRtcVideoOutputDelegate, TiRtcAudioInputDelegate
 {
     nonisolated func conn(_ conn: TiRtcConn, didChangeState state: TiRtcConnState, errorCode: Int32) {
         let connectionIdentity = ObjectIdentifier(conn)
@@ -197,27 +197,32 @@ extension ExampleSessionController: TiRtcConnDelegate, TiRtcAudioOutputDelegate,
         }
     }
 
-    func audioInput(_ input: TiRtcAudioInput, didChangeState state: TiRtcInputState) {
-        let rawValue = state.rawValue
-        if input === clientLocalAudioInput {
-            isClientLocalAudioRunning = state == .running
-            if state == .stopped || state == .failed {
-                isClientLocalAudioBusy = false
+    nonisolated func audioInput(_ input: TiRtcAudioInput, didChangeState state: TiRtcInputState) {
+        // TiRtcAudioInput invokes its delegate synchronously on the main queue.
+        MainActor.assumeIsolated {
+            let rawValue = state.rawValue
+            if input === clientLocalAudioInput {
+                isClientLocalAudioRunning = state == .running
+                if state == .stopped || state == .failed {
+                    isClientLocalAudioBusy = false
+                }
+                clientLocalAudioStatus = "client local audio state=\(rawValue)"
             }
-            clientLocalAudioStatus = "client local audio state=\(rawValue)"
+            setStatus("audio input state=\(rawValue)")
+            appendStatusLogLine("audio-input-state=\(rawValue)")
         }
-        setStatus("audio input state=\(rawValue)")
-        appendStatusLogLine("audio-input-state=\(rawValue)")
     }
 
-    func audioInput(_ input: TiRtcAudioInput, didFailWithCode code: Int32, message: String?) {
-        if input === clientLocalAudioInput {
-            isClientLocalAudioBusy = false
-            isClientLocalAudioRunning = false
-            clientLocalAudioStatus = "client local audio error=\(code)"
+    nonisolated func audioInput(_ input: TiRtcAudioInput, didFailWithCode code: Int32, message: String?) {
+        MainActor.assumeIsolated {
+            if input === clientLocalAudioInput {
+                isClientLocalAudioBusy = false
+                isClientLocalAudioRunning = false
+                clientLocalAudioStatus = "client local audio error=\(code)"
+            }
+            setStatus("audio input error=\(code) msg=\(message ?? "")")
+            showUserFacingError(code: code, context: "audio input")
         }
-        setStatus("audio input error=\(code) msg=\(message ?? "")")
-        showUserFacingError(code: code, context: "audio input")
     }
 
 }

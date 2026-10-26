@@ -966,7 +966,9 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudRecordingsButton: some View {
-        Button(action: { recordingsPresented = true }) {
+        Button {
+            recordingsPresented = true
+        } label: {
             Label("选择录像", systemImage: "calendar")
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -977,7 +979,9 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudRecordingsIconButton: some View {
-        Button(action: { recordingsPresented = true }) {
+        Button {
+            recordingsPresented = true
+        } label: {
             Image(systemName: "calendar")
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
@@ -988,7 +992,9 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudUploadLogsButton: some View {
-        Button(action: { flow.uploadLogs() }) {
+        Button {
+            flow.uploadLogs()
+        } label: {
             Label(flow.uploadingLogs ? "上传中…" : "上传日志", systemImage: "arrow.up.doc")
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -999,7 +1005,9 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudUploadLogsIconButton: some View {
-        Button(action: { flow.uploadLogs() }) {
+        Button {
+            flow.uploadLogs()
+        } label: {
             Image(systemName: flow.uploadingLogs ? "hourglass" : "arrow.up.doc")
                 .frame(width: 44, height: 44)
                 .contentShape(Rectangle())
@@ -1109,7 +1117,9 @@ struct TiCloudStorageExampleView: View {
             .accessibilityLabel("播放倍速")
             .accessibilityValue(flow.speed.label)
         #else
-            Button(action: { speedActionsPresented.toggle() }) {
+            Button {
+                speedActionsPresented.toggle()
+            } label: {
                 cloudSpeedLabel
             }
             .buttonStyle(.plain)
@@ -1152,7 +1162,9 @@ struct TiCloudStorageExampleView: View {
             .accessibilityIdentifier("cloudStorage.more")
             .accessibilityLabel("更多播放操作")
         #else
-            Button(action: { secondaryActionsPresented.toggle() }) {
+            Button {
+                secondaryActionsPresented.toggle()
+            } label: {
                 cloudMoreLabel
             }
             .buttonStyle(.plain)
@@ -1169,10 +1181,10 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudRecordingButton: some View {
-        Button(action: {
+        Button {
             secondaryActionsPresented = false
             flow.toggleRecording()
-        }) {
+        } label: {
             Label(
                 flow.recording ? "停止本地保存" : "开始本地保存",
                 systemImage: flow.recording ? "stop.circle" : "record.circle"
@@ -1186,10 +1198,10 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudSnapshotButton: some View {
-        Button(action: {
+        Button {
             secondaryActionsPresented = false
             flow.takeSnapshot()
-        }) {
+        } label: {
             Label("截图", systemImage: "camera")
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -1199,10 +1211,10 @@ struct TiCloudStorageExampleView: View {
     }
 
     private var cloudGalleryButton: some View {
-        Button(action: {
+        Button {
             secondaryActionsPresented = false
             flow.saveLatestToGallery()
-        }) {
+        } label: {
             Label("保存到系统相册", systemImage: "photo.on.rectangle.angled")
                 .frame(minWidth: 44, minHeight: 44)
                 .contentShape(Rectangle())
@@ -1324,7 +1336,9 @@ struct TiCloudStorageExampleView: View {
                                 .foregroundColor(ExampleColors.textSecondary)
                         }
                         Spacer()
-                        Button(action: { recordingsPresented = false }) {
+                        Button {
+                            recordingsPresented = false
+                        } label: {
                             Text("关闭")
                                 .frame(minWidth: 44, minHeight: 44)
                                 .contentShape(Rectangle())
@@ -1430,7 +1444,9 @@ struct TiCloudStorageExampleView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 VStack(spacing: 8) {
                     HStack {
-                        Button(action: { changeVisibleMonth(by: -1) }) {
+                        Button {
+                            changeVisibleMonth(by: -1)
+                        } label: {
                             Image(systemName: "chevron.left")
                                 .frame(width: 44, height: 44)
                         }
@@ -1442,7 +1458,9 @@ struct TiCloudStorageExampleView: View {
                             .font(.headline)
                             .accessibilityAddTraits(.isHeader)
                         Spacer()
-                        Button(action: { changeVisibleMonth(by: 1) }) {
+                        Button {
+                            changeVisibleMonth(by: 1)
+                        } label: {
                             Image(systemName: "chevron.right")
                                 .frame(width: 44, height: 44)
                         }
@@ -1487,7 +1505,9 @@ struct TiCloudStorageExampleView: View {
         let available = hasRecording(day: day)
         let selected = isSelected(day: day)
         let date = dateText(day: day)
-        return Button(action: { select(day: day) }) {
+        return Button {
+            select(day: day)
+        } label: {
             VStack(spacing: 4) {
                 Text("\(day)")
                     .font(.body.weight(.semibold))

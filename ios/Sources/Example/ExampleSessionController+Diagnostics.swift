@@ -49,29 +49,40 @@ func resetExampleRawDumpEvidenceMarkers() {
 @MainActor
 extension ExampleSessionController {
     func uploadLogs() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            await self.finalizeRawDump(upload: false)
-            self.beginLogUpload(isRawDumpUpload: false)
-        }
+        guard canUploadLogs, !isLogUploadInProgress else { return }
+        beginLogUpload(isRawDumpUpload: false)
     }
 
     func rawDumpButtonTapped() {
-        guard rawDumpButtonState.enabled else { return }
-        if rawDump != nil {
-            Task { @MainActor [weak self] in await self?.finalizeRawDump(upload: true) }
-        } else if rawDumpArchiveReady {
-            beginLogUpload(isRawDumpUpload: true)
+        guard rawDumpButtonState.enabled, canUploadLogs, !isLogUploadInProgress else { return }
+        if rawDump != nil || rawDumpArchiveReady {
+            // Register before yielding: cleanup must join both stop and this accepted upload.
+            rawDumpOperationTask = Task { @MainActor in
+                await self.finishRawDumpCapture()
+                if self.rawDumpArchiveReady {
+                    let upload = self.beginLogUpload(isRawDumpUpload: true)
+                    _ = await upload.value
+                }
+                self.rawDumpOperationTask = nil
+            }
         } else {
             startRawDump()
         }
     }
 
-    func finalizeRawDump(upload: Bool) async {
-        guard let rawDump else {
-            if upload, rawDumpArchiveReady { beginLogUpload(isRawDumpUpload: true) }
-            return
+    func finalizeRawDump() async {
+        if let operation = rawDumpOperationTask { await operation.value }
+        guard rawDump != nil else { return }
+        let task = Task { @MainActor in
+            await self.finishRawDumpCapture()
+            self.rawDumpOperationTask = nil
         }
+        rawDumpOperationTask = task
+        await task.value
+    }
+
+    private func finishRawDumpCapture() async {
+        guard let rawDump else { return }
         rawDumpButtonState = .finalizing
         async let firstStop = rawDump.stop()
         async let secondStop = rawDump.stop()
@@ -89,7 +100,6 @@ extension ExampleSessionController {
             if let marker = exampleRawDumpEvidenceMarker(event: "stop", archive: archive) {
                 emitExampleRawDumpEvidenceMarker(marker)
             }
-            if upload { beginLogUpload(isRawDumpUpload: true) }
         } else {
             rawDumpButtonState = .captureFailed
             setStatus("raw dump stop failed: code=\(result.code)")
@@ -103,8 +113,9 @@ extension ExampleSessionController {
         }
         rawDumpButtonState = .starting
         resetExampleRawDumpEvidenceMarkers()
-        Task { @MainActor [weak self] in
+        rawDumpOperationTask = Task { @MainActor [weak self] in
             guard let self else { return }
+            defer { self.rawDumpOperationTask = nil }
             let result = await conn.startRawDump(
                 options: TiRtcRawDumpOptions(
                     audioStreamIds: configuration.audioStreamId.map { [NSNumber(value: $0)] } ?? [],
@@ -126,47 +137,55 @@ extension ExampleSessionController {
         }
     }
 
-    private func beginLogUpload(isRawDumpUpload: Bool) {
-        if isLogUploadInProgress {
-            return
-        }
-        appendStatusLogLine("log_upload_ui_visible flow=client")
+    @discardableResult
+    private func beginLogUpload(isRawDumpUpload: Bool) -> Task<Int32, Never> {
+        let terminalClientUpload =
+            !isRawDumpUpload && !isClientPlayerActive
+            && clientCleanupState == .stopped && initialized
         isLogUploadInProgress = true
-        let code = TiRtcLogging.upload { [weak self] result in
-            DispatchQueue.main.async {
-                self?.isLogUploadInProgress = false
-                let resolvedLogId = result.logId ?? "nil"
-                self?.logUploadResult = ExampleLogUploadResult(code: result.code, logId: result.logId)
-                let status = "log upload finished: code=\(result.code) log_id=\(resolvedLogId)"
-                self?.setStatus(status)
-                if isRawDumpUpload {
-                    if let self, let archive = self.rawDumpArchiveEvidence,
-                        let marker = exampleRawDumpEvidenceMarker(
-                            event: "upload", archive: archive, code: result.code,
-                            logId: result.logId ?? "")
-                    {
-                        emitExampleRawDumpEvidenceMarker(marker)
-                    }
-                    self?.rawDumpButtonState = result.succeeded ? .idle : .uploadFailed
-                    if result.succeeded {
-                        self?.rawDumpArchiveReady = false
-                        self?.rawDumpArchiveEvidence = nil
+        logUploadResult = nil
+        let task = Task { @MainActor in
+            if !isRawDumpUpload { await self.finalizeRawDump() }
+            self.appendStatusLogLine("log_upload_ui_visible flow=client")
+            self.setStatus("log upload started")
+            if isRawDumpUpload { self.rawDumpButtonState = .uploading }
+            let result: ExampleLogUploadResult = await withCheckedContinuation { continuation in
+                let code = TiRtcLogging.upload { result in
+                    DispatchQueue.main.async {
+                        continuation.resume(
+                            returning: ExampleLogUploadResult(code: result.code, logId: result.logId))
                     }
                 }
-                if !result.succeeded {
-                    self?.showUserFacingError(code: result.code, context: "log upload")
+                if code != 0 {
+                    continuation.resume(returning: ExampleLogUploadResult(code: code, logId: nil))
                 }
             }
+            self.logUploadResult = result
+            self.setStatus("log upload finished: code=\(result.code) log_id=\(result.logId ?? "nil")")
+            if terminalClientUpload {
+                self.appendStatusLogLine(
+                    "client_final_log_upload_completed code=\(result.code) log_id=\(result.logId ?? "nil")")
+            }
+            if isRawDumpUpload {
+                if let archive = self.rawDumpArchiveEvidence,
+                    let marker = exampleRawDumpEvidenceMarker(
+                        event: "upload", archive: archive, code: result.code, logId: result.logId ?? "")
+                {
+                    emitExampleRawDumpEvidenceMarker(marker)
+                }
+                self.rawDumpButtonState = result.succeeded ? .idle : .uploadFailed
+                if result.succeeded {
+                    self.rawDumpArchiveReady = false
+                    self.rawDumpArchiveEvidence = nil
+                }
+            }
+            if !result.succeeded { self.showUserFacingError(code: result.code, context: "log upload") }
+            self.isLogUploadInProgress = false
+            self.logUploadTask = nil
+            return result.code
         }
-        if isRawDumpUpload { rawDumpButtonState = .uploading }
-        setStatus("log upload started")
-        if code != 0 {
-            isLogUploadInProgress = false
-            logUploadResult = ExampleLogUploadResult(code: code, logId: nil)
-            appendStatusLogLine("log upload finished: code=\(code) log_id=nil")
-            showUserFacingError(code: code, context: "log upload")
-            if isRawDumpUpload { rawDumpButtonState = .uploadFailed }
-        }
+        logUploadTask = task
+        return task
     }
 
     func refreshDiagnostics() {
@@ -179,6 +198,7 @@ extension ExampleSessionController {
 
         let connMetrics = conn.getMetricsSnapshot()
         let audioMetrics = audioOutput?.getMetricsSnapshot()
+        let audioContinuity = audioOutput?.getContinuityMetricsSnapshot()
         let videoMetrics = videoOutput?.getMetricsSnapshot()
         let audioDebug = audioOutput?.getDebugSnapshot()
         let videoDebug = videoOutput?.getDebugSnapshot()
@@ -186,6 +206,7 @@ extension ExampleSessionController {
             "conn=\(connMetrics.code) audio=\(audioMetrics?.code ?? 0) video=\(videoMetrics?.code ?? 0)"
         let audioSnapshot = audioDebug?.snapshot
         let audioMetricsSnapshot = audioMetrics?.snapshot
+        let audioContinuitySnapshot = audioContinuity?.snapshot
         let videoDebugSnapshot = videoDebug?.snapshot
         let videoMetricsSnapshot = videoMetrics?.snapshot
         debugSummary =
@@ -196,6 +217,11 @@ extension ExampleSessionController {
             "码率 \(formatKbps(videoMetricsSnapshot?.videoInputBitrateKbps)) · 接收 \(formatRate(videoMetricsSnapshot?.videoInputFps, suffix: "FPS"))"
         audioReceiveSummary =
             "码率 \(formatKbps(audioMetricsSnapshot?.audioInputBitrateKbps)) · PPS \(formatRate(audioMetricsSnapshot?.audioInputPacketRate, suffix: "/s"))"
+        audioContinuitySummary =
+            "观察 \(formatFrameCount(audioContinuitySnapshot?.observedSourceFrameCount)) · "
+            + "接纳 \(formatFrameCount(audioContinuitySnapshot?.acceptedSourceFrameCount)) · "
+            + "接纳率 \(formatAcceptanceRatio(audioContinuitySnapshot)) · "
+            + "缺口 \(formatDuration(audioContinuitySnapshot?.missingSourceDurationMs))"
         audioStutterSummary =
             "\(formatCount(audioMetricsSnapshot?.stutter.stutterCount)) / 最长 \(formatDuration(audioMetricsSnapshot?.stutter.stutterPeakMs))"
         videoOutputLatencySummary =
@@ -215,7 +241,7 @@ extension ExampleSessionController {
         pendingSummary =
             "audio estimated_output_latency_ms=\(audioMetricsSnapshot?.estimatedOutputLatencyMs ?? -1) video estimated_output_latency_ms=\(videoMetricsSnapshot?.estimatedOutputLatencyMs ?? -1)"
         let debugLine =
-            "debug_stats_ready metrics=\"\(metricsSummary)\" debug=\"\(debugSummary)\" media=\"\(mediaParameterSummary)\" video=\"\(videoReceiveSummary)\" audio=\"\(audioReceiveSummary)\" audio_stutter=\"\(audioStutterSummary)\" video_output_latency=\"\(videoOutputLatencySummary)\" audio_output_latency=\"\(audioOutputLatencySummary)\" pending=\"\(pendingSummary)\" audio_output_duration_ms=\(audioMetricsSnapshot?.stutter.outputDurationMs ?? -1) audio_stats_updated_at_ms=\(audioMetricsSnapshot?.statsUpdatedAtMs ?? -1) video_stats_updated_at_ms=\(videoMetricsSnapshot?.statsUpdatedAtMs ?? -1)"
+            "debug_stats_ready metrics=\"\(metricsSummary)\" debug=\"\(debugSummary)\" media=\"\(mediaParameterSummary)\" video=\"\(videoReceiveSummary)\" audio=\"\(audioReceiveSummary)\" audio_continuity=\"\(audioContinuitySummary)\" audio_stutter=\"\(audioStutterSummary)\" video_output_latency=\"\(videoOutputLatencySummary)\" audio_output_latency=\"\(audioOutputLatencySummary)\" pending=\"\(pendingSummary)\" audio_output_duration_ms=\(audioMetricsSnapshot?.stutter.outputDurationMs ?? -1) audio_stats_updated_at_ms=\(audioMetricsSnapshot?.statsUpdatedAtMs ?? -1) video_stats_updated_at_ms=\(videoMetricsSnapshot?.statsUpdatedAtMs ?? -1)"
         appendStatusLogLine(debugLine)
         print("[Example] \(debugLine)")
         fflush(stdout)
@@ -317,6 +343,21 @@ extension ExampleSessionController {
             return "--"
         }
         return "\(count) 次"
+    }
+
+    private func formatFrameCount(_ count: Int64?) -> String {
+        guard let count, count >= 0 else { return "--" }
+        return "\(count) 帧"
+    }
+
+    private func formatAcceptanceRatio(
+        _ snapshot: TiRtcAudioOutputContinuityMetricsSnapshot?
+    ) -> String {
+        guard let snapshot, snapshot.observedSourceFrameCount > 0 else { return "--" }
+        return String(
+            format: "%.1f%%",
+            Double(snapshot.acceptedSourceFrameCount) * 100.0
+                / Double(snapshot.observedSourceFrameCount))
     }
 
     private func formatKbps(_ value: Double?) -> String {

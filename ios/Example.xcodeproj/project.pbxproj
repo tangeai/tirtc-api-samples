@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A11CE000000000000000001 /* ExampleRobotVoiceEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A11CE000000000000000003 /* ExampleRobotVoiceEffect.swift */; };
+		0A11CE000000000000000002 /* ExampleRobotVoiceEffect.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A11CE000000000000000003 /* ExampleRobotVoiceEffect.swift */; };
 		0EC6BE825EC29587E8CAF184 /* ExampleSessionSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6F12A13B5B6E450424020A71 /* ExampleSessionSupport.swift */; };
 		0F5A9A116E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */; };
 		0F5A9A126E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */; };
@@ -19,6 +21,8 @@
 		3939C5E0D127F2E8FCFC883A /* ExampleSessionController+Delegates.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94EF43B396E3BFBD265704EB /* ExampleSessionController+Delegates.swift */; };
 		3A22DCB88BB2FC78A69FC092 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 64BDB87E7042672739BB6807 /* Assets.xcassets */; };
 		3FE4719C2821DA3D360B4C60 /* ExampleConfigureViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = 392E43624911F05C70DFA230 /* ExampleConfigureViews.swift */; };
+		451AF9E5040FA3A1E32E726C /* ExampleClientConnectionObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A567C7CB3A5FA51318294D /* ExampleClientConnectionObservation.swift */; };
+		560AE820C9E4FB2E77436B07 /* ExampleClientConnectionObservation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 91A567C7CB3A5FA51318294D /* ExampleClientConnectionObservation.swift */; };
 		6633F8FBC9EE93BA3BA9169B /* ExampleModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D6C77AEB255D3AA485CECC1 /* ExampleModels.swift */; };
 		6B29DB0C5BD9202C0D893C57 /* ExampleScene.swift in Sources */ = {isa = PBXBuildFile; fileRef = EDFDC397EA306C1C6D53C7C5 /* ExampleScene.swift */; };
 		77C80262F3232A07B26F6E9D /* ExampleSessionController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 42CA0EA736383E72AA180B24 /* ExampleSessionController.swift */; };
@@ -69,6 +73,7 @@
 		00ACA4B9768A65ECAFA832D8 /* ExampleSceneStyle.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleSceneStyle.swift; path = Sources/Example/ExampleSceneStyle.swift; sourceTree = "<group>"; };
 		011DBBB8743549AD3536ECCD /* ExampleApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleApp.swift; path = Sources/Example/ExampleApp.swift; sourceTree = "<group>"; };
 		035B9F21ECD2699B72442D9E /* ExampleMacOS.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = ExampleMacOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		0A11CE000000000000000003 /* ExampleRobotVoiceEffect.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleRobotVoiceEffect.swift; path = Sources/Example/ExampleRobotVoiceEffect.swift; sourceTree = "<group>"; };
 		0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleRawDumpButton.swift; path = Sources/Example/ExampleRawDumpButton.swift; sourceTree = "<group>"; };
 		21688C10276368282EAB6CF6 /* ExampleTheme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleTheme.swift; path = Sources/Example/ExampleTheme.swift; sourceTree = "<group>"; };
 		26BD31380DD12580F9DB8BE8 /* DarwinIntegrationMacOS.xctestplan */ = {isa = PBXFileReference; includeInIndex = 1; path = DarwinIntegrationMacOS.xctestplan; sourceTree = "<group>"; };
@@ -86,6 +91,7 @@
 		849EB88C7CAC1B0636951B40 /* ExampleQRCodeScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleQRCodeScanner.swift; path = Sources/Example/ExampleQRCodeScanner.swift; sourceTree = "<group>"; };
 		86CA813E264CA8D903AAFFF7 /* DarwinExampleSmoke.xctestplan */ = {isa = PBXFileReference; includeInIndex = 1; path = DarwinExampleSmoke.xctestplan; sourceTree = "<group>"; };
 		88BACD43BC2B63695A15406F /* ExampleSessionController+Diagnostics.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ExampleSessionController+Diagnostics.swift"; path = "Sources/Example/ExampleSessionController+Diagnostics.swift"; sourceTree = "<group>"; };
+		91A567C7CB3A5FA51318294D /* ExampleClientConnectionObservation.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleClientConnectionObservation.swift; path = Tests/UI/ExampleClientConnectionObservation.swift; sourceTree = "<group>"; };
 		94EF43B396E3BFBD265704EB /* ExampleSessionController+Delegates.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ExampleSessionController+Delegates.swift"; path = "Sources/Example/ExampleSessionController+Delegates.swift"; sourceTree = "<group>"; };
 		A425A6DE707ACF6EAEF878E6 /* ExampleUITestHarnessConfig.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = ExampleUITestHarnessConfig.swift; path = Tests/UI/ExampleUITestHarnessConfig.swift; sourceTree = "<group>"; };
 		AA50E4CA69198A13132C644D /* ExampleSessionController+Commands.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; name = "ExampleSessionController+Commands.swift"; path = "Sources/Example/ExampleSessionController+Commands.swift"; sourceTree = "<group>"; };
@@ -187,6 +193,7 @@
 			isa = PBXGroup;
 			children = (
 				011DBBB8743549AD3536ECCD /* ExampleApp.swift */,
+				0A11CE000000000000000003 /* ExampleRobotVoiceEffect.swift */,
 				392E43624911F05C70DFA230 /* ExampleConfigureViews.swift */,
 				2D6C77AEB255D3AA485CECC1 /* ExampleModels.swift */,
 				0F5A9A106E454F6091B69301 /* ExampleRawDumpButton.swift */,
@@ -244,6 +251,7 @@
 			children = (
 				A425A6DE707ACF6EAEF878E6 /* ExampleUITestHarnessConfig.swift */,
 				E8284363AAF7DDCE1CF9E726 /* ExampleUITests.swift */,
+				91A567C7CB3A5FA51318294D /* ExampleClientConnectionObservation.swift */,
 			);
 			name = UI;
 			sourceTree = "<group>";
@@ -402,6 +410,7 @@
 			files = (
 				D604B9553B006920701D2602 /* ExampleUITestHarnessConfig.swift in Sources */,
 				1B5B625188336074417DFDA9 /* ExampleUITests.swift in Sources */,
+				560AE820C9E4FB2E77436B07 /* ExampleClientConnectionObservation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -411,6 +420,7 @@
 			files = (
 				133FDF9D7722E9C8FB067B11 /* ExampleUITestHarnessConfig.swift in Sources */,
 				19DF93B0C25B176C34F7A396 /* ExampleUITests.swift in Sources */,
+				451AF9E5040FA3A1E32E726C /* ExampleClientConnectionObservation.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -432,6 +442,7 @@
 				846BF8127C066E600C073522 /* ExampleTheme.swift in Sources */,
 				B2E85882805A8C063902A750 /* ExampleVideoViews.swift in Sources */,
 				0F5A9A116E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */,
+				0A11CE000000000000000001 /* ExampleRobotVoiceEffect.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -453,6 +464,7 @@
 				FAECDB889D85A87500D0FEC4 /* ExampleTheme.swift in Sources */,
 				D674AB4BC51F9B0A2C80A0E6 /* ExampleVideoViews.swift in Sources */,
 				0F5A9A126E454F6091B69301 /* ExampleRawDumpButton.swift in Sources */,
+				0A11CE000000000000000002 /* ExampleRobotVoiceEffect.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -518,8 +530,17 @@
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_STYLE = Automatic;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					TiRTC,
+					"-framework",
+					WebRTC,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = tirtc.example.macos.uitests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
@@ -561,8 +582,17 @@
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_STYLE = Automatic;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					TiRTC,
+					"-framework",
+					WebRTC,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = tirtc.example.macos.uitests;
 				SDKROOT = macosx;
 				SWIFT_VERSION = 5.0;
@@ -698,12 +728,20 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Ti RTC";
 				INFOPLIST_KEY_CFBundleName = "Ti RTC";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture microphone audio for TiRTC client talkback.";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					TiRTC,
+					"-framework",
+					WebRTC,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = tirtc.example.macos;
 				PRODUCT_NAME = Example;
 				SDKROOT = macosx;
@@ -782,12 +820,20 @@
 				CODE_SIGNING_REQUIRED = NO;
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
+				FRAMEWORK_SEARCH_PATHS = "$(inherited)";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = "Ti RTC";
 				INFOPLIST_KEY_CFBundleName = "Ti RTC";
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Capture microphone audio for TiRTC client talkback.";
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks @loader_path/../Frameworks";
 				MACOSX_DEPLOYMENT_TARGET = 11.5;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-framework",
+					TiRTC,
+					"-framework",
+					WebRTC,
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = tirtc.example.macos;
 				PRODUCT_NAME = Example;
 				SDKROOT = macosx;
