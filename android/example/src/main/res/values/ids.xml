@@ -21,6 +21,7 @@
     <item name="field_cloud_storage_video_channel_id_2" type="id" />
     <item name="field_cloud_storage_video_channel_id_3" type="id" />
     <item name="player_status" type="id" />
+    <item name="player_robot_voice" type="id" />
     <item name="player_empty_video_state" type="id" />
     <item name="player_command_button" type="id" />
     <item name="player_command_sheet" type="id" />
