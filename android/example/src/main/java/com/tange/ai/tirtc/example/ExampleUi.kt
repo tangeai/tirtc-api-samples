@@ -252,6 +252,7 @@ internal fun Context.playerBottomControls(
     outputVolumeButton: TextView,
     downlinkButton: TextView,
     moreButton: TextView,
+    robotVoiceControl: View,
 ): View {
     val wide = resources.configuration.expandPlaybackSecondaryActions()
     return LinearLayout(this).apply {
@@ -260,6 +261,12 @@ internal fun Context.playerBottomControls(
         setPadding(dp(12), dp(8), dp(12), dp(12))
         addView(
             bubble,
+            LinearLayout.LayoutParams(wrap(), wrap()).apply {
+                gravity = Gravity.END
+            },
+        )
+        addView(
+            robotVoiceControl,
             LinearLayout.LayoutParams(wrap(), wrap()).apply {
                 gravity = Gravity.END
             },

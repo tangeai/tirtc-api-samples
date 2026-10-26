@@ -85,6 +85,7 @@ internal fun AppCompatActivity.showExampleSettingsPage(
                             localAudioAecEnabled = localAudioAec.isChecked,
                             localAudioAgcLevel = localAudioProcessingLevelFromIndex(localAudioAgc.selectedItemPosition),
                             localAudioAnsLevel = localAudioProcessingLevelFromIndex(localAudioAns.selectedItemPosition),
+                            localAudioRobotVoiceEnabled = settings.localAudioRobotVoiceEnabled,
                             consoleLogEnabled = console.isChecked,
                         ),
                     )

@@ -16,6 +16,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
+import android.widget.CheckBox
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.GridLayout
@@ -103,10 +104,13 @@ class MainActivity : AppCompatActivity() {
     private var playerLatestMediaTargetId: Int? = null
     private var playerAudioInput: TiRtcAudioInput? = null
     private var playerTalkbackRunning = false
+    private val playerLocalAudioController = ExampleLocalAudioController()
+    private var playerTalkbackPermissionPending = false
     private var playerRunning = false
     private var playerConfig: ClientConfiguration? = null
     private var playerStage: FrameLayout? = null
     private var playerLocalAudioButton: TextView? = null
+    private var playerRobotVoiceControl: CheckBox? = null
     private var playerOutputVolumeButton: TextView? = null
     private var playerDownlinkButton: TextView? = null
     private var playerRecordingButton: View? = null
@@ -122,7 +126,9 @@ class MainActivity : AppCompatActivity() {
     private var playerStopPending = false
     private var playerStopClearPageRefs = false
     private var playerStopInFlight = false
-    private val playerStopCallbacks = mutableListOf<() -> Unit>()
+    private var playerLogUploadInFlight = false
+    private var playerStopAwaitingLogUpload = false
+    private val playerStopCallbacks = mutableListOf<(Int) -> Unit>()
     private var navigationGeneration = 0
     private var metricsTimer: Timer? = null
     private var playerSessionGeneration = 0
@@ -168,7 +174,13 @@ class MainActivity : AppCompatActivity() {
     private var rawDumpArchiveEvidence: TiRawDumpArchive? = null
     private var rawDumpBusy = false
     private val permissionLauncher =
-        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {}
+        registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+            activeScanner?.resume()
+            if (playerTalkbackPermissionPending) {
+                playerTalkbackPermissionPending = false
+                updatePlayerLocalAudioButton(enabled = conn?.state == TiRtcConnState.CONNECTED)
+            }
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -200,8 +212,8 @@ class MainActivity : AppCompatActivity() {
         clearActiveScanner()
         statusView = null
         closeCloudStorageFlow {
-            stopPlayer {
-                if (generation != navigationGeneration || isFinishing || isDestroyed) return@stopPlayer
+            stopPlayer { code ->
+                if (code != 0 || generation != navigationGeneration || isFinishing || isDestroyed) return@stopPlayer
                 if (configureProduct == ConfigureProduct.CLOUD_STORAGE) {
                     showCloudStorageConfigure()
                 } else {
@@ -499,8 +511,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showCloudStoragePlayer(config: CloudStorageConfiguration) {
+        val generation = ++navigationGeneration
         clearActiveScanner()
-        stopPlayer()
+        stopPlayer { code ->
+            if (code != 0 || generation != navigationGeneration || isFinishing || isDestroyed) return@stopPlayer
+            openCloudStoragePlayer(config)
+        }
+    }
+
+    private fun openCloudStoragePlayer(config: CloudStorageConfiguration) {
         closeCloudStorageFlow()
         val flow = TiCloudStorageExampleFlow()
         cloudStorageFlow = flow
@@ -553,24 +572,24 @@ class MainActivity : AppCompatActivity() {
                     more,
                     buildList {
                         add(
-                        PlaybackMenuAction(
-                            R.id.cloud_storage_recording_button,
-                            if (flow.isRecording) "结束录屏" else "开始录屏",
-                            "cloud_storage_action_recording",
-                            enabled = { cloudActionEnabled(PlaybackMediaAction.RECORDING, cloudPlaybackActionState(flow)) },
-                            unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
-                            dispatch = { toggleCloudStorageRecording(flow, config) },
-                        ),
+                            PlaybackMenuAction(
+                                R.id.cloud_storage_recording_button,
+                                if (flow.isRecording) "结束录屏" else "开始录屏",
+                                "cloud_storage_action_recording",
+                                enabled = { cloudActionEnabled(PlaybackMediaAction.RECORDING, cloudPlaybackActionState(flow)) },
+                                unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
+                                dispatch = { toggleCloudStorageRecording(flow, config) },
+                            ),
                         )
                         add(
-                        PlaybackMenuAction(
-                            R.id.cloud_storage_snapshot_button,
-                            "截图",
-                            "cloud_storage_action_snapshot",
-                            enabled = { cloudActionEnabled(PlaybackMediaAction.SNAPSHOT, cloudPlaybackActionState(flow)) },
-                            unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
-                            dispatch = { takeCloudStorageSnapshot(flow) },
-                        ),
+                            PlaybackMenuAction(
+                                R.id.cloud_storage_snapshot_button,
+                                "截图",
+                                "cloud_storage_action_snapshot",
+                                enabled = { cloudActionEnabled(PlaybackMediaAction.SNAPSHOT, cloudPlaybackActionState(flow)) },
+                                unavailableMessage = { if (cloudStorageMediaBusyOwner === flow) "媒体操作进行中" else "请先选择并播放录像" },
+                                dispatch = { takeCloudStorageSnapshot(flow) },
+                            ),
                         )
                         if (flow.hasLatestMedia) {
                             add(
@@ -1652,6 +1671,7 @@ class MainActivity : AppCompatActivity() {
         remoteIdField: EditText,
         tokenField: EditText,
     ) {
+        requestRuntimePermissions(includeCamera = true)
         val payloadField =
             editText(
                 placeholder = CLIENT_QR_SAMPLE,
@@ -1703,6 +1723,7 @@ class MainActivity : AppCompatActivity() {
         endpointField: EditText,
         tokenField: EditText,
     ) {
+        requestRuntimePermissions(includeCamera = true)
         val payloadField = editText("粘贴云录像 Token", "", multiLine = true)
 
         fun applyToken(raw: String): Boolean {
@@ -1742,6 +1763,18 @@ class MainActivity : AppCompatActivity() {
             playbackControlButton("🎙", "启动麦克风") {
                 togglePlayerTalkback()
             }
+        val robotVoiceControl =
+            CheckBox(this).apply {
+                id = R.id.player_robot_voice
+                text = "80 Hz 机器人变声"
+                isChecked = settings.localAudioRobotVoiceEnabled
+                setTextColor(ExampleTheme.textPrimary)
+                minHeight = dp(ExampleTheme.minimumTouchTargetDp)
+                setOnCheckedChangeListener { _, checked ->
+                    settings = settings.copy(localAudioRobotVoiceEnabled = checked)
+                    updatePlayerLocalAudioButton(enabled = conn?.state == TiRtcConnState.CONNECTED)
+                }
+            }
         val downlinkButton =
             playbackControlButton("…", "连接中", emphasized = true) {
                 togglePlayerDownlink()
@@ -1773,24 +1806,24 @@ class MainActivity : AppCompatActivity() {
                     moreButton,
                     buildList {
                         add(
-                        PlaybackMenuAction(
-                            R.id.player_recording_button,
-                            if (playerRecordingTask == null) "开始本地保存" else "结束本地保存",
-                            "player_action_recording",
-                            enabled = { rtcActionEnabled(PlaybackMediaAction.RECORDING, rtcPlaybackActionState()) },
-                            unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
-                            dispatch = ::togglePlayerRecording,
-                        ),
+                            PlaybackMenuAction(
+                                R.id.player_recording_button,
+                                if (playerRecordingTask == null) "开始本地保存" else "结束本地保存",
+                                "player_action_recording",
+                                enabled = { rtcActionEnabled(PlaybackMediaAction.RECORDING, rtcPlaybackActionState()) },
+                                unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
+                                dispatch = ::togglePlayerRecording,
+                            ),
                         )
                         add(
-                        PlaybackMenuAction(
-                            R.id.player_snapshot_button,
-                            "截图",
-                            "player_action_snapshot",
-                            enabled = { rtcActionEnabled(PlaybackMediaAction.SNAPSHOT, rtcPlaybackActionState()) },
-                            unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
-                            dispatch = ::takePlayerSnapshot,
-                        ),
+                            PlaybackMenuAction(
+                                R.id.player_snapshot_button,
+                                "截图",
+                                "player_action_snapshot",
+                                enabled = { rtcActionEnabled(PlaybackMediaAction.SNAPSHOT, rtcPlaybackActionState()) },
+                                unavailableMessage = { if (playerMediaBusy) "媒体操作进行中" else "当前视频尚未可用" },
+                                dispatch = ::takePlayerSnapshot,
+                            ),
                         )
                         if (playerLatestMediaFile != null) {
                             add(
@@ -1820,6 +1853,7 @@ class MainActivity : AppCompatActivity() {
         playerConfig = config
         playerStage = videoStage
         playerLocalAudioButton = localAudioButton
+        playerRobotVoiceControl = robotVoiceControl
         playerOutputVolumeButton = outputVolumeButton
         playerDownlinkButton = downlinkButton
         playerOutputMuted = false
@@ -1867,6 +1901,7 @@ class MainActivity : AppCompatActivity() {
                         outputVolumeButton = outputVolumeButton,
                         downlinkButton = downlinkButton,
                         moreButton = moreButton,
+                        robotVoiceControl = robotVoiceControl,
                     ),
             ).apply { addRawDumpOverlay(rawDumpControl) },
         )
@@ -1877,6 +1912,11 @@ class MainActivity : AppCompatActivity() {
         config: ClientConfiguration,
         stage: FrameLayout,
     ) {
+        if (conn != null || playerStopInFlight) {
+            setPlayerControlState(connecting = false, running = false, localAudioEnabled = false)
+            appendStatus("播放器尚未停止，请先重试停止")
+            return
+        }
         val generation = ++playerSessionGeneration
         val initCode =
             TiRtc.init(
@@ -2078,7 +2118,6 @@ class MainActivity : AppCompatActivity() {
                     appendStatus("talkback ready stream=${settings.localAudioStreamId}")
                 }
             }
-        nextTalkback.setOptions(settings.localAudioOptions())
         nextAudio?.onStateChanged =
             TiRtcAudioOutputStateListener { state ->
                 if (generation != playerSessionGeneration || audioOutput !== nextAudio) {
@@ -2224,7 +2263,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun stopPlayer(
         clearPageRefs: Boolean = true,
-        completion: (() -> Unit)? = null,
+        completion: ((Int) -> Unit)? = null,
     ) {
         if (rawDump != null) {
             finishRawDump(upload = false, completion = { stopPlayer(clearPageRefs, completion) })
@@ -2268,7 +2307,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun finishStopPlayer() {
         val clearPageRefs = playerStopClearPageRefs
-        playerAudioInput?.dispose()
+        val inputDisposeCode = playerAudioInput?.dispose() ?: 0
+        if (inputDisposeCode != 0) {
+            completePlayerStop(inputDisposeCode)
+            return
+        }
+        playerLocalAudioController.complete("disposed")
         playerAudioInput = null
         playerTalkbackRunning = false
         val activeConfig = playerConfig
@@ -2281,15 +2325,44 @@ class MainActivity : AppCompatActivity() {
                     "audioStream=${activeConfig.audioStreamId} videoStreams=${activeConfig.videoStreamIds}",
             )
         }
-        videoOutputs.values.forEach(TiRtcVideoOutput::dispose)
-        videoOutputs.clear()
+        for ((streamId, output) in videoOutputs.toMap()) {
+            val code = output.dispose()
+            if (code != 0) {
+                completePlayerStop(code)
+                return
+            }
+            videoOutputs.remove(streamId)
+        }
         playerVideoLanes.clear()
         playerVideoStateLabels.clear()
         playerUnavailableVideoStreamIds.clear()
-        audioOutput?.dispose()
+        val audioDisposeCode = audioOutput?.dispose() ?: 0
+        if (audioDisposeCode != 0) {
+            completePlayerStop(audioDisposeCode)
+            return
+        }
         audioOutput = null
-        conn?.dispose()
+        if (activeConnection != null) {
+            val disconnectCode = activeConnection.disconnect()
+            if (disconnectCode != 0) {
+                completePlayerStop(disconnectCode)
+                return
+            }
+            if (activeConnection.state != TiRtcConnState.IDLE && activeConnection.state != TiRtcConnState.DISCONNECTED) {
+                completePlayerStop(TiCloudStorageErrorCode.IN_USE)
+                return
+            }
+            val disposeCode = activeConnection.dispose()
+            if (disposeCode != 0) {
+                completePlayerStop(disposeCode)
+                return
+            }
+        }
         conn = null
+        if (clearPageRefs && playerLogUploadInFlight) {
+            playerStopAwaitingLogUpload = true
+            return
+        }
         playerRunning = false
         setPlayerControlState(connecting = false, running = false, localAudioEnabled = false)
         if (clearPageRefs) {
@@ -2298,6 +2371,7 @@ class MainActivity : AppCompatActivity() {
             playerConfig = null
             playerStage = null
             playerLocalAudioButton = null
+            playerRobotVoiceControl = null
             playerOutputVolumeButton = null
             playerDownlinkButton = null
             playerRecordingButton = null
@@ -2305,15 +2379,28 @@ class MainActivity : AppCompatActivity() {
             playerGalleryButton = null
             playerMoreButton = null
         }
+        refreshPlayerMediaControls()
+        if (clearPageRefs) appendStatus("shutdown code=${TiRtc.shutdown()}")
+        completePlayerStop(0)
+    }
+
+    private fun completePlayerStop(code: Int) {
         playerMediaBusy = false
         playerStopPending = false
         playerStopClearPageRefs = false
         playerStopInFlight = false
-        refreshPlayerMediaControls()
-        TiRtc.shutdown()
+        playerStopAwaitingLogUpload = false
+        if (code != 0) {
+            setPlayerControlState(connecting = false, running = false, localAudioEnabled = false)
+            appendStatus("停止播放失败 code=$code，可重试停止")
+        }
         val callbacks = playerStopCallbacks.toList()
         playerStopCallbacks.clear()
-        callbacks.forEach { it() }
+        callbacks.forEach { callback ->
+            runCatching { callback(code) }.onFailure { error ->
+                Log.e("TiRtcExample", "player stop completion failed exception=${error.javaClass.simpleName}")
+            }
+        }
     }
 
     private fun togglePlayerRecording() {
@@ -2523,9 +2610,13 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun togglePlayerDownlink() {
-        if (playerRunning) {
-            stopPlayer(clearPageRefs = false)
-            appendStatus("Downlink stopped.")
+        if (playerRunning || conn != null || playerStopInFlight) {
+            val generation = navigationGeneration
+            stopPlayer(clearPageRefs = false) { code ->
+                if (code == 0 && generation == navigationGeneration && !isFinishing && !isDestroyed) {
+                    appendStatus("Downlink stopped.")
+                }
+            }
             return
         }
         val config = playerConfig ?: return
@@ -2581,28 +2672,69 @@ class MainActivity : AppCompatActivity() {
             appendStatus("talkback waiting for connected client")
             return
         }
-        val optionsCode = input.setOptions(settings.localAudioOptions())
+        updatePlayerTalkbackModeControl(enabled = false)
+        val options = settings.localAudioOptions()
+        if (options.captureEnabled &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            playerTalkbackPermissionPending = true
+            updatePlayerLocalAudioButton(enabled = false)
+            requestRuntimePermissions(includeMicrophone = true)
+            appendStatus("talkback waiting for microphone permission")
+            return
+        }
+        val optionsCode = playerLocalAudioController.configure(input, settings)
         if (optionsCode != 0) {
+            updatePlayerTalkbackModeControl(enabled = true)
             appendStatus("talkback options=$optionsCode")
             return
         }
         val attachCode = input.attach(connection, settings.localAudioStreamId)
         if (attachCode != 0) {
+            playerLocalAudioController.deactivate(input)
+            playerLocalAudioController.complete("attach_failed")
+            updatePlayerTalkbackModeControl(enabled = true)
             appendStatus("talkback attach=$attachCode")
             return
         }
+        playerLocalAudioController.beginStart(input)
         val startCode = input.start()
         playerTalkbackRunning = startCode == 0
+        if (startCode != 0) {
+            playerLocalAudioController.deactivate(input)
+            val detachCode = input.detach(connection)
+            if (detachCode == 0) {
+                playerLocalAudioController.complete("start_failed")
+                updatePlayerTalkbackModeControl(enabled = true)
+            } else {
+                playerTalkbackRunning = true
+                appendStatus("talkback start rollback detach=$detachCode; retry stop")
+            }
+        }
         updatePlayerLocalAudioButton(enabled = true)
-        appendStatus("talkback start=$startCode stream=${settings.localAudioStreamId}")
+        appendStatus(
+            "talkback start=$startCode stream=${settings.localAudioStreamId} " +
+                "robot=${settings.localAudioRobotVoiceEnabled}",
+        )
     }
 
     private fun stopPlayerTalkback() {
         val input = playerAudioInput ?: return
         val connection = conn
-        val detachCode = if (connection != null) input.detach(connection) else 0
+        playerLocalAudioController.deactivate(input)
         val stopCode = input.stop()
+        if (stopCode != 0) {
+            appendStatus("talkback stop=$stopCode; input remains attached")
+            return
+        }
+        val detachCode = if (connection != null) input.detach(connection) else 0
+        if (detachCode != 0) {
+            appendStatus("talkback detach=$detachCode; retry stop")
+            return
+        }
         playerTalkbackRunning = false
+        playerLocalAudioController.complete("stopped")
         updatePlayerLocalAudioButton(enabled = connection?.state == TiRtcConnState.CONNECTED)
         appendStatus("talkback stop=$stopCode detach=$detachCode")
     }
@@ -2614,16 +2746,18 @@ class MainActivity : AppCompatActivity() {
     ) {
         playerRunning = running
         playerDownlinkButton?.apply {
+            val stopRequired = !connecting && !running && conn != null
             val label =
                 when {
                     connecting -> "连接中"
                     running -> "停止播放"
+                    stopRequired -> "重试停止"
                     else -> "开始播放"
                 }
             updatePlaybackControl(
                 if (connecting) {
                     "…"
-                } else if (running) {
+                } else if (running || stopRequired) {
                     "■"
                 } else {
                     "▶"
@@ -2644,8 +2778,25 @@ class MainActivity : AppCompatActivity() {
 
     private fun updatePlayerLocalAudioButton(enabled: Boolean) {
         playerLocalAudioButton?.apply {
-            val label = if (playerTalkbackRunning) "停止麦克风" else "启动麦克风"
+            val label =
+                if (playerTalkbackRunning) {
+                    "停止麦克风"
+                } else if (settings.localAudioRobotVoiceEnabled) {
+                    "启动机器人麦克风"
+                } else {
+                    "启动麦克风"
+                }
             updatePlaybackControl(if (playerTalkbackRunning) "🎙" else "🎙", label, label)
+            isEnabled = enabled
+            alpha = if (enabled) 1.0f else 0.55f
+        }
+        updatePlayerTalkbackModeControl(
+            enabled = enabled && !playerTalkbackRunning && !playerTalkbackPermissionPending && !playerStopInFlight,
+        )
+    }
+
+    private fun updatePlayerTalkbackModeControl(enabled: Boolean) {
+        playerRobotVoiceControl?.apply {
             isEnabled = enabled
             alpha = if (enabled) 1.0f else 0.55f
         }
@@ -2773,12 +2924,35 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun uploadLogsNow() {
+        if (playerLogUploadInFlight) return
+        playerLogUploadInFlight = true
+        val generation = navigationGeneration
         appendStatus("log upload=start")
-        TiRtcLogging.upload(
-            TiRtcLogUploadCallback { code, logId ->
+        val startCode =
+            TiRtcLogging.upload(
+                TiRtcLogUploadCallback { code, logId ->
+                    completePlayerLogUpload(generation, code, logId)
+                },
+            )
+        if (startCode != 0) completePlayerLogUpload(generation, startCode, null)
+    }
+
+    private fun completePlayerLogUpload(
+        generation: Int,
+        code: Int,
+        logId: String?,
+    ) {
+        try {
+            if (generation == navigationGeneration && !isFinishing && !isDestroyed) {
                 appendStatus("log upload code=$code id=${logId ?: ""}")
-            },
-        )
+            }
+        } finally {
+            playerLogUploadInFlight = false
+            if (playerStopAwaitingLogUpload) {
+                playerStopAwaitingLogUpload = false
+                finishStopPlayer()
+            }
+        }
     }
 
     private fun restoreMediaSelections() {
@@ -2913,7 +3087,11 @@ class MainActivity : AppCompatActivity() {
                 text = message
                 contentDescription = "播放状态：$message"
                 setTextColor(
-                    if (message.contains("失败") || message.contains("error", ignoreCase = true)) ExampleTheme.failure else ExampleTheme.textPrimary,
+                    if (message.contains("失败") || message.contains("error", ignoreCase = true)) {
+                        ExampleTheme.failure
+                    } else {
+                        ExampleTheme.textPrimary
+                    },
                 )
             }
         }
@@ -2983,8 +3161,13 @@ class MainActivity : AppCompatActivity() {
         scannerProcessing = false
     }
 
-    private fun requestRuntimePermissions() {
-        val permissions = mutableListOf(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+    private fun requestRuntimePermissions(
+        includeCamera: Boolean = false,
+        includeMicrophone: Boolean = false,
+    ) {
+        val permissions = mutableListOf<String>()
+        if (includeCamera) permissions += Manifest.permission.CAMERA
+        if (includeMicrophone) permissions += Manifest.permission.RECORD_AUDIO
         if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.P) {
             permissions += Manifest.permission.WRITE_EXTERNAL_STORAGE
         }

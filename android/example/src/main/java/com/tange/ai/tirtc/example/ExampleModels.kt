@@ -36,6 +36,7 @@ data class ExampleSettings(
     val localAudioAecEnabled: Boolean = false,
     val localAudioAgcLevel: Int = 0,
     val localAudioAnsLevel: Int = 0,
+    val localAudioRobotVoiceEnabled: Boolean = false,
     val consoleLogEnabled: Boolean = true,
 )
 
