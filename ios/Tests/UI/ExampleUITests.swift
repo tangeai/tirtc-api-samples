@@ -187,6 +187,8 @@ private final class TiCloudStorageExportObservationBox: @unchecked Sendable {
 }
 
 final class ExampleUITests: XCTestCase {
+    private var publicClientConnectionObservation: ExampleClientConnectionObservation?
+
     override func setUpWithError() throws {
         continueAfterFailure = false
         #if os(macOS)
@@ -314,7 +316,6 @@ final class ExampleUITests: XCTestCase {
         #else
             let app = XCUIApplication(bundleIdentifier: "tirtc.example.ios.darwin")
         #endif
-        app.launchEnvironment["TIRTC_EXAMPLE_FULL_CLEANUP_ON_STOP"] = "1"
         app.launch()
 
         XCTAssertTrue(waitForElement(app, "client.configure.page", timeout: 8.0))
@@ -663,14 +664,25 @@ final class ExampleUITests: XCTestCase {
         try replaceText(app, "client.token", required(payload, "token"))
         Self.appendStatus(statusLog, "smoke_payload_applied")
 
+        let connectionObservation = ExampleClientConnectionObservation(statusLog: statusLog)
+        publicClientConnectionObservation = connectionObservation
+        defer { publicClientConnectionObservation = nil }
         tap(app, "client.enter_player")
         Self.appendStatus(statusLog, "smoke_public_submit_tapped")
+        let connectionState = connectionObservation.waitForConnected(timeout: timeoutSeconds)
+        guard connectionState == .connected else {
+            Self.appendStatus(statusLog, "smoke_client_connection_failed state=\(connectionState)")
+            XCTFail("public client connection did not connect: \(connectionState)")
+            return
+        }
         XCTAssertTrue(waitForElement(app, "client.player.page", timeout: 8.0))
         _ = waitForStatus(
             app, "client.player.page", statusLog, containing: "route_reached flow=client",
             timeout: 2.0)
         XCTAssertTrue(waitForElement(app, "client.metrics.overlay", timeout: timeoutSeconds))
-        let rawDumpCase = payload["raw_dump_case"] == "1"
+        let talkbackCase = payload["talkback_case"] ?? ""
+        let isTalkbackCase = !talkbackCase.isEmpty
+        let rawDumpCase = payload["raw_dump_case"] == "1" || isTalkbackCase
         if !rawDumpCase {
             tap(app, "client.metrics.summary")
         }
@@ -685,6 +697,108 @@ final class ExampleUITests: XCTestCase {
             )
         }
         Self.appendStatus(statusLog, "smoke_video_rendering")
+        if isTalkbackCase {
+            let talkbackStreamId = Int(try required(payload, "audio_stream_id")) ?? -1
+            XCTAssertTrue((1...255).contains(talkbackStreamId), "talkback stream ID is invalid")
+            let robotCase = talkbackCase == "smoke.talkback-robot"
+            XCTAssertTrue(
+                robotCase || talkbackCase == "smoke.talkback-built-in",
+                "unknown talkback smoke selector")
+            let toggle = app.descendants(matching: .any)["client.robot_voice"].firstMatch
+            XCTAssertTrue(toggle.waitForExistence(timeout: 4.0), "robot voice toggle is not visible")
+            let initialToggleValue = String(describing: toggle.value ?? "")
+            XCTAssertTrue(
+                ["0", "off", "false", "关闭"].contains(initialToggleValue.lowercased()),
+                "robot voice toggle is not off by default: \(initialToggleValue)")
+            if robotCase {
+                XCTAssertTrue(toggle.isEnabled, "robot voice toggle is disabled before input starts")
+                XCTAssertTrue(
+                    setToggleState(app, toggle, enabled: true, timeout: 2.0),
+                    "robot voice toggle did not turn on")
+            }
+            tap(app, "raw_dump.button")
+            XCTAssertTrue(
+                Self.waitForFile(statusLog, containing: "raw_dump_started flow=client", timeout: 8.0),
+                "talkback raw dump did not start before microphone input")
+            Self.appendStatus(statusLog, "talkback_raw_dump_ready case_id=\(talkbackCase)")
+            tap(app, "client.local_audio")
+            XCTAssertTrue(
+                waitForStatusHandlingSystemPermissions(
+                    app, "client.local_audio", statusLog,
+                    containing: "client.local_audio started", timeout: 30.0),
+                "talkback microphone did not start")
+            let startContract =
+                "options=0 attach=0 start=0 robot=\(robotCase) "
+                + "nano_media=2 sample_rate_hz=16000 aec=0 agc=0 ans=0"
+            XCTAssertTrue(
+                waitForStatus(
+                    app, "client.local_audio", statusLog,
+                    containing: startContract, timeout: 2.0),
+                "talkback microphone start contract did not match the selected mode and fixed format")
+            XCTAssertFalse(toggle.isEnabled, "robot voice toggle remained enabled while input ran")
+            Self.appendStatus(
+                statusLog,
+                "talkback_input_started case_id=\(talkbackCase) mode=\(robotCase ? "custom" : "builtIn")")
+            waitForRenderWindow(seconds: 1.0)
+            tapElement(app.buttons["client.local_audio"].firstMatch)
+            XCTAssertTrue(
+                waitForStatus(
+                    app, "client.local_audio", statusLog,
+                    containing: "client.local_audio stopped detach=0 stop=0", timeout: 8.0),
+                "talkback microphone did not stop cleanly")
+            waitForRenderWindow(seconds: 0.5)
+            tap(app, "raw_dump.button")
+            XCTAssertTrue(
+                waitForStatus(
+                    app, "client.player.page", statusLog,
+                    containing: "log upload finished: code=0", timeout: timeoutSeconds),
+                "talkback raw dump upload did not finish")
+            _ = dismissAppAlert(app, buttonTitles: ["OK", "确定"])
+            var recoveryBuiltIn = false
+            if robotCase {
+                XCTAssertTrue(
+                    setToggleState(app, toggle, enabled: false, timeout: 2.0),
+                    "robot voice toggle did not turn off for recovery")
+                tap(app, "client.local_audio")
+                XCTAssertTrue(
+                    waitForStatusHandlingSystemPermissions(
+                        app, "client.local_audio", statusLog,
+                        containing: "robot=false", timeout: 30.0),
+                    "built-in talkback recovery did not start")
+                tap(app, "client.local_audio")
+                XCTAssertTrue(
+                    waitForStatus(
+                        app, "client.local_audio", statusLog,
+                        containing: "client.local_audio stopped detach=0 stop=0", timeout: 8.0),
+                    "built-in talkback recovery did not stop")
+                recoveryBuiltIn = true
+            }
+            let receipt: [String: Any] = [
+                "schema": "tirtc.darwin-talkback-ui/v1",
+                "case_id": talkbackCase,
+                "toggle_default_off": true,
+                "selected_mode": robotCase ? "custom" : "builtIn",
+                "stream_id": talkbackStreamId,
+                "codec": "g711a",
+                "sample_rate_hz": 16000,
+                "channels": 1,
+                "processing_disabled": true,
+                "raw_dump_started_before_input": true,
+                "first_window_ms": 1000,
+                "capture_window_max_ms": 2000,
+                "toggle_locked_while_running": true,
+                "post_stop_observation_ms": 500,
+                "recovery_built_in": recoveryBuiltIn,
+                "cleanup": "passed",
+            ]
+            try Self.writeJSONReceipt(receipt, path: required(payload, "talkback_receipt_path"))
+            Self.appendStatus(
+                statusLog,
+                "talkback_ui_receipt_ready case_id=\(talkbackCase) cleanup=passed")
+            finishClientPublicSmoke(
+                app, payload: payload, statusLog: statusLog, timeoutSeconds: timeoutSeconds)
+            return
+        }
         if rawDumpCase {
             tap(app, "raw_dump.button")
             XCTAssertTrue(
@@ -714,20 +828,8 @@ final class ExampleUITests: XCTestCase {
             Self.appendStatus(
                 statusLog,
                 "raw_dump_media_continuity_verified capturing=1 uploading=1")
-            tap(app, "client.stop")
-            XCTAssertTrue(
-                waitForElement(app, "client.configure.page", timeout: 8.0),
-                "client did not return to configure after raw dump upload")
-            Self.appendStatus(statusLog, "smoke_returned_to_configure")
-            XCTAssertTrue(
-                waitForStatus(
-                    app,
-                    "client.configure.page",
-                    statusLog,
-                    containing: "cleaned",
-                    timeout: 8.0),
-                "client teardown did not finish cleanup after raw dump upload")
-            Self.appendStatus(statusLog, "smoke_teardown_completed cleaned")
+            finishClientPublicSmoke(
+                app, payload: payload, statusLog: statusLog, timeoutSeconds: timeoutSeconds)
             return
         }
         if waitForElement(app, "client.more", timeout: 0.5) {
@@ -885,12 +987,22 @@ final class ExampleUITests: XCTestCase {
                 "log upload result dialog did not dismiss"
             )
         }
+        finishClientPublicSmoke(
+            app, payload: payload, statusLog: statusLog, timeoutSeconds: timeoutSeconds)
+    }
+
+    @MainActor
+    private func finishClientPublicSmoke(
+        _ app: XCUIApplication, payload: [String: String], statusLog: String,
+        timeoutSeconds: TimeInterval
+    ) {
         if app.state != .runningForeground {
             app.activate()
         }
         XCTAssertTrue(
             app.wait(for: .runningForeground, timeout: 5.0),
             "Example did not return to foreground before teardown")
+        publicClientConnectionObservation = nil
         tap(app, "client.stop")
         XCTAssertTrue(
             waitForElement(app, "client.configure.page", timeout: 8.0),
@@ -904,7 +1016,25 @@ final class ExampleUITests: XCTestCase {
                 containing: "cleaned",
                 timeout: 8.0),
             "client teardown did not finish cleanup")
+        XCTAssertTrue(
+            Self.waitForFile(
+                statusLog, containing: "client_cleanup_resources_released code=0", timeout: 8.0),
+            "client resources were not released")
         Self.appendStatus(statusLog, "smoke_teardown_completed cleaned")
+        if payload["simulator_downlink_only"] != "1" {
+            tap(app, "client.upload_logs")
+            XCTAssertTrue(
+                waitForStatus(
+                    app, "client.configure.page", statusLog,
+                    containing: "log upload finished: code=0", timeout: timeoutSeconds),
+                "final client log upload did not finish")
+            XCTAssertTrue(
+                Self.waitForFile(
+                    statusLog, containing: "client_final_log_upload_completed code=0 log_id=",
+                    timeout: timeoutSeconds),
+                "final client log upload was not observed after release")
+            XCTAssertTrue(dismissAppAlert(app, buttonTitles: ["OK", "确定"]))
+        }
     }
 
     @MainActor
@@ -1022,7 +1152,6 @@ final class ExampleUITests: XCTestCase {
                 app, "cloudStorage.status", statusLog, containing: "边播边录完成", timeout: 20.0))
         Self.appendStatus(statusLog, "ti-cloud-storage-recording-verified")
         tapCloudSecondaryAction(app, identifier: "cloudStorage.gallery")
-        handleSystemPermissionDialogs(app, attempts: 5)
         XCTAssertTrue(
             waitForStatusHandlingSystemPermissions(
                 app, "cloudStorage.status", statusLog, containing: "已保存到系统相册", timeout: 20.0),
@@ -1118,7 +1247,6 @@ final class ExampleUITests: XCTestCase {
             waitForStatus(app, "cloudStorage.status", statusLog, containing: "截图完成", timeout: 15.0))
         Self.appendStatus(statusLog, "ti-cloud-storage-snapshot-verified")
         tapCloudSecondaryAction(app, identifier: "cloudStorage.gallery")
-        handleSystemPermissionDialogs(app, attempts: 5)
         XCTAssertTrue(
             waitForStatusHandlingSystemPermissions(
                 app, "cloudStorage.status", statusLog, containing: "已保存到系统相册", timeout: 20.0),
@@ -1195,6 +1323,10 @@ final class ExampleUITests: XCTestCase {
         var partialExportFile: TiCloudStorageRecordingFile?
         var completeExportObservation: [String: Any]?
         var partialExportObservation: [String: Any]?
+        var snapshotArtifact: [String: Any]?
+        var recordingArtifact: [String: Any]?
+        var recordingDurationMs: Int64 = 0
+        var tokenRecovery: [String: Any]?
         var pauseStart: Int64 = 0
         var pauseObserved: Int64 = 0
         var seekTarget: Int64 = 0
@@ -1286,12 +1418,25 @@ final class ExampleUITests: XCTestCase {
                     statusLog: statusLog)
                 Self.appendStatus(statusLog, "ti-cloud-storage-sdk-concurrency-verified")
             }
-            let activeTiCloudStorage = TiCloudStorage(token: token)
+            let activeTiCloudStorage = TiCloudStorage(token: "invalid-token")
             tiCloudStorage = activeTiCloudStorage
+            let rejected = await activeTiCloudStorage.listRecordings(
+                startTimeMs: queryStartMs, endTimeMs: queryEndMs)
+            guard rejected.code == 6024 else {
+                throw NSError(
+                    domain: "TiCloudStorageTokenRecovery", code: Int(rejected.code),
+                    userInfo: [NSLocalizedDescriptionKey: "invalid-token list did not terminate with permission denied"]
+                )
+            }
+            try requireTiCloudStorageOk(activeTiCloudStorage.updateToken(token), "update token on same storage")
             let listed = await activeTiCloudStorage.listRecordings(
                 startTimeMs: queryStartMs,
                 endTimeMs: queryEndMs)
             try requireTiCloudStorageOk(listed.code, "exact Ti Cloud Storage query")
+            tokenRecovery = [
+                "initial_list_code": rejected.code, "initial_terminal_count": 1,
+                "update_code": 0, "retry_code": listed.code, "same_object": true,
+            ]
             let range = try XCTUnwrap(
                 listed.recordings.max { lhs, rhs in
                     lhs.endTimeMs - lhs.startTimeMs < rhs.endTimeMs - rhs.startTimeMs
@@ -1513,6 +1658,13 @@ final class ExampleUITests: XCTestCase {
             Self.appendStatus(statusLog, "ti-cloud-storage-sdk-snapshot-verified")
 
             let artifactRoot = try required(payload, "artifact_root")
+            snapshotArtifact = try copySavedCloudMedia(
+                capturedSnapshot.path, root: artifactRoot,
+                name: "replay-snapshot.jpg", kind: "jpeg")
+            recordingArtifact = try copySavedCloudMedia(
+                capturedRecording.path, root: artifactRoot,
+                name: "replay-recording.mp4", kind: "mp4")
+            recordingDurationMs = capturedRecording.durationMs
             let (completeObservation, capturedExport) = try await runObservedCloudExport(
                 storage: activeTiCloudStorage,
                 request: TiCloudStorageExportRequest(
@@ -1596,6 +1748,10 @@ final class ExampleUITests: XCTestCase {
             path: try required(payload, "export_result_path"),
             completeExport: try XCTUnwrap(completeExportObservation),
             partialExport: try XCTUnwrap(partialExportObservation),
+            snapshotArtifact: try XCTUnwrap(snapshotArtifact),
+            recordingArtifact: try XCTUnwrap(recordingArtifact),
+            recordingDurationMs: recordingDurationMs,
+            tokenRecovery: try XCTUnwrap(tokenRecovery),
             pauseStart: pauseStart,
             pauseObserved: pauseObserved,
             seekTarget: seekTarget,
@@ -1869,11 +2025,11 @@ final class ExampleUITests: XCTestCase {
                 request,
                 progress: nil,
                 progressDetail: { observations.record(progress: $0) },
-                onRecordingGap: { observations.record(gap: $0) }
-            ) { result in
-                observations.recordTerminal()
-                continuation.resume(returning: result)
-            }
+                onRecordingGap: { observations.record(gap: $0) },
+                completion: { result in
+                    observations.recordTerminal()
+                    continuation.resume(returning: result)
+                })
             guard started.code == TiCloudStorageErrorCode.ok, let startedTask = started.task else {
                 continuation.resume(
                     throwing: NSError(
@@ -1976,10 +2132,26 @@ final class ExampleUITests: XCTestCase {
         }
     }
 
+    private func copySavedCloudMedia(_ source: String, root: String, name: String, kind: String) throws -> [String: Any]
+    {
+        try FileManager.default.createDirectory(atPath: root, withIntermediateDirectories: true)
+        let path = URL(fileURLWithPath: root).appendingPathComponent(name).path
+        try FileManager.default.copyItem(atPath: source, toPath: path)
+        let attributes = try FileManager.default.attributesOfItem(atPath: path)
+        return [
+            "path": path, "source_path": source, "kind": kind,
+            "bytes": (attributes[.size] as? NSNumber)?.intValue ?? 0,
+        ]
+    }
+
     private func writeCloudExportResult(
         path: String,
         completeExport: [String: Any],
         partialExport: [String: Any],
+        snapshotArtifact: [String: Any],
+        recordingArtifact: [String: Any],
+        recordingDurationMs: Int64,
+        tokenRecovery: [String: Any],
         pauseStart: Int64,
         pauseObserved: Int64,
         seekTarget: Int64,
@@ -1989,7 +2161,7 @@ final class ExampleUITests: XCTestCase {
     ) throws {
         let value: [String: Any] = [
             "schema_version": 1,
-            "consumer": "darwin-public-swift-headless",
+            "consumer": "darwin-public-swift-xctest",
             "mode": "cloud-integration",
             "architecture": "arm64",
             "process_id": ProcessInfo.processInfo.processIdentifier,
@@ -2016,6 +2188,10 @@ final class ExampleUITests: XCTestCase {
                 "speed_half_media_elapsed_ms": slowMedia,
                 "complete_export": completeExport,
                 "partial_export": partialExport,
+                "snapshot_artifact": snapshotArtifact,
+                "recording_artifact": recordingArtifact,
+                "recording_duration_ms": recordingDurationMs,
+                "token_recovery": tokenRecovery,
             ] as [String: Any],
         ]
         let data = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
@@ -2551,7 +2727,7 @@ final class ExampleUITests: XCTestCase {
         #if os(iOS)
             let springBoard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
             let alert = springBoard.alerts.firstMatch
-            guard alert.waitForExistence(timeout: 1.0) else {
+            guard waitForOptionalElement(alert, timeout: 1.0) else {
                 return false
             }
             let preferredButtons = [
@@ -2598,7 +2774,7 @@ final class ExampleUITests: XCTestCase {
             let springBoard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
             let banner = springBoard.descendants(matching: .any)["NotificationShortLookView"]
                 .firstMatch
-            guard banner.waitForExistence(timeout: 0.2) else {
+            guard waitForOptionalElement(banner, timeout: 0.2) else {
                 return false
             }
             if banner.isHittable {
@@ -2638,8 +2814,18 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
+    private func waitForOptionalElement(_ element: XCUIElement, timeout: TimeInterval) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !element.exists {
+            guard Date() < deadline else { return false }
+            RunLoop.current.run(until: min(deadline, Date().addingTimeInterval(0.1)))
+        }
+        return true
+    }
+
+    @MainActor
     private func dismissPermissionElement(_ element: XCUIElement) -> Bool {
-        guard element.waitForExistence(timeout: 0.2) else {
+        guard waitForOptionalElement(element, timeout: 0.2) else {
             return false
         }
         for title in Self.systemPermissionAllowButtonTitles() {
@@ -2722,17 +2908,59 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
+    private func waitForToggleState(
+        _ toggle: XCUIElement, enabled: Bool, timeout: TimeInterval
+    ) -> Bool {
+        let expectedValues =
+            enabled
+            ? Set(["1", "on", "true", "开启"])
+            : Set(["0", "off", "false", "关闭"])
+        let deadline = Date().addingTimeInterval(timeout)
+        repeat {
+            let value = String(describing: toggle.value ?? "").lowercased()
+            if expectedValues.contains(value) {
+                return true
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        return false
+    }
+
+    @MainActor
+    private func setToggleState(
+        _ app: XCUIApplication, _ toggle: XCUIElement, enabled: Bool, timeout: TimeInterval
+    ) -> Bool {
+        if waitForToggleState(toggle, enabled: enabled, timeout: 0) {
+            return true
+        }
+        scrollIntoView(app, toggle)
+        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.9, dy: 0.5)).tap()
+        return waitForToggleState(toggle, enabled: enabled, timeout: timeout)
+    }
+
+    @MainActor
     private func waitForElement(_ app: XCUIApplication, _ identifier: String, timeout: TimeInterval)
         -> Bool
     {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard publicClientConnectionStillValid() else { return false }
             if elementExistsNow(app, identifier) {
                 return true
             }
             RunLoop.current.run(until: Date().addingTimeInterval(0.2))
         }
-        return elementExistsNow(app, identifier)
+        return publicClientConnectionStillValid() && elementExistsNow(app, identifier)
+    }
+
+    private func publicClientConnectionStillValid() -> Bool {
+        guard let observation = publicClientConnectionObservation else { return true }
+        if case .failed(let code) = observation.state() {
+            Self.appendStatus(observation.statusLog, "smoke_client_connection_failed code=\(code)")
+            XCTFail("public client connection failed: code=\(code)")
+            return false
+        }
+        return true
     }
 
     @MainActor
@@ -2782,7 +3010,8 @@ final class ExampleUITests: XCTestCase {
 
     @MainActor
     private func tap(_ app: XCUIApplication, _ identifier: String) {
-        let element = app.descendants(matching: .any)[identifier].firstMatch
+        let element = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == %@", identifier))
+            .firstMatch
         XCTAssertTrue(element.waitForExistence(timeout: 8.0), "missing UI element \(identifier)")
         scrollIntoView(app, element)
         tapElement(element)
@@ -2966,16 +3195,16 @@ final class ExampleUITests: XCTestCase {
     private func dismissInAppLogUploadDialog(_ app: XCUIApplication, buttonTitles: [String]) -> Bool {
         let dialog = app.descendants(matching: .any)["log_upload_result.dialog"].firstMatch
         let identifierButton = app.descendants(matching: .any)["log_upload_result.ok"].firstMatch
-        if identifierButton.waitForExistence(timeout: 1.0) {
+        if waitForOptionalElement(identifierButton, timeout: 1.0) {
             tapElement(identifierButton)
             return waitForInAppLogUploadDialogDismissal(app)
         }
-        guard dialog.exists || dialog.waitForExistence(timeout: 0.4) else {
+        guard waitForOptionalElement(dialog, timeout: 0.4) else {
             return false
         }
         for title in buttonTitles {
             let button = app.buttons[title].firstMatch
-            if button.exists || button.waitForExistence(timeout: 0.4) {
+            if waitForOptionalElement(button, timeout: 0.4) {
                 tapElement(button)
                 return waitForInAppLogUploadDialogDismissal(app)
             }
@@ -3141,6 +3370,7 @@ final class ExampleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard publicClientConnectionStillValid() else { return false }
             if Self.waitForFile(statusLog, containing: pattern, timeout: 0.05) {
                 return true
             }
@@ -3161,6 +3391,7 @@ final class ExampleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard publicClientConnectionStillValid() else { return false }
             if Self.waitForFile(
                 statusLog, containing: "video stream_id=\(streamId) ", timeout: 0.05)
             {
@@ -3217,6 +3448,7 @@ final class ExampleUITests: XCTestCase {
     ) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard publicClientConnectionStillValid() else { return false }
             for pattern in patterns
             where Self.waitForFile(statusLog, containing: pattern, timeout: 0.05) {
                 return true
@@ -3236,6 +3468,7 @@ final class ExampleUITests: XCTestCase {
     {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
+            guard publicClientConnectionStillValid() else { return nil }
             let snapshot = clientDiagnosticsSnapshot(app)
             if clientDiagnosticsAreUseful(snapshot) {
                 return [
@@ -3454,6 +3687,14 @@ final class ExampleUITests: XCTestCase {
             _ = try? handle.seekToEnd()
             _ = try? handle.write(contentsOf: data)
         }
+    }
+
+    private static func writeJSONReceipt(_ value: [String: Any], path: String) throws {
+        let url = URL(fileURLWithPath: path)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let data = try JSONSerialization.data(withJSONObject: value, options: [.sortedKeys])
+        try data.write(to: url, options: .atomic)
     }
 
     private static func rawDumpEvidenceMarker(

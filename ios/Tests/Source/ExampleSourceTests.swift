@@ -4,6 +4,32 @@ import XCTest
 @testable import DarwinExampleSupport
 
 final class ExampleSourceTests: XCTestCase {
+    func testRobotVoiceEffectPreservesLengthSilenceContinuityAndReset() {
+        let effect = ExampleRobotVoiceEffect(sampleRate: 8_000)
+        let silence = Data(repeating: 0, count: 320)
+        XCTAssertEqual(effect.process(silence), silence)
+
+        let samples = (0..<320).map { index in
+            Int16(8_000 + (index % 7) * 100)
+        }
+        let source = pcmData(samples)
+        effect.reset()
+        let whole = effect.process(source)
+        XCTAssertEqual(whole.count, source.count)
+        XCTAssertNotEqual(whole, source)
+        XCTAssertTrue(whole.contains { $0 != 0 })
+
+        effect.reset()
+        let splitOffset = 246
+        var split = effect.process(source.prefix(splitOffset))
+        split.append(effect.process(source.dropFirst(splitOffset)))
+        XCTAssertEqual(split, whole)
+
+        _ = effect.process(Data(repeating: 1, count: 20))
+        effect.reset()
+        XCTAssertEqual(effect.process(source), whole)
+    }
+
     func testRawDumpButtonContractMatchesFlutterBaseline() {
         XCTAssertEqual(ExampleRawDumpButtonState.idle.label, "抓数据")
         XCTAssertEqual(ExampleRawDumpButtonState.capturing.label, "结束上传")
@@ -223,5 +249,15 @@ final class ExampleSourceTests: XCTestCase {
             return error
         }
         return nil
+    }
+
+    private func pcmData(_ samples: [Int16]) -> Data {
+        var data = Data(capacity: samples.count * 2)
+        for sample in samples {
+            let bits = UInt16(bitPattern: sample)
+            data.append(UInt8(truncatingIfNeeded: bits))
+            data.append(UInt8(truncatingIfNeeded: bits >> 8))
+        }
+        return data
     }
 }
