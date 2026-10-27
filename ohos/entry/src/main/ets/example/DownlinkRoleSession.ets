@@ -14,6 +14,7 @@ import {
   TiRtcConn,
   TiRtcConnState,
   TiRtcInputState,
+  TiRtcInitOptions,
   TiRtcLogging,
   TiRtcRecordingTask,
   TiRtcRecordingFile,
@@ -134,6 +135,8 @@ export class DownlinkRoleSession {
   private recordingTargetId: number | null = null;
   private latestMediaTargetId: number = -1;
   private readonly ownedMediaFiles: Set<TiRtcRecordingFile | TiRtcSnapshotFile> = new Set();
+  private loggingInitOptions?: TiRtcInitOptions;
+  private runtimeInitialized: boolean = false;
 
   videoOutputCount(): number {
     return this.videoOutputs.length;
@@ -175,16 +178,19 @@ export class DownlinkRoleSession {
       options.token.length,
       options.token.startsWith('v1.') ? 'v1' : 'other');
 
-    let code = await TiRtc.init({
+    const initOptions: TiRtcInitOptions = {
       context: options.context,
       appId: options.appId,
       endpoint: options.endpoint,
       consoleLogEnabled: options.consoleLogEnabled,
-    });
+    };
+    let code = await TiRtc.init(initOptions);
     if (code !== 0) {
       this.fail(`初始化失败 #${code}`, code);
       return code;
     }
+    this.runtimeInitialized = true;
+    this.loggingInitOptions = initOptions;
 
     this.selectedDecoderPreference = options.videoDecoderPreference;
     this.resetVideoRenderSize();
@@ -348,6 +354,7 @@ export class DownlinkRoleSession {
       this.fail(`停止失败 #${shutdownCode}`, shutdownCode);
       return true;
     }
+    this.runtimeInitialized = false;
     this.resetObjects();
     this.callbacks.onStatusChanged?.(reason === 'manual_stop' ? '已停止' : '加载中', 'Downlink stopped.');
     hilog.info(LOG_DOMAIN, LOG_TAG,
@@ -543,18 +550,49 @@ export class DownlinkRoleSession {
   async uploadLogs(): Promise<boolean> {
     this.callbacks.onLogUploadStatusChanged?.('log_upload=上传中');
     const startedAtMs = Date.now();
+    let openedLoggingRuntime = false;
     try {
+      if (!this.runtimeInitialized) {
+        if (this.loggingInitOptions === undefined) {
+          this.callbacks.onLogUploadStatusChanged?.('log_upload=失败 #6002');
+          hilog.warn(LOG_DOMAIN, LOG_TAG,
+            'TIRTC_downlink_log_upload_failed elapsed_ms=%{public}d reason=%{public}s',
+            Math.max(0, Date.now() - startedAtMs), 'init_options_unavailable');
+          return false;
+        }
+        const initCode = await TiRtc.init(this.loggingInitOptions);
+        if (initCode !== 0) {
+          this.callbacks.onLogUploadStatusChanged?.(`log_upload=失败 #${initCode}`);
+          hilog.warn(LOG_DOMAIN, LOG_TAG,
+            'TIRTC_downlink_log_upload_failed elapsed_ms=%{public}d reason=%{public}s code=%{public}d',
+            Math.max(0, Date.now() - startedAtMs), 'logging_runtime_init_failed', initCode);
+          return false;
+        }
+        this.runtimeInitialized = true;
+        openedLoggingRuntime = true;
+      }
       const result = await TiRtcLogging.upload();
       const elapsedMs = Math.max(0, Date.now() - startedAtMs);
+      let shutdownCode = 0;
+      if (openedLoggingRuntime) {
+        shutdownCode = TiRtc.shutdown();
+        if (shutdownCode === 0) this.runtimeInitialized = false;
+      }
+      const succeeded = result.code === 0 && shutdownCode === 0;
       this.callbacks.onLogUploadStatusChanged?.(
-        result.code === 0 ? `log_upload=已上传 · ${result.logId ?? ''}` :
-          `log_upload=失败 #${result.code}`);
+        succeeded ? `log_upload=已上传 · ${result.logId ?? ''}` :
+          `log_upload=失败 #${result.code !== 0 ? result.code : shutdownCode}`);
       hilog.info(LOG_DOMAIN, LOG_TAG,
-        'TIRTC_downlink_log_upload_done code=%{public}d elapsed_ms=%{public}d log_id_present=%{public}s',
-        result.code, elapsedMs, result.logId === undefined || result.logId.length === 0 ? 'false' : 'true');
-      if (result.code === 0) this.rawDumpUploadPending = false;
-      return result.code === 0;
+        'TIRTC_downlink_log_upload_done code=%{public}d shutdown=%{public}d elapsed_ms=%{public}d log_id_present=%{public}s',
+        result.code, shutdownCode, elapsedMs,
+        result.logId === undefined || result.logId.length === 0 ? 'false' : 'true');
+      if (succeeded) this.rawDumpUploadPending = false;
+      return succeeded;
     } catch (error) {
+      if (openedLoggingRuntime) {
+        const shutdownCode = TiRtc.shutdown();
+        if (shutdownCode === 0) this.runtimeInitialized = false;
+      }
       const elapsedMs = Math.max(0, Date.now() - startedAtMs);
       this.callbacks.onLogUploadStatusChanged?.('log_upload=异常');
       hilog.warn(LOG_DOMAIN, LOG_TAG,
@@ -740,12 +778,15 @@ export class DownlinkRoleSession {
   private refreshMetrics(): void {
     const connMetrics = this.conn.getMetricsSnapshot();
     const audioMetrics = this.audioOutput.getMetricsSnapshot();
+    const audioContinuity = this.audioOutput.getContinuityMetricsSnapshot();
     const selectedVideo = this.selectedVideoOutput();
     const videoMetrics = selectedVideo?.getMetricsSnapshot();
     const audioDebug = this.audioOutput.getDebugSnapshot();
     const videoDebug = selectedVideo?.getDebugSnapshot();
     const conn = connMetrics.code === 0 ? connMetrics.snapshot : undefined;
     const audio = this.audioOutputAvailable && audioMetrics.code === 0 ? audioMetrics.snapshot : undefined;
+    const continuity = this.audioOutputAvailable && audioContinuity.code === 0
+      ? audioContinuity.snapshot : undefined;
     const video = videoMetrics !== undefined && videoMetrics.code === 0 ? videoMetrics.snapshot : undefined;
     const audioInfo = this.audioOutputAvailable && audioDebug.code === 0 ? audioDebug.snapshot : undefined;
     const videoInfo = videoDebug !== undefined && videoDebug.code === 0 ? videoDebug.snapshot : undefined;
@@ -759,6 +800,11 @@ export class DownlinkRoleSession {
       `音频接收：码率 ${this.formatKbps(audio?.audioInputBitrateKbps)} · ` +
         `PPS ${this.formatRate(audio?.audioInputPacketRate, '/s')} · ` +
         `输出 ${this.formatDuration(audio?.stutter.outputDurationMs)}`,
+      `音频源连续性：观察 ${this.formatFrameCount(continuity?.observedSourceFrameCount)} · ` +
+        `接纳 ${this.formatFrameCount(continuity?.acceptedSourceFrameCount)} · ` +
+        `接纳率 ${this.formatAcceptanceRatio(continuity?.observedSourceFrameCount,
+          continuity?.acceptedSourceFrameCount)} · ` +
+        `缺口 ${this.formatDuration(continuity?.missingSourceDurationMs)}`,
       `估算延迟：视频 ${this.formatDuration(video?.estimatedOutputLatencyMs)} · ` +
         `音频 ${this.formatDuration(audio?.estimatedOutputLatencyMs)}`,
       `启动耗时：${this.formatStartup(connectDurationMs, firstFrameDurationMs)}`,
@@ -872,6 +918,15 @@ export class DownlinkRoleSession {
     return `${Math.round(count)} 次`;
   }
 
+  private formatFrameCount(count: number | undefined): string {
+    return count === undefined || count < 0 ? '--' : `${Math.round(count)} 帧`;
+  }
+
+  private formatAcceptanceRatio(observed: number | undefined, accepted: number | undefined): string {
+    if (observed === undefined || accepted === undefined || observed <= 0) return '--';
+    return `${(accepted * 100 / observed).toFixed(1)}%`;
+  }
+
   private formatStartup(connectDurationMs: number, firstFrameDurationMs: number): string {
     const connect = this.formatDuration(connectDurationMs);
     if (firstFrameDurationMs < 0) {
@@ -922,6 +977,7 @@ export class DownlinkRoleSession {
     const audioDisposeCode = this.activeAudioStreamId === null ? 0 : this.audioOutput.dispose();
     const connDisposeCode = this.conn.dispose();
     const shutdownCode = TiRtc.shutdown();
+    if (shutdownCode === 0) this.runtimeInitialized = false;
     const released = localAudioDisposeCode === 0 && videoDisposeCode === 0 &&
       audioDisposeCode === 0 && connDisposeCode === 0 && shutdownCode === 0;
     if (released) {
