@@ -190,6 +190,7 @@ export struct PlayerMetricsOverlay {
         this.metricLine('媒体参数', 'tirtc_example_downlink_metrics_media_params_text')
         this.metricLine('视频接收', 'tirtc_example_downlink_metrics_video_receive_text')
         this.metricLine('音频接收', 'tirtc_example_downlink_metrics_audio_receive_text')
+        this.metricLine('音频源连续性', 'tirtc_example_downlink_metrics_audio_continuity_text')
         this.metricLine('估算延迟', 'tirtc_example_downlink_metrics_latency_stats_text')
         this.metricLine('启动耗时', 'tirtc_example_downlink_metrics_startup_text')
         this.metricLine('卡顿统计', 'tirtc_example_downlink_metrics_stutter_text')
