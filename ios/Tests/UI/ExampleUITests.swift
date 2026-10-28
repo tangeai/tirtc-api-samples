@@ -21,6 +21,7 @@ private final class TiCloudStorageSdkOutputObserver: NSObject, TiCloudStorageAud
     private var sourceCompleted = false
     private var sourceCompletedTimeMs: Int64 = 0
     private var storedProgressAfterSource = 0
+    private var storedSourceCompletionCount = 0
 
     var replayError: Int32 { lock.withLock { storedReplayError } }
     var audioError: Int32 { lock.withLock { storedAudioError } }
@@ -28,6 +29,8 @@ private final class TiCloudStorageSdkOutputObserver: NSObject, TiCloudStorageAud
     var currentTimeMs: Int64 { lock.withLock { storedCurrentTimeMs } }
     var bufferingCount: Int { lock.withLock { storedBufferingCount } }
     var progressAfterSource: Int { lock.withLock { storedProgressAfterSource } }
+    var sourceCompletionCount: Int { lock.withLock { storedSourceCompletionCount } }
+    var sourceTimeMs: Int64 { lock.withLock { sourceCompletedTimeMs } }
 
     func beginContinuousPlayback() { lock.withLock { continuousPlayback = true } }
     func endContinuousPlayback() { lock.withLock { continuousPlayback = false } }
@@ -41,6 +44,7 @@ private final class TiCloudStorageSdkOutputObserver: NSObject, TiCloudStorageAud
         lock.withLock {
             sourceCompletedTimeMs = storedCurrentTimeMs
             sourceCompleted = true
+            storedSourceCompletionCount += 1
         }
     }
     func setReplayError(_ code: Int32) { lock.withLock { storedReplayError = code } }
@@ -1299,11 +1303,226 @@ final class ExampleUITests: XCTestCase {
     }
 
     @MainActor
+    private func runTiCloudStorageReplayDrainSpeedCase(
+        payload: [String: String], statusLog: String
+    ) async throws {
+        let caseId = "ti-cloud-storage.cloud.replay-drain-speed"
+        let resultPath = try required(payload, "drain_result_path")
+        let token = try await fetchOneTimeToken(required(payload, "token_url"))
+        let observer = TiCloudStorageSdkOutputObserver()
+        var initialized = false
+        var storage: TiCloudStorage?
+        var replay: TiCloudStorageReplay?
+        var audio: TiCloudStorageAudioOutput?
+        var video: TiCloudStorageVideoOutput?
+        var audioAttached = false
+        var videoAttached = false
+        var observations: [String: Any] = [:]
+        var failure: Error?
+
+        func require(_ condition: Bool, _ message: String) throws {
+            guard condition else {
+                throw NSError(
+                    domain: "TiCloudStorageReplayDrainSpeed", code: 1,
+                    userInfo: [NSLocalizedDescriptionKey: message])
+            }
+        }
+
+        do {
+            let code = TiCloudStorage.initialize(
+                appId: try required(payload, "app_id"),
+                endpoint: payload["endpoint"] ?? "", consoleLogEnabled: true)
+            try require(code == 0, "initialize=\(code)")
+            initialized = true
+            let activeStorage = TiCloudStorage(token: token)
+            storage = activeStorage
+            let listed = await activeStorage.listRecordings(
+                startTimeMs: try requiredInt64(payload, "query_start_ms"),
+                endTimeMs: try requiredInt64(payload, "query_end_ms"))
+            try require(listed.code == 0, "list=\(listed.code)")
+            let range = try XCTUnwrap(
+                listed.recordings.max {
+                    $0.endTimeMs - $0.startTimeMs < $1.endTimeMs - $1.startTimeMs
+                })
+            try require(range.endTimeMs - range.startTimeMs >= 15_000, "short AV fixture")
+            observations["range_end_time_ms"] = range.endTimeMs
+            let activeReplay = activeStorage.createReplay()
+            replay = activeReplay
+            let activeAudio = TiCloudStorageAudioOutput()
+            audio = activeAudio
+            let activeVideo = TiCloudStorageVideoOutput()
+            video = activeVideo
+            activeAudio.delegate = observer
+            activeVideo.delegate = observer
+            activeReplay.onTimeChanged = { observer.setReplayTime($0) }
+            activeReplay.onCompleted = { observer.markSourceCompleted() }
+            activeReplay.onError = { observer.setReplayError($0) }
+            let audioCode = activeAudio.attach(
+                replay: activeReplay, channelId: try requiredChannel(payload, "audio_channel_id"))
+            try require(audioCode == 0, "audio attach=\(audioCode)")
+            audioAttached = true
+            let videoCode = activeVideo.attach(
+                replay: activeReplay, channelId: try requiredChannel(payload, "video_channel_id"))
+            try require(videoCode == 0, "video attach=\(videoCode)")
+            videoAttached = true
+            let playCode = activeReplay.play(
+                startTimeMs: range.startTimeMs, endTimeMs: range.endTimeMs)
+            try require(playCode == 0, "play=\(playCode)")
+            try await waitForTiCloudStorageDrainCondition("AV playback", timeoutSeconds: 30) {
+                activeAudio.state == .playing && activeVideo.state == .rendering
+                    && observer.currentTimeMs >= range.startTimeMs + 500
+            }
+            observations["initial_audio_state"] = activeAudio.state.rawValue
+            observations["initial_video_state"] = activeVideo.state.rawValue
+            try await waitForTiCloudStorageDrainCondition(
+                "source completed with consumed progress",
+                timeoutSeconds: 45
+            ) {
+                observer.sourceCompletionCount > 0 && observer.progressAfterSource > 0
+            }
+            // The callbacks target the main queue. Crossing its next task ensures this
+            // control runs after the source/progress callbacks have returned.
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                DispatchQueue.main.async { continuation.resume() }
+            }
+            observations["callback_stack_returned"] = true
+            observations["source_completion_count"] = observer.sourceCompletionCount
+            observations["source_completed_time_ms"] = observer.sourceTimeMs
+            let controlTime = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            observations["control_time_ms"] = controlTime
+            observations["control_audio_state"] = activeAudio.state.rawValue
+            observations["control_video_state"] = activeVideo.state.rawValue
+            try require(observer.sourceCompletionCount == 1, "source completion count")
+            try require(controlTime > observer.sourceTimeMs, "no post-source consumption")
+            try require(
+                activeAudio.state == .playing && activeVideo.state == .rendering,
+                "AV outputs not active before control")
+            try require(range.endTimeMs - controlTime >= 3_000, "drain tail below full sample budget")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-drain-window-verified")
+
+            // Deliberately call each speed once; no IN_USE retry helper is used.
+            observations["half_speed_calls"] = 1
+            let halfCode = activeReplay.setSpeed(.x0_5)
+            observations["half_speed_code"] = halfCode
+            observations["half_speed_readback"] = activeReplay.speed.rawValue
+            try require(halfCode == 0 && activeReplay.speed == .x0_5, "half speed=\(halfCode)")
+            try await waitForTiCloudStorageDrainCondition(
+                "half-speed consumption settled",
+                timeoutSeconds: 3
+            ) {
+                (activeReplay.currentTimeMs?.int64Value ?? 0) >= controlTime + 200
+            }
+            let sampleStart = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            observations["sample_start_time_ms"] = sampleStart
+            observations["sample_progress_start"] = observer.progressAfterSource
+            observations["sample_audio_state_start"] = activeAudio.state.rawValue
+            observations["video_state_start"] = activeVideo.state.rawValue
+            try require(activeVideo.state == .rendering, "video not rendering at sample start")
+            let sampleStarted = ProcessInfo.processInfo.systemUptime
+            try await Task.sleep(nanoseconds: 4_000_000_000)
+            let sampleEnd = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            let wallMs = Int64((ProcessInfo.processInfo.systemUptime - sampleStarted) * 1_000)
+            observations["sample_end_time_ms"] = sampleEnd
+            observations["sample_wall_elapsed_ms"] = wallMs
+            observations["sample_progress_end"] = observer.progressAfterSource
+            observations["sample_audio_state_end"] = activeAudio.state.rawValue
+            observations["video_state_end"] = activeVideo.state.rawValue
+            let expectedMs = Double(wallMs) * 0.5
+            let mediaMs = sampleEnd - sampleStart
+            try require(wallMs >= 4_000, "sample shorter than four seconds")
+            try require(
+                activeVideo.state == .rendering && sampleEnd < range.endTimeMs,
+                "drain tail truncated sample")
+            try require(
+                mediaMs > 0 && abs(Double(mediaMs) - expectedMs) <= max(250, expectedMs / 4),
+                "half-speed consumption media=\(mediaMs) wall=\(wallMs)")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-drain-half-speed-verified")
+
+            observations["restore_calls"] = 1
+            let restoreCode = activeReplay.setSpeed(.x1)
+            observations["restore_code"] = restoreCode
+            observations["restore_readback"] = activeReplay.speed.rawValue
+            try require(restoreCode == 0 && activeReplay.speed == .x1, "restore speed=\(restoreCode)")
+            let restoreTime = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            observations["restore_time_ms"] = restoreTime
+            try await waitForTiCloudStorageDrainCondition(
+                "restored playback continues",
+                timeoutSeconds: 4
+            ) {
+                (activeReplay.currentTimeMs?.int64Value ?? 0) >= restoreTime + 300
+            }
+            observations["continued_time_ms"] = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            observations["continued_audio_state"] = activeAudio.state.rawValue
+            observations["continued_video_state"] = activeVideo.state.rawValue
+            try require(
+                observer.replayError == 0 && observer.audioError == 0 && observer.videoError == 0,
+                "Replay or Output error")
+            Self.appendStatus(statusLog, "ti-cloud-storage-sdk-drain-restored-verified")
+        } catch {
+            failure = error
+        }
+
+        // Cleanup runs after every partial setup and preserves the original failure.
+        var cleanup: [String: Int32] = [:]
+        replay?.onTimeChanged = nil
+        replay?.onCompleted = nil
+        replay?.onError = nil
+        if let replay { cleanup["stop"] = replay.stop() }
+        if videoAttached { cleanup["video_detach"] = video?.detach() }
+        if audioAttached { cleanup["audio_detach"] = audio?.detach() }
+        if let video { cleanup["video_dispose"] = video.dispose() }
+        if let audio { cleanup["audio_dispose"] = audio.dispose() }
+        if let replay { cleanup["replay_dispose"] = replay.dispose() }
+        if let storage { cleanup["storage_dispose"] = storage.dispose() }
+        if initialized { cleanup["shutdown"] = TiCloudStorage.shutdown() }
+        observations["cleanup"] = cleanup
+        observations["replay_error"] = observer.replayError
+        observations["audio_error"] = observer.audioError
+        observations["video_error"] = observer.videoError
+        if cleanup.values.contains(where: { $0 != 0 }) && failure == nil {
+            failure = NSError(
+                domain: "TiCloudStorageReplayDrainSpeedCleanup", code: 1,
+                userInfo: [NSLocalizedDescriptionKey: "cleanup=\(cleanup)"])
+        }
+        var value: [String: Any] = [
+            "schema_version": 1, "case_id": caseId,
+            "consumer": "darwin-public-swift-xctest",
+            "status": failure == nil ? "passed" : "failed", "result": observations,
+        ]
+        if let failure { value["failure"] = String(describing: failure) }
+        let data = try JSONSerialization.data(withJSONObject: value, options: [.prettyPrinted, .sortedKeys])
+        try (data + Data("\n".utf8)).write(to: URL(fileURLWithPath: resultPath), options: .atomic)
+        if let failure { throw failure }
+        Self.appendStatus(statusLog, "ti-cloud-storage-sdk-drain-teardown-completed")
+        Self.appendStatus(statusLog, "ti-cloud-storage-sdk-drain-case-completed")
+    }
+
+    @MainActor
+    private func waitForTiCloudStorageDrainCondition(
+        _ stage: String, timeoutSeconds: TimeInterval,
+        _ predicate: @MainActor @escaping () -> Bool
+    ) async throws {
+        let deadline = ProcessInfo.processInfo.systemUptime + timeoutSeconds
+        while !predicate() {
+            guard ProcessInfo.processInfo.systemUptime < deadline else {
+                throw NSError(
+                    domain: "TiCloudStorageReplayDrainSpeed", code: 2,
+                    userInfo: [NSLocalizedDescriptionKey: "timed out: \(stage)"])
+            }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+    }
+
+    @MainActor
     private func runTiCloudStoragePublicSdkCase(
         payload: [String: String],
         statusLog: String,
         timeoutSeconds: TimeInterval
     ) async throws {
+        if payload["case_id"] == "ti-cloud-storage.cloud.replay-drain-speed" {
+            try await runTiCloudStorageReplayDrainSpeedCase(payload: payload, statusLog: statusLog)
+            return
+        }
         let queryStartMs = try requiredInt64(payload, "query_start_ms")
         let queryEndMs = try requiredInt64(payload, "query_end_ms")
         let audioChannel = try requiredChannel(payload, "audio_channel_id")

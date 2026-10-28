@@ -5,11 +5,11 @@ project 'Example.xcodeproj'
 target 'ExampleIOS' do
   platform :ios, '14.0'
   use_frameworks!
-  pod 'TiRTC', :podspec => 'https://github.com/tangeai/tirtc-sdk-apple/releases/download/v2.6.0/TiRTC.podspec'
+  pod 'TiRTC', :podspec => 'https://github.com/tangeai/tirtc-sdk-apple/releases/download/v2.6.1/TiRTC.podspec'
 end
 
 target 'ExampleMacOS' do
   platform :osx, '11.5'
   use_frameworks!
-  pod 'TiRTC', :podspec => 'https://github.com/tangeai/tirtc-sdk-apple/releases/download/v2.6.0/TiRTC.podspec'
+  pod 'TiRTC', :podspec => 'https://github.com/tangeai/tirtc-sdk-apple/releases/download/v2.6.1/TiRTC.podspec'
 end
