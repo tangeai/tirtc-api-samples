@@ -686,6 +686,12 @@ final class ExampleUITests: XCTestCase {
         XCTAssertTrue(waitForElement(app, "client.metrics.overlay", timeout: timeoutSeconds))
         let talkbackCase = payload["talkback_case"] ?? ""
         let isTalkbackCase = !talkbackCase.isEmpty
+        #if os(macOS)
+            guard !isTalkbackCase else {
+                XCTFail("macOS tests do not use microphone capture")
+                return
+            }
+        #endif
         let rawDumpCase = payload["raw_dump_case"] == "1" || isTalkbackCase
         if !rawDumpCase {
             tap(app, "client.metrics.summary")
@@ -743,6 +749,13 @@ final class ExampleUITests: XCTestCase {
             Self.appendStatus(
                 statusLog,
                 "talkback_input_started case_id=\(talkbackCase) mode=\(robotCase ? "custom" : "builtIn")")
+            var firstPCMObserved = false
+            if robotCase {
+                firstPCMObserved = Self.waitForFile(
+                    statusLog, containing: "client.local_audio robot_first_pcm stream=\(talkbackStreamId)",
+                    timeout: 30.0)
+                XCTAssertTrue(firstPCMObserved, "robot microphone did not deliver an accepted PCM frame")
+            }
             waitForRenderWindow(seconds: 1.0)
             tapElement(app.buttons["client.local_audio"].firstMatch)
             XCTAssertTrue(
@@ -790,6 +803,8 @@ final class ExampleUITests: XCTestCase {
                 "raw_dump_started_before_input": true,
                 "first_window_ms": 1000,
                 "capture_window_max_ms": 2000,
+                "first_pcm_required": robotCase,
+                "first_pcm_observed": firstPCMObserved,
                 "toggle_locked_while_running": true,
                 "post_stop_observation_ms": 500,
                 "recovery_built_in": recoveryBuiltIn,
@@ -885,41 +900,43 @@ final class ExampleUITests: XCTestCase {
         XCTAssertNotNil(volumeEvidence, "audio output continuity evidence was not exposed")
         Self.appendStatus(statusLog, volumeEvidence ?? "audio_output_volume_verified status=failed")
 
-        if payload["skip_local_audio"] != "1" {
-            tap(app, "client.local_audio")
-            XCTAssertTrue(
-                waitForStatusHandlingSystemPermissions(
-                    app,
-                    "client.local_audio",
+        #if !os(macOS)
+            if payload["skip_local_audio"] != "1" {
+                tap(app, "client.local_audio")
+                XCTAssertTrue(
+                    waitForStatusHandlingSystemPermissions(
+                        app,
+                        "client.local_audio",
+                        statusLog,
+                        containing: "client.local_audio started",
+                        timeout: 30.0),
+                    "client microphone did not start")
+                XCTAssertTrue(
+                    waitForStatus(
+                        app,
+                        "client.local_audio",
+                        statusLog,
+                        containing: "options=0 start=0 attach=0",
+                        timeout: 2.0),
+                    "client microphone start returned a non-zero code")
+                Self.appendStatus(
                     statusLog,
-                    containing: "client.local_audio started",
-                    timeout: 30.0),
-                "client microphone did not start")
-            XCTAssertTrue(
-                waitForStatus(
-                    app,
-                    "client.local_audio",
+                    "smoke_local_audio_started \(statusValue(app, "client.local_audio"))")
+                waitForRenderWindow(seconds: 1.0)
+                tap(app, "client.local_audio")
+                XCTAssertTrue(
+                    waitForStatus(
+                        app,
+                        "client.local_audio",
+                        statusLog,
+                        containing: "client.local_audio stopped detach=0 stop=0",
+                        timeout: 8.0),
+                    "client microphone did not stop cleanly")
+                Self.appendStatus(
                     statusLog,
-                    containing: "options=0 start=0 attach=0",
-                    timeout: 2.0),
-                "client microphone start returned a non-zero code")
-            Self.appendStatus(
-                statusLog,
-                "smoke_local_audio_started \(statusValue(app, "client.local_audio"))")
-            waitForRenderWindow(seconds: 1.0)
-            tap(app, "client.local_audio")
-            XCTAssertTrue(
-                waitForStatus(
-                    app,
-                    "client.local_audio",
-                    statusLog,
-                    containing: "client.local_audio stopped detach=0 stop=0",
-                    timeout: 8.0),
-                "client microphone did not stop cleanly")
-            Self.appendStatus(
-                statusLog,
-                "smoke_local_audio_stopped \(statusValue(app, "client.local_audio"))")
-        }
+                    "smoke_local_audio_stopped \(statusValue(app, "client.local_audio"))")
+            }
+        #endif
 
         let diagnostics = waitForClientDiagnosticsData(app, timeout: timeoutSeconds)
         XCTAssertNotNil(diagnostics, "client metrics overlay did not expose useful debug values")
@@ -1548,6 +1565,8 @@ final class ExampleUITests: XCTestCase {
         var tokenRecovery: [String: Any]?
         var pauseStart: Int64 = 0
         var pauseObserved: Int64 = 0
+        var pauseCallbackStart: Int64 = 0
+        var pauseCallbackObserved: Int64 = 0
         var seekTarget: Int64 = 0
         var seekObserved: Int64 = 0
         var slowWall: Int64 = 0
@@ -1710,17 +1729,17 @@ final class ExampleUITests: XCTestCase {
                 XCTAssertEqual(conflicting.code, TiCloudStorageErrorCode.inUse)
                 try await Task.sleep(nanoseconds: 3_000_000_000)
                 try requireTiCloudStorageOk(
-                    activeReplay.pause(), "Ti Cloud Storage raw dump replay pause")
+                    retryTiCloudStorageInUse { activeReplay.pause() }, "Ti Cloud Storage raw dump replay pause")
                 try await waitForTiCloudStorageCondition(timeoutSeconds: 5) {
                     activeAudio.state == .paused && activeVideo.state == .paused
                 }
                 try requireTiCloudStorageOk(
-                    activeReplay.resume(), "Ti Cloud Storage raw dump replay resume")
+                    retryTiCloudStorageInUse { activeReplay.resume() }, "Ti Cloud Storage raw dump replay resume")
                 let rawDumpSeek = min(
                     range.endTimeMs - 15_000,
                     range.startTimeMs + (range.endTimeMs - range.startTimeMs) / 2)
                 try requireTiCloudStorageOk(
-                    activeReplay.seek(toTimeMs: rawDumpSeek),
+                    retryTiCloudStorageInUse { activeReplay.seek(toTimeMs: rawDumpSeek) },
                     "Ti Cloud Storage raw dump replay seek")
                 try await waitForTiCloudStorageCondition(timeoutSeconds: 8) {
                     abs(observer.currentTimeMs - rawDumpSeek) <= 2_000
@@ -1819,28 +1838,35 @@ final class ExampleUITests: XCTestCase {
             try requireTiCloudStorageOk(activeAudio.setVolume(0), "Ti Cloud Storage mute")
             try requireTiCloudStorageOk(
                 activeAudio.setVolume(35), "Ti Cloud Storage volume restore")
-            try requireTiCloudStorageOk(activeReplay.pause(), "Ti Cloud Storage replay pause")
+            try requireTiCloudStorageOk(
+                retryTiCloudStorageInUse { activeReplay.pause() }, "Ti Cloud Storage replay pause")
             try await waitForTiCloudStorageCondition(timeoutSeconds: 5) {
                 activeAudio.state == .paused && activeVideo.state == .paused
             }
-            pauseStart = observer.currentTimeMs
+            pauseStart = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            pauseCallbackStart = observer.currentTimeMs
             try await Task.sleep(nanoseconds: 1_200_000_000)
-            pauseObserved = observer.currentTimeMs
-            XCTAssertTrue((0...100).contains(pauseObserved - pauseStart))
-            try requireTiCloudStorageOk(activeReplay.resume(), "Ti Cloud Storage replay resume")
+            pauseObserved = try XCTUnwrap(activeReplay.currentTimeMs).int64Value
+            pauseCallbackObserved = observer.currentTimeMs
+            XCTAssertTrue(
+                (0...100).contains(pauseObserved - pauseStart),
+                "paused replay clock \(pauseStart) -> \(pauseObserved); "
+                    + "callback \(pauseCallbackStart) -> \(pauseCallbackObserved)")
+            try requireTiCloudStorageOk(
+                retryTiCloudStorageInUse { activeReplay.resume() }, "Ti Cloud Storage replay resume")
             try await waitForTiCloudStorageCondition(timeoutSeconds: 5) {
                 observer.currentTimeMs >= pauseStart + 500
             }
             let midpoint = range.startTimeMs + (range.endTimeMs - range.startTimeMs) / 2
             seekTarget = midpoint
             try requireTiCloudStorageOk(
-                activeReplay.seek(toTimeMs: midpoint), "Ti Cloud Storage replay seek")
+                retryTiCloudStorageInUse { activeReplay.seek(toTimeMs: midpoint) }, "Ti Cloud Storage replay seek")
             try await waitForTiCloudStorageCondition(timeoutSeconds: 8) {
                 abs(observer.currentTimeMs - midpoint) <= 2_000
             }
             seekObserved = observer.currentTimeMs
             try requireTiCloudStorageOk(
-                activeReplay.setSpeed(.x0_5), "Ti Cloud Storage replay 1/2x")
+                retryTiCloudStorageInUse { activeReplay.setSpeed(.x0_5) }, "Ti Cloud Storage replay 1/2x")
             let slowStarted = Date()
             let slowMediaStarted = observer.currentTimeMs
             try await Task.sleep(nanoseconds: 3_000_000_000)
@@ -1848,7 +1874,8 @@ final class ExampleUITests: XCTestCase {
             slowMedia = observer.currentTimeMs - slowMediaStarted
             XCTAssertGreaterThanOrEqual(slowMedia, 500)
             XCTAssertLessThanOrEqual(slowMedia * 10, slowWall * 8)
-            try requireTiCloudStorageOk(activeReplay.setSpeed(.x1), "Ti Cloud Storage replay x1")
+            try requireTiCloudStorageOk(
+                retryTiCloudStorageInUse { activeReplay.setSpeed(.x1) }, "Ti Cloud Storage replay x1")
             Self.appendStatus(statusLog, "ti-cloud-storage-sdk-controls-verified")
 
             var completionSnapshot: TiCloudStorageSnapshotResult?
@@ -1973,6 +2000,8 @@ final class ExampleUITests: XCTestCase {
             tokenRecovery: try XCTUnwrap(tokenRecovery),
             pauseStart: pauseStart,
             pauseObserved: pauseObserved,
+            pauseCallbackStart: pauseCallbackStart,
+            pauseCallbackObserved: pauseCallbackObserved,
             seekTarget: seekTarget,
             seekObserved: seekObserved,
             slowWall: slowWall,
@@ -2373,6 +2402,8 @@ final class ExampleUITests: XCTestCase {
         tokenRecovery: [String: Any],
         pauseStart: Int64,
         pauseObserved: Int64,
+        pauseCallbackStart: Int64,
+        pauseCallbackObserved: Int64,
         seekTarget: Int64,
         seekObserved: Int64,
         slowWall: Int64,
@@ -2401,6 +2432,9 @@ final class ExampleUITests: XCTestCase {
                 "teardown_ok": true,
                 "pause_started_time_ms": pauseStart,
                 "pause_observed_time_ms": pauseObserved,
+                "pause_clock_source": "replay.currentTimeMs",
+                "pause_callback_started_time_ms": pauseCallbackStart,
+                "pause_callback_observed_time_ms": pauseCallbackObserved,
                 "seek_target_time_ms": seekTarget,
                 "seek_observed_time_ms": seekObserved,
                 "speed_half_wall_elapsed_ms": slowWall,
