@@ -767,9 +767,24 @@ final class ExampleSessionController: NSObject, ObservableObject {
                 ? ExampleRobotVoiceEffect(sampleRate: options.sampleRate.rawValue) : nil
             effect?.reset()
             if let effect {
+                let firstPCMLock = NSLock()
+                var firstPCMReported = false
                 input.onPCMCaptured = { [weak self, weak input] pcm in
                     guard let self, let input, self.clientLocalAudioInput === input else { return }
                     let submitCode = input.submitPCM(effect.process(pcm))
+                    if submitCode == 0 && !pcm.isEmpty {
+                        firstPCMLock.lock()
+                        let reportFirstPCM = !firstPCMReported
+                        firstPCMReported = true
+                        firstPCMLock.unlock()
+                        if reportFirstPCM {
+                            Task { @MainActor [weak self, weak input] in
+                                guard let self, let input, self.clientLocalAudioInput === input else { return }
+                                self.appendStatusLogLine(
+                                    "client.local_audio robot_first_pcm stream=\(streamId)")
+                            }
+                        }
+                    }
                     if submitCode != 0 {
                         self.appendStatusLogLine(
                             "client.local_audio robot_submit_failed code=\(submitCode)")
