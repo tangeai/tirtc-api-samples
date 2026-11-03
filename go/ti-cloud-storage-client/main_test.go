@@ -131,6 +131,20 @@ func TestFirstFrameWaitPreservesReplayFailure(t *testing.T) {
 	}
 }
 
+func TestRetryWhileInUseStopsAtFirstStableResult(t *testing.T) {
+	calls := 0
+	err := retryWhileInUse(context.Background(), func() error {
+		calls++
+		if calls < 3 {
+			return storage.ErrInUse
+		}
+		return nil
+	})
+	if err != nil || calls != 3 {
+		t.Fatalf("retryWhileInUse = (%v, %d calls), want (nil, 3 calls)", err, calls)
+	}
+}
+
 func TestCoveredExportRangeExcludesReportedGapsAndPreRoll(t *testing.T) {
 	at := func(seconds int64) time.Time { return time.Unix(seconds, 0) }
 	report := storage.ExportReport{
