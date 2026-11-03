@@ -72,6 +72,7 @@ abstract final class DemoWidgetKeys {
   static const ValueKey<String> playerPage = ValueKey<String>('tirtc_example_player_page');
   static const ValueKey<String> playerCommandButton = ValueKey<String>('tirtc_example_player_command_button');
   static const ValueKey<String> playerLocalAudioButton = ValueKey<String>('tirtc_example_player_local_audio_button');
+  static const ValueKey<String> playerRobotVoiceToggle = ValueKey<String>('tirtc_example_player_robot_voice_toggle');
   static const ValueKey<String> playerAudioVolumeButton = ValueKey<String>('tirtc_example_player_audio_volume_button');
   static const ValueKey<String> streamMessageBubble = ValueKey<String>('tirtc_example_stream_message_bubble');
   static const ValueKey<String> playerLogUploadButton = ValueKey<String>('tirtc_example_player_log_upload_button');
