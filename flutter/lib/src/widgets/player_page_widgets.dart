@@ -346,11 +346,11 @@ class LocalAudioControlButton extends StatelessWidget {
     return Semantics(
       button: true,
       toggled: running,
-      label: running ? '停止麦克风' : '启动麦克风',
+      label: running ? '关闭对讲' : '开启对讲',
       child: IconButton(
         key: _buttonKey,
         onPressed: enabled && !busy ? onPressed : null,
-        tooltip: running ? '停止麦克风' : '启动麦克风',
+        tooltip: running ? '关闭对讲' : '开启对讲',
         style: IconButton.styleFrom(
           minimumSize: Size(ExampleTheme.minimumTargetSize(context), ExampleTheme.minimumTargetSize(context)),
           foregroundColor: running ? Colors.orangeAccent.shade100 : Colors.white,
@@ -365,7 +365,38 @@ class LocalAudioControlButton extends StatelessWidget {
                     valueColor: AlwaysStoppedAnimation<Color>(running ? Colors.white : ExampleTheme.primary),
                   ),
                 )
-                : Icon(running ? Icons.mic_off_rounded : Icons.mic_rounded),
+                : Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(running ? Icons.mic_rounded : Icons.mic_off_rounded),
+                    const SizedBox(height: 2),
+                    Text(running ? '对讲中' : '未开启', style: const TextStyle(fontSize: 10, height: 1)),
+                  ],
+                ),
+      ),
+    );
+  }
+}
+
+class RobotVoiceToggle extends StatelessWidget {
+  const RobotVoiceToggle({super.key, required this.enabled, required this.selected, required this.onChanged});
+
+  final bool enabled;
+  final bool selected;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Semantics(
+      label: '机器人音',
+      toggled: selected,
+      child: FilterChip(
+        key: DemoWidgetKeys.playerRobotVoiceToggle,
+        label: const Text('机器人音', style: TextStyle(fontSize: 11)),
+        selected: selected,
+        showCheckmark: false,
+        avatar: const Icon(Icons.smart_toy_outlined, size: 16),
+        onSelected: enabled ? onChanged : null,
       ),
     );
   }
@@ -598,8 +629,8 @@ class PlayerControlPanel extends StatelessWidget {
                                 recording: recording,
                               ),
                             ),
-                            captureControls!,
-                            more!,
+                            if (captureControls != null) captureControls,
+                            if (more != null) more,
                           ],
                         ],
                       )
