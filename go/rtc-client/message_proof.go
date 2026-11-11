@@ -104,6 +104,8 @@ func (p *messageProof) stream(id uint8, stamp time.Duration, data []byte) {
 	}
 }
 func (p *messageProof) wait(ctx context.Context) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	for {
 		p.mu.Lock()
 		failure := p.failure

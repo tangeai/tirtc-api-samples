@@ -19,3 +19,11 @@
 [TiRTC 开发文档](https://docs.tange.ai/products/tirtc/)
 
 - [Java Server SDK Examples](java/)
+
+<!-- tirtc-alpha-preview -->
+## Alpha preview
+
+This branch contains Alpha API Samples. Stable dependencies remain on [main](https://github.com/tangeai/tirtc-api-samples/tree/main).
+
+Use the exact SDK dependency and lock in each owner directory. Immutable owner ZIPs are available in [Releases](https://github.com/tangeai/tirtc-api-samples/releases), under `sdk-v<version>-<owner>`.
+<!-- /tirtc-alpha-preview -->

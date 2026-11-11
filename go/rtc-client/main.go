@@ -149,7 +149,7 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (resultErr error) {
 	config, err := parseConfig()
 	if err != nil {
 		return err
@@ -173,8 +173,6 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
-	defer cancel()
 
 	messages, err := newMessageProof(config.videoStreamIDs, config.verifyMessageEcho)
 	if err != nil {
@@ -227,6 +225,7 @@ func run() error {
 		}
 		videos = append(videos, pair)
 	}
+	var recordingAudioObservers []*tirtc.EncodedAudioOutput
 	cleaned := false
 	cleanup := func() error {
 		if cleaned {
@@ -236,6 +235,9 @@ func run() error {
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cleanupCancel()
 		var cleanupErrors []error
+		for _, observer := range recordingAudioObservers {
+			cleanupErrors = append(cleanupErrors, closeEventually(cleanupCtx, observer.Close))
+		}
 		for index := len(videos) - 1; index >= 0; index-- {
 			cleanupErrors = append(cleanupErrors,
 				closeEventually(cleanupCtx, videos[index].encoded.Close),
@@ -251,7 +253,22 @@ func run() error {
 		cleanupErrors = append(cleanupErrors, connection.Close(), client.Close())
 		return errors.Join(cleanupErrors...)
 	}
-	defer func() { _ = cleanup() }()
+	var connectFailure *tirtc.Error
+	defer func() {
+		cleanupErr := cleanup()
+		resultErr = errors.Join(resultErr, cleanupErr)
+		if connectFailure != nil && cleanupErr == nil {
+			data, marshalErr := json.Marshal(map[string]any{
+				"schema": "tirtc.headless-network-failure/v1", "callsite": "rtc.client_connect",
+				"public_error":     map[string]any{"code": connectFailure.Code, "source": "Connection.Connect"},
+				"cleanup_complete": true,
+			})
+			if marshalErr == nil {
+				marshalErr = os.WriteFile(filepath.Join(config.outputDir, "network-failure.json"), data, 0600)
+			}
+			resultErr = errors.Join(resultErr, marshalErr)
+		}
+	}()
 
 	if config.audioStreamID != nil {
 		if err := audio.Attach(connection, *config.audioStreamID); err != nil {
@@ -278,7 +295,11 @@ func run() error {
 			return fmt.Errorf("zero-frame snapshot: %w", errors.Join(err, errors.New("ErrNoFrame required")))
 		}
 	}
-	if err := connection.Connect(ctx, config.remoteID); err != nil {
+	connectCtx, connectCancel := context.WithTimeout(ctx, operationTimeout)
+	connectErr := connection.Connect(connectCtx, config.remoteID)
+	connectCancel()
+	if err := connectErr; err != nil {
+		_ = errors.As(err, &connectFailure)
 		return fmt.Errorf("connect: %w", err)
 	}
 	if config.audioStreamID != nil {
@@ -384,7 +405,12 @@ func run() error {
 		if startErr != nil {
 			return fmt.Errorf("start recording stream %d: %w", pair.streamID, startErr)
 		}
-		baseline := pair.frames.snapshot()
+		recordingFrames := *pair.frames
+		if config.audioStreamID != nil {
+			recordingFrames.audio = audioFrames.audio
+			recordingFrames.encodedAudio = audioFrames.encodedAudio
+		}
+		baseline := recordingFrames.snapshot()
 		if requestErr := connection.RequestVideoKeyframe(pair.streamID); requestErr != nil {
 			file, stopErr := recording.Stop()
 			if file.Path != "" {
@@ -392,7 +418,26 @@ func run() error {
 			}
 			return fmt.Errorf("request recording key frame %d: %w", pair.streamID, errors.Join(requestErr, stopErr))
 		}
-		if waitErr := waitVideoRecordingFramesAfter(ctx, pair.frames, baseline, failures); waitErr != nil {
+		waitErr := waitSelectedRecordingFramesAfter(ctx, &recordingFrames, baseline, config.audioStreamID != nil, failures)
+		if waitErr == nil && config.audioStreamID != nil {
+			// Existing Output mailboxes can still contain pre-anchor frames. A new
+			// observer, attached only after the key frame and following video,
+			// gives this recording its own audio observation generation.
+			frames := newFrameSignal()
+			observer, createErr := tirtc.NewEncodedAudioOutput(tirtc.EncodedAudioOutputOptions{
+				OnFrame: func(tirtc.EncodedAudioFrame) { frames.notify() },
+				OnError: outputErrorNotifier("recording encoded audio output", failures),
+			})
+			waitErr = createErr
+			if createErr == nil {
+				// Retain ownership even when Attach or the scoped Close fails.
+				recordingAudioObservers = append(recordingAudioObservers, observer)
+				waitErr = observeRecordingAudio(ctx, frames, failures,
+					func() error { return observer.Attach(connection, *config.audioStreamID) },
+					func() error { return closeEventually(ctx, observer.Close) })
+			}
+		}
+		if waitErr != nil {
 			file, stopErr := recording.Stop()
 			if file.Path != "" {
 				stopErr = errors.Join(stopErr, file.Delete())
@@ -612,6 +657,13 @@ func waitSelectedFrames(ctx context.Context, audioFrames *frameSignals, receiveA
 	return nil
 }
 
+func waitSelectedRecordingFramesAfter(ctx context.Context, frames *frameSignals, baseline frameSnapshot, receiveAudio bool, failures <-chan error) error {
+	if receiveAudio {
+		return waitRecordingFramesAfter(ctx, frames, baseline, failures)
+	}
+	return waitVideoRecordingFramesAfter(ctx, frames, baseline, failures)
+}
+
 func waitVideoRecordingFramesAfter(ctx context.Context, frames *frameSignals, baseline frameSnapshot, failures <-chan error) error {
 	if err := waitFrameAfter(ctx, "decoded video frame", frames.video, baseline.video, failures); err != nil {
 		return err
@@ -662,7 +714,40 @@ func waitRecordingFramesAfter(ctx context.Context, frames *frameSignals, baselin
 	return waitFrameAfter(ctx, "encoded video frame after key frame", frames.encodedVideo, frames.encodedVideo.count.Load(), failures)
 }
 
+// observeRecordingAudio owns Attach/wait/Close for a fresh observer. Two
+// callbacks are required: Runtime serializes encoded dispatch per Connection,
+// and enqueues a recording sample after the native callback returns. The second
+// callback therefore fences the first sample's enqueue, without a timed sleep.
+// This only applies to a new observer; an existing mailbox can contain old data.
+func observeRecordingAudio(ctx context.Context, frames *frameSignal, failures <-chan error, attach, closeObserver func() error) (resultErr error) {
+	defer func() { resultErr = errors.Join(resultErr, closeObserver()) }()
+	// Take the baseline before Attach, which may already deliver callbacks.
+	baseline := frames.count.Load()
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := attach(); err != nil {
+		return fmt.Errorf("attach recording audio observer: %w", err)
+	}
+	if err := waitFrameAfter(ctx, "first recording audio frame", frames, baseline, failures); err != nil {
+		return err
+	}
+	if err := waitFrameAfter(ctx, "following recording audio frame", frames, baseline+1, failures); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-failures:
+		return err
+	default:
+		return nil
+	}
+}
+
 func waitFrameAfter(ctx context.Context, name string, signal *frameSignal, baseline uint64, failures <-chan error) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	for signal.count.Load() <= baseline {
 		if err := waitSignal(ctx, name, signal.ready, failures); err != nil {
 			return err
@@ -700,6 +785,8 @@ func notifyError(target chan<- error, err error) {
 }
 
 func closeEventually(ctx context.Context, closeResource func() error) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	ticker := time.NewTicker(5 * time.Millisecond)
 	defer ticker.Stop()
 	for {
