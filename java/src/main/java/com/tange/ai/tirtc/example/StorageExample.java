@@ -11,11 +11,53 @@ import static com.tange.ai.tirtc.example.RtcExample.*;
 
 /** Cloud recording query, Replay and independent Export through the public SDK. */
 public final class StorageExample {
+    private static final class NetworkOperationFailure extends Exception {
+        private static final long serialVersionUID=1L;
+        final String callsite;
+        final TiRtcException error;
+        NetworkOperationFailure(String callsite,TiRtcException error) {
+            super(error);this.callsite=callsite;this.error=error;
+        }
+    }
+    private static <T> T networkOperation(String callsite,Callable<T> operation) throws Exception {
+        try { return operation.call(); }
+        catch(Exception original) {
+            Throwable cause=original instanceof ExecutionException?original.getCause():original;
+            if(cause instanceof TiRtcException) {
+                TiRtcException error=(TiRtcException)cause;
+                if(error.code()==6009||error.code()==6114||error.code()==6136||error.code()==6137)
+                    throw new NetworkOperationFailure(callsite,error);
+            }
+            throw original;
+        }
+    }
     public static void main(String[] args) throws Exception {
+        try { run(args); }
+        catch(NetworkOperationFailure failure) {
+            // try-with-resources adds suppressed exceptions on release failure.
+            // Such a failure must never authorize a replacement session.
+            try {
+                writeNetworkFailure(Paths.get(required(flags(args),"output-dir")).toAbsolutePath(),failure);
+            } catch(Exception evidenceError) {
+                failure.addSuppressed(evidenceError);
+            }
+            throw failure;
+        }
+    }
+    private static void writeNetworkFailure(Path output,NetworkOperationFailure failure) throws Exception {
+        if(failure.getSuppressed().length==0) {
+            String json="{\"schema\":\"tirtc.headless-network-failure/v1\",\"callsite\":\""+
+                failure.callsite+"\",\"public_error\":{\"source\":\"java-public-sdk\",\"code\":"+
+                failure.error.code()+"},\"cleanup_complete\":true}\n";
+            Files.write(output.resolve("network-failure.json"),json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+    private static void run(String[] args) throws Exception {
         Map<String,String> flags=flags(args);
         applyRawDumpCase(flags, true);
         if(flags.containsKey("help")) { System.out.println("--endpoint --cache-dir --output-dir --start-ms --end-ms --audio-channel-id --video-channel-id [--secondary-video-channel-id ID] [--raw-dump --raw-dump-seconds 10 --raw-dump-copy-to ABSOLUTE_ZIP] [--upload-logs] [--case-id ti-cloud-storage.raw-dump.smoke-upload|ti-cloud-storage.raw-dump.integration-recovery]; credentials/device use TI_CLOUD_STORAGE_* environment"); return; }
         Path output=Paths.get(required(flags,"output-dir")).toAbsolutePath(); Files.createDirectories(output);
+        Files.deleteIfExists(output.resolve("network-failure.json"));
         String device=env("TI_CLOUD_STORAGE_DEVICE_ID");
         Instant start=Instant.ofEpochMilli(Long.parseLong(required(flags,"start-ms")));
         Instant end=Instant.ofEpochMilli(Long.parseLong(required(flags,"end-ms")));
@@ -26,9 +68,9 @@ public final class StorageExample {
         ClientOptions options=options(flags,"TI_CLOUD_STORAGE_APP_ID","TI_CLOUD_STORAGE_ACCESS_KEY_ID","TI_CLOUD_STORAGE_ACCESS_KEY_SECRET");
         ExportTask retainedTask=null;
         try (CloudStorageClient client=new CloudStorageClient(options)) {
-            List<RecordingDay> days=client.listRecordingDays(device,start.atZone(ZoneOffset.UTC).toLocalDate(),end.atZone(ZoneOffset.UTC).toLocalDate(),ZoneOffset.UTC).get(90,TimeUnit.SECONDS);
+            List<RecordingDay> days=networkOperation("cloud.initial_query",() -> client.listRecordingDays(device,start.atZone(ZoneOffset.UTC).toLocalDate(),end.atZone(ZoneOffset.UTC).toLocalDate(),ZoneOffset.UTC).get(90,TimeUnit.SECONDS));
             check(days.stream().anyMatch(RecordingDay::hasRecording),"recording dates present"); result.setProperty("dates","true");
-            List<RecordingRange> ranges=client.listRecordings(device,start,end).get(90,TimeUnit.SECONDS);
+            List<RecordingRange> ranges=networkOperation("cloud.initial_query",() -> client.listRecordings(device,start,end).get(90,TimeUnit.SECONDS));
             check(!ranges.isEmpty(),"recording ranges present"); result.setProperty("ranges","true");
             RecordingRange available=ranges.stream().filter(r -> Duration.between(r.startTime(),r.endTime()).compareTo(Duration.ofSeconds(4))>=0)
                     .findFirst().orElseThrow(() -> new IllegalStateException("fixture needs at least four seconds of continuous recording"));
@@ -38,10 +80,10 @@ public final class StorageExample {
                             ? available.startTime().plusSeconds(12) : available.endTime());
             RecordingRange playback=playbackRange(available,secondaryId!=videoId);
             AtomicBoolean completed=new AtomicBoolean();
-            try (Replay replay=client.newReplay(device,new Replay.Listener() {
+            try (Replay replay=networkOperation("cloud.open_start",() -> client.newReplay(device,new Replay.Listener() {
                 public void onCompleted() { completed.set(true); }
                 public void onError(TiRtcException error) { frames.error(error); }
-            })) {
+            }))) {
                 frames.reentry=replay::pause;
                 try (VideoOutput video=new VideoOutput(replay,videoId,frames.video());
                      AudioOutput audio=new AudioOutput(replay,audioId,frames.audio());
@@ -50,7 +92,7 @@ public final class StorageExample {
                      VideoOutput secondVideo=secondaryId==videoId?null:new VideoOutput(replay,secondaryId,secondary.video());
                      EncodedVideoOutput secondEncoded=secondaryId==videoId?null:new EncodedVideoOutput(replay,secondaryId,secondary.encodedVideo())) {
                     requireNoFrame(video);if(secondVideo!=null)requireNoFrame(secondVideo);result.setProperty("zeroFrameSnapshot","true");
-                    replay.play(playback.startTime(),playback.endTime());
+                    networkOperation("cloud.open_start",() -> { replay.play(playback.startTime(),playback.endTime());return null; });
                     com.tange.ai.tirtc.RawDump rawDump=null;
                     long rawDumpStarted=0;
                     boolean rawDumpEnabled=flags.containsKey("raw-dump")||flags.containsKey("raw-dump-seconds");
