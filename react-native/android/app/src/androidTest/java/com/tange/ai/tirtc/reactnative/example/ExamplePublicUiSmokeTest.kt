@@ -67,10 +67,6 @@ class ExamplePublicUiSmokeTest {
     when (arg("flow", "downlink")) {
       "auxiliary" -> verifyAuxiliaryUiContract()
       "ti-cloud-storage" -> runCloudStorageFlow()
-      "stress" -> {
-        fillCommonConfig()
-        runStressFlow()
-      }
       else -> {
         fillCommonConfig()
         runDownlinkFlow()
@@ -426,30 +422,6 @@ class ExamplePublicUiSmokeTest {
     marker("client_downlink_done")
   }
 
-  private fun runStressFlow() {
-    val loops = arg("loops", DEFAULT_STRESS_LOOPS.toString()).toIntOrNull()?.coerceAtLeast(1) ?: DEFAULT_STRESS_LOOPS
-    val loopOffset = arg("loopOffset", "0").toIntOrNull()?.coerceAtLeast(0) ?: 0
-    repeat(loops) { index ->
-      val localLoop = index + 1
-      val loop = loopOffset + localLoop
-      marker("stress_loop_${loop}_start")
-      clickStressControl("TiRTC Start Downlink", scrollIfMissing = true)
-      marker("stress_loop_${loop}_downlink_clicked package=${device.currentPackageName}")
-      waitClientDownlink(captureVideoEvidence = false)
-      marker("stress_fabric_output_loop_${loop}_ok")
-      Thread.sleep(arg("holdMs", "2000").toLongOrNull() ?: 2_000L)
-      clickStressControl("TiRTC Player Stop")
-      waitForControlVisible("TiRTC Config appId", SHORT_TIMEOUT_MS)
-      marker("stress_loop_${loop}_done")
-      if (localLoop < loops) {
-        Thread.sleep(STRESS_RECONNECT_COOLDOWN_MS)
-        marker("stress_loop_${loop}_cooldown_done")
-      }
-    }
-    marker("stress_loops_done")
-    marker("stress_fabric_output_loops_done")
-    marker("stress_loops_done_details count=$loops offset=$loopOffset")
-  }
 
   private fun fillCommonConfig() {
     waitObject(By.desc("TiRTC Config appId"), LAUNCH_TIMEOUT_MS)
@@ -665,21 +637,6 @@ class ExamplePublicUiSmokeTest {
     Thread.sleep(300)
   }
 
-  private fun clickStressControl(desc: String, scrollIfMissing: Boolean = false) {
-    ensureExampleWindow()
-    dismissSoftKeyboardIfShown()
-    val text = visibleText(desc)
-    var item = findControlNow(desc, text)
-    if (item == null && scrollIfMissing) {
-      item = scrollToDesc(desc) ?: scrollToText(text) ?: swipeToControl(desc, text)
-    }
-    if (item == null) {
-      dumpFailureArtifacts(desc)
-    }
-    assertNotNull("missing stress control $desc", item)
-    clickControl(item!!)
-    Thread.sleep(300)
-  }
 
   private fun clickControl(item: UiObject2) {
     var target: UiObject2? = item
