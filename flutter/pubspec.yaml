@@ -16,7 +16,7 @@ dependencies:
   tirtc_flutter:
     git:
       url: https://github.com/tangeai/tirtc-sdk-flutter.git
-      ref: v2.6.2
+      ref: v2.6.4-alpha.1
 dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_test:
