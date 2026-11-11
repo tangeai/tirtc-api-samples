@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 import math
@@ -101,6 +102,9 @@ def parse_args() -> argparse.Namespace:
         help="run one registered raw dump Cloud Storage case through this public Example",
     )
     parser.add_argument("--timeout", type=float, default=180.0)
+    parser.add_argument(
+        "--verify-permission-rejection", action="store_true", help=argparse.SUPPRESS
+    )
     args = parser.parse_args()
     if args.case_id is not None:
         args.raw_dump = True
@@ -138,7 +142,8 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def save_temporary_media(source: Path, destination: Path, signature: bytes, offset: int) -> None:
+def save_temporary_media(media: tirtc.RecordingFile | tirtc.SnapshotFile, destination: Path, signature: bytes, offset: int) -> None:
+    source = media.path
     size = source.stat().st_size
     if size <= offset + len(signature) or size > MAXIMUM_MEDIA_FILE_SIZE:
         raise RuntimeError(f"unexpected temporary media size: {source} ({size} bytes)")
@@ -148,6 +153,17 @@ def save_temporary_media(source: Path, destination: Path, signature: bytes, offs
             raise RuntimeError(f"unexpected temporary media signature: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
     shutil.copyfile(source, destination)
+    digest = hashlib.sha256()
+    with destination.open("rb") as saved:
+        for chunk in iter(lambda: saved.read(1024 * 1024), b""):
+            digest.update(chunk)
+    media.delete()
+    if source.exists():
+        raise RuntimeError("SDK temporary media remains after delete")
+    destination.with_suffix(destination.suffix + ".receipt.json").write_text(json.dumps({
+        "source_path": str(source), "deleted": True, "sha256": digest.hexdigest(),
+        "bytes": size, "saved_name": destination.name,
+    }, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def refresh_token(cloud: storage.CloudStorage) -> None:
@@ -159,8 +175,68 @@ def refresh_token(cloud: storage.CloudStorage) -> None:
     cloud.update_token(refreshed)
 
 
+def verify_permission_rejection(cloud: storage.CloudStorage, valid_token: str,
+                                start: datetime, end: datetime,
+                                timeout: float) -> dict[str, object]:
+    # Construction must have succeeded. The rejected remote list is the proof,
+    # not a local argument error; this synchronous API has one returned terminal.
+    cloud.update_token("invalid-token")
+    try:
+        cloud.list_recordings(start, end, timeout=timeout)
+    except tirtc.PermissionDeniedError as failure:
+        if failure.code != 6024:
+            raise
+        terminal = (type(failure).__name__, failure.code)
+    else:
+        raise RuntimeError("invalid credential did not fail remote authorization")
+    cloud.update_token(valid_token)
+    ranges = cloud.list_recordings(start, end, timeout=timeout)
+    if not ranges:
+        raise RuntimeError("explicit token recovery retry returned no uploaded recording")
+    return {
+        "status": "passed",
+        "case": "invalid-token-permission-rejection",
+        "same_store": True,
+        "failed_operation_code": terminal[1],
+        "failed_operation_terminal_returns": 1,
+        "explicit_retry": True,
+        "retry_ranges": len(ranges),
+    }
+
+
+class NetworkOperationFailure(RuntimeError):
+    def __init__(self, callsite: str, error: tirtc.TiRTCError) -> None:
+        super().__init__(str(error))
+        self.callsite = callsite
+        self.public_error = {"code": error.code, "source": "python-public-sdk"}
+
+
+def network_operation(callsite, operation):
+    try:
+        return operation()
+    except tirtc.TiRTCError as error:
+        if error.code not in {6009, 6114, 6136, 6137}:
+            raise
+        raise NetworkOperationFailure(callsite, error) from error
+
+
 def run() -> None:
     args = parse_args()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    (args.output_dir / "network-failure.json").unlink(missing_ok=True)
+    try:
+        run_with_args(args)
+    except NetworkOperationFailure as error:
+        # Context managers have all returned successfully. A cleanup exception
+        # replaces this exception and cannot authorize another session.
+        (args.output_dir / "network-failure.json").write_text(json.dumps({
+            "schema": "tirtc.headless-network-failure/v1", "callsite": error.callsite,
+            "public_error": error.public_error, "cleanup_complete": True,
+        }, sort_keys=True) + "\n", encoding="utf-8")
+        raise
+
+
+def run_with_args(args) -> None:
     app_id = os.environ.get("TI_CLOUD_STORAGE_APP_ID", "")
     if not app_id:
         raise RuntimeError("TI_CLOUD_STORAGE_APP_ID is required")
@@ -188,7 +264,6 @@ def run() -> None:
     epoch = datetime(1970, 1, 1, tzinfo=timezone.utc)
     start = epoch + timedelta(milliseconds=args.start_ms)
     end = epoch + timedelta(milliseconds=args.end_ms)
-    deadline = time.monotonic() + args.timeout
     signals = Signals()
     terminal = threading.Event()
     terminal_error: list[tirtc.TiRTCError] = []
@@ -208,34 +283,41 @@ def run() -> None:
         )
     with client_owner as client:
         if args.auth_mode == "external-token":
-            cloud_owner = client.open_with_token(token)
+            cloud_owner = network_operation("cloud.open_start", lambda: client.open_with_token(token))
         else:
-            cloud_owner = client.open_device(device_id)
+            cloud_owner = network_operation("cloud.open_start", lambda: client.open_device(device_id))
         with cloud_owner as cloud:
+            if args.verify_permission_rejection:
+                if args.auth_mode != "external-token":
+                    raise RuntimeError("permission rejection verification requires external-token auth")
+                rejection = verify_permission_rejection(cloud, token, start, end, args.timeout)
+                (args.output_dir / "permission-rejection.json").write_text(
+                    json.dumps(rejection, sort_keys=True) + "\n", encoding="utf-8"
+                )
             shanghai = ZoneInfo("Asia/Shanghai")
             try:
-                cloud.list_recording_days(
+                network_operation("cloud.initial_query", lambda: cloud.list_recording_days(
                     start.astimezone(shanghai).date(),
                     end.astimezone(shanghai).date(),
                     timezone=shanghai,
-                    timeout=max(0.001, deadline - time.monotonic()),
-                )
-                ranges = cloud.list_recordings(
-                    start, end, timeout=max(0.001, deadline - time.monotonic())
-                )
+                    timeout=args.timeout,
+                ))
+                ranges = network_operation("cloud.initial_query", lambda: cloud.list_recordings(
+                    start, end, timeout=args.timeout
+                ))
             except tirtc.TokenExpiredError:
                 if args.auth_mode != "external-token":
                     raise
                 refresh_token(cloud)
-                cloud.list_recording_days(
+                network_operation("cloud.initial_query", lambda: cloud.list_recording_days(
                     start.astimezone(shanghai).date(),
                     end.astimezone(shanghai).date(),
                     timezone=shanghai,
-                    timeout=max(0.001, deadline - time.monotonic()),
-                )
-                ranges = cloud.list_recordings(
-                    start, end, timeout=max(0.001, deadline - time.monotonic())
-                )
+                    timeout=args.timeout,
+                ))
+                ranges = network_operation("cloud.initial_query", lambda: cloud.list_recordings(
+                    start, end, timeout=args.timeout
+                ))
             if not ranges:
                 raise RuntimeError("no recording is available in the requested window")
             selected = max(ranges, key=lambda item: (item.end_time, item.start_time))
@@ -308,9 +390,16 @@ def run() -> None:
                     stack.callback(encoded_video.close)
                     video.attach(replay, channel_id)
                     encoded_video.attach(replay, channel_id)
+                    try:
+                        early_snapshot = video.take_snapshot()
+                    except tirtc.NoFrameError:
+                        pass
+                    else:
+                        early_snapshot.delete()
+                        raise RuntimeError("zero-frame snapshot unexpectedly succeeded")
                     video_outputs.append((channel_id, video, encoded_video))
 
-                replay.play(selected.start_time, selected.end_time)
+                network_operation("cloud.open_start", lambda: replay.play(selected.start_time, selected.end_time))
                 required_frames: list[str] = []
                 if args.audio_channel_id is not None:
                     required_frames.extend(("audio", "encoded_audio"))
@@ -342,11 +431,33 @@ def run() -> None:
                         replay.resume()
                         replay.seek(selected.start_time)
                     capture_deadline = time.monotonic() + args.raw_dump_seconds
-                    if capture_deadline > deadline:
-                        raise TimeoutError(
-                            "raw dump duration exceeds the remaining example timeout"
-                        )
-                signals.wait_after(tuple(required_frames), {}, deadline)
+                signals.wait_after(tuple(required_frames), {}, time.monotonic() + args.timeout)
+                route_evidence: dict[str, object] = {"zero_frame_rejected": [item[0] for item in video_outputs]}
+                if len(video_outputs) >= 2:
+                    first_id, first_video, first_encoded = video_outputs[0]
+                    second_id = video_outputs[1][0]
+                    route_names = (f"video:{first_id}", f"encoded_video:{first_id}",
+                                   f"video:{second_id}", f"encoded_video:{second_id}")
+                    common_before = signals.snapshot(route_names)
+                    signals.wait_after(route_names, common_before, time.monotonic() + args.timeout)
+                    common_after = signals.snapshot(route_names)
+                    first_encoded.detach()
+                    first_video.detach()
+                    isolated_before = signals.snapshot(route_names)
+                    signals.wait_after(route_names[2:], isolated_before, time.monotonic() + args.timeout)
+                    isolated_after = signals.snapshot(route_names)
+                    if any(isolated_after[name] != isolated_before[name] for name in route_names[:2]):
+                        raise RuntimeError("detached route continued to deliver callbacks")
+                    first_video.attach(replay, first_id)
+                    first_encoded.attach(replay, first_id)
+                    restored_before = signals.snapshot(route_names)
+                    # Observe the next keyframe from this same replay.
+                    signals.wait_after(route_names, restored_before, time.monotonic() + args.timeout)
+                    route_evidence.update(status="passed", ids=[first_id, second_id],
+                        common_before=common_before, common_after=common_after,
+                        isolated_before=isolated_before, isolated_after=isolated_after,
+                        restored_before=restored_before, restored_after=signals.snapshot(route_names))
+                (args.output_dir / "route-proof.json").write_text(json.dumps(route_evidence, sort_keys=True) + "\n")
 
                 if dump is not None:
                     time.sleep(max(0, capture_deadline - time.monotonic()))
@@ -384,21 +495,54 @@ def run() -> None:
                 if args.upload_logs:
                     print(json.dumps({"log_id": client.upload_logs()}, sort_keys=True))
 
-                for channel_id, video, _ in video_outputs:
+                for output_index, (channel_id, video, encoded_video) in enumerate(video_outputs):
                     recording = replay.start_recording(
                         video_channel_id=channel_id,
                         audio_channel_id=args.audio_channel_id,
                     )
                     try:
-                        key_name = f"encoded_video_key:{channel_id}"
-                        encoded_name = f"encoded_video:{channel_id}"
-                        baseline = signals.snapshot((key_name, encoded_name))
-                        signals.wait_after((key_name,), baseline, deadline)
-                        after_key = signals.snapshot((encoded_name,))
-                        signals.wait_after((encoded_name,), after_key, deadline)
+                        # Replace the binding after Start returns. Already admitted
+                        # callbacks on the previous output can arrive late and do
+                        # not prove that this recording accepted any media.
+                        recording_signals = Signals()
+                        encoded_video.close()
+
+                        def on_recording_video(
+                            frame: tirtc.EncodedVideoFrame, observed: Signals = recording_signals
+                        ) -> None:
+                            observed.notify("video")
+                            if frame.key_frame:
+                                observed.notify("key")
+
+                        encoded_video = storage.EncodedVideoOutput(
+                            on_recording_video, on_error=recording_signals.fail
+                        )
+                        stack.callback(encoded_video.close)
+                        encoded_video.attach(replay, channel_id)
+                        video_outputs[output_index] = (channel_id, video, encoded_video)
+                        recording_signals.wait_after(("key",), {}, time.monotonic() + args.timeout)
+                        after_key = recording_signals.snapshot(("video",))
+                        recording_signals.wait_after(("video",), after_key, time.monotonic() + args.timeout)
+                        if encoded_audio is not None:
+                            # A new audio binding after the video key observation
+                            # proves audio was admitted after the recording anchor.
+                            encoded_audio.close()
+
+                            def on_recording_audio(
+                                frame: tirtc.EncodedAudioFrame, observed: Signals = recording_signals
+                            ) -> None:
+                                observed.notify("audio")
+
+                            encoded_audio = storage.EncodedAudioOutput(
+                                on_recording_audio,
+                                on_error=recording_signals.fail,
+                            )
+                            stack.callback(encoded_audio.close)
+                            encoded_audio.attach(replay, args.audio_channel_id)
+                            recording_signals.wait_after(("audio",), {}, time.monotonic() + args.timeout)
                         with recording.stop() as recording_file:
                             save_temporary_media(
-                                recording_file.path,
+                                recording_file,
                                 args.output_dir / f"ti-cloud-storage-replay-recording-channel-{channel_id}.mp4",
                                 b"ftyp",
                                 4,
@@ -410,17 +554,20 @@ def run() -> None:
                             pass
                         raise
 
+                    snapshot_deadline = time.monotonic() + args.timeout
                     while True:
+                        if time.monotonic() >= snapshot_deadline:
+                            raise TimeoutError("timed out waiting for snapshot")
                         try:
                             snapshot = video.take_snapshot()
                             break
                         except tirtc.NoFrameError:
                             name = f"video:{channel_id}"
                             baseline = signals.snapshot((name,))
-                            signals.wait_after((name,), baseline, deadline)
+                            signals.wait_after((name,), baseline, snapshot_deadline)
                     with snapshot:
                         save_temporary_media(
-                            snapshot.path,
+                            snapshot,
                             args.output_dir / f"ti-cloud-storage-snapshot-channel-{channel_id}.jpg",
                             b"\xff\xd8",
                             0,
@@ -428,6 +575,9 @@ def run() -> None:
                     print(f"consumed video channel {channel_id}")
 
                 replay.pause()
+                if video_outputs:
+                    with video_outputs[0][1].take_snapshot() as paused_snapshot:
+                        save_temporary_media(paused_snapshot, args.output_dir / "ti-cloud-storage-paused-snapshot.jpg", b"\xff\xd8", 0)
                 replay.resume()
 
                 if audio is not None and video_outputs:
@@ -448,18 +598,19 @@ def run() -> None:
                 )
                 baseline = signals.snapshot((progress_name,))
                 replay.set_speed(storage.ReplaySpeed.X0_5)
-                signals.wait_after((progress_name,), baseline, deadline)
+                signals.wait_after((progress_name,), baseline, time.monotonic() + args.timeout)
                 if replay.speed is not storage.ReplaySpeed.X0_5:
                     raise RuntimeError("replay speed did not change to 0.5x")
                 baseline = signals.snapshot((progress_name,))
                 replay.set_speed(storage.ReplaySpeed.X1)
-                signals.wait_after((progress_name,), baseline, deadline)
+                signals.wait_after((progress_name,), baseline, time.monotonic() + args.timeout)
 
-                if not terminal.wait(max(0, deadline - time.monotonic())):
+                if not terminal.wait(args.timeout):
                     raise TimeoutError("timed out waiting for replay completion")
                 if terminal_error:
                     raise terminal_error[0]
 
+                full_exports: list[dict[str, object]] = []
                 for channel_id, video, encoded_video in video_outputs:
                     export = cloud.export_recording(
                         selected.start_time,
@@ -468,7 +619,7 @@ def run() -> None:
                         audio_channel_id=args.audio_channel_id,
                     )
                     try:
-                        exported = export.wait(timeout=max(0.001, deadline - time.monotonic()))
+                        exported = export.wait(timeout=args.timeout)
                     except tirtc.OperationTimeoutError:
                         exported = export.stop()
                     with exported:
@@ -483,6 +634,14 @@ def run() -> None:
                             raise RuntimeError("range export did not finish scanning usable video")
                         if not report.complete:
                             raise RuntimeError("range export is incomplete")
+                        full_exports.append({
+                            "channel_id": channel_id,
+                            "complete": True,
+                            "termination": "EXHAUSTED",
+                            "unprocessed_ranges": 0,
+                            "saved_name": f"ti-cloud-storage-range-export-channel-{channel_id}.mp4",
+                            "source_deleted": True,
+                        })
                         print(
                             f"export channel={channel_id} complete={report.complete} "
                             f"termination={report.termination.name} "
@@ -491,13 +650,109 @@ def run() -> None:
                             f"unprocessed={len(report.unprocessed_ranges)}"
                         )
                         save_temporary_media(
-                            exported.path,
+                            exported,
                             args.output_dir / f"ti-cloud-storage-range-export-channel-{channel_id}.mp4",
                             b"ftyp",
                             4,
                         )
                     encoded_video.detach()
                     video.detach()
+
+                if not video_outputs:
+                    if encoded_audio is not None:
+                        encoded_audio.detach()
+                    if audio is not None:
+                        audio.detach()
+                    return
+
+                media_tail = selected
+                gap_tail = selected
+                empty_start = gap_tail.end_time
+                empty_end = empty_start + timedelta(seconds=60)
+                following = cloud.list_recordings(
+                    empty_start,
+                    empty_end,
+                    timeout=args.timeout,
+                )
+                if following:
+                    gap_tail = max(
+                        following, key=lambda item: (item.end_time, item.start_time)
+                    )
+                    empty_start = gap_tail.end_time
+                    empty_end = empty_start + timedelta(seconds=60)
+                    following = cloud.list_recordings(
+                        empty_start,
+                        empty_end,
+                        timeout=args.timeout,
+                    )
+                if following:
+                    raise RuntimeError(
+                        "partial export fixture needs a confirmed empty following minute"
+                    )
+                partial_start = max(
+                    media_tail.start_time,
+                    media_tail.end_time - timedelta(seconds=12),
+                )
+                if partial_start >= media_tail.end_time:
+                    raise RuntimeError("partial export fixture has no valid recorded tail")
+                partial_channel = video_outputs[0][0]
+                partial_task = cloud.export_recording(
+                    partial_start,
+                    empty_end,
+                    video_channel_id=partial_channel,
+                    audio_channel_id=args.audio_channel_id,
+                )
+                try:
+                    partial_file = partial_task.wait(
+                        timeout=args.timeout
+                    )
+                except tirtc.OperationTimeoutError:
+                    partial_file = partial_task.stop()
+                partial_name = (
+                    f"ti-cloud-storage-partial-export-channel-{partial_channel}.mp4"
+                )
+                with partial_file:
+                    partial_report = partial_task.report
+                    if (
+                        partial_task.progress != 1.0
+                        or partial_report.complete
+                        or partial_report.termination
+                        is not storage.ExportTermination.EXHAUSTED
+                        or not partial_report.segments
+                        or not partial_report.gaps
+                        or partial_report.unprocessed_ranges
+                        or partial_report.covered_duration_ms <= 0
+                    ):
+                        raise RuntimeError(
+                            "partial export did not exhaust the recorded tail and confirmed empty window"
+                        )
+                    save_temporary_media(
+                        partial_file,
+                        args.output_dir / partial_name,
+                        b"ftyp",
+                        4,
+                    )
+                (args.output_dir / "export-proof.json").write_text(
+                    json.dumps({
+                        "full": {
+                            "status": "passed",
+                            "exports": full_exports,
+                        },
+                        "partial": {
+                            "status": "passed",
+                            "complete": False,
+                            "termination": "EXHAUSTED",
+                            "segments": len(partial_report.segments),
+                            "gaps": len(partial_report.gaps),
+                            "unprocessed_ranges": 0,
+                            "confirmed_empty_window": True,
+                            "channel_id": partial_channel,
+                            "saved_name": partial_name,
+                            "source_deleted": True,
+                        },
+                    }, sort_keys=True) + "\n",
+                    encoding="utf-8",
+                )
                 if encoded_audio is not None:
                     encoded_audio.detach()
                 if audio is not None:

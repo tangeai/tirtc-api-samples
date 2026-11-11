@@ -1,1 +1,3 @@
-tirtc==2.5.0
+# tirtc-version: 2.6.4a1
+tirtc @ https://github.com/tangeai/tirtc-sdk-python/releases/download/v2.6.4-alpha.1/tirtc-2.6.4a1-cp311-abi3-macosx_11_0_arm64.whl#sha256=838d2f460d7d938092f539385c35c119a65c44f745b544df4b0721ff39e84142 ; implementation_name == "cpython" and python_version >= "3.11" and sys_platform == "darwin" and platform_machine == "arm64"
+tirtc @ https://github.com/tangeai/tirtc-sdk-python/releases/download/v2.6.4-alpha.1/tirtc-2.6.4a1-cp311-abi3-manylinux_2_35_x86_64.whl#sha256=e63ff2b54722e524cb84868c28350a0b014246c37eb6ce74bb3fd9b2b73fd60c ; implementation_name == "cpython" and python_version >= "3.11" and sys_platform == "linux" and platform_machine == "x86_64"
