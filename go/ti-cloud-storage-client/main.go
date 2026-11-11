@@ -129,6 +129,44 @@ func (s *frameSignals) snapshot() frameSnapshot {
 	}
 }
 
+// Network failures keep the original public code and exact operation. Cleanup
+// signs the observation only after all application-owned resources are released.
+type networkOperationFailure struct {
+	callsite string
+	code     int32
+	cause    error
+}
+
+func (failure *networkOperationFailure) Error() string { return failure.cause.Error() }
+func (failure *networkOperationFailure) Unwrap() error { return failure.cause }
+func networkFailure(callsite string, err error) error {
+	var public *storage.Error
+	if errors.As(err, &public) {
+		switch public.Code {
+		case 6009, 6114, 6136, 6137:
+			return &networkOperationFailure{callsite: callsite, code: public.Code, cause: err}
+		}
+	}
+	return err
+}
+
+func finishNetworkFailure(outputDir string, original, cleanupErr error) error {
+	resultErr := errors.Join(original, cleanupErr)
+	var failure *networkOperationFailure
+	if cleanupErr == nil && errors.As(original, &failure) {
+		payload, err := json.Marshal(map[string]any{
+			"schema": "tirtc.headless-network-failure/v1", "callsite": failure.callsite,
+			"public_error":     map[string]any{"code": failure.code, "source": "go-public-sdk"},
+			"cleanup_complete": true,
+		})
+		if err == nil {
+			err = os.WriteFile(filepath.Join(outputDir, "network-failure.json"), append(payload, '\n'), 0o600)
+		}
+		resultErr = errors.Join(resultErr, err)
+	}
+	return resultErr
+}
+
 func main() {
 	if err := run(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -136,10 +174,16 @@ func main() {
 	}
 }
 
-func run() error {
+func run() (resultErr error) {
 	config, err := parseConfig()
 	if err != nil {
 		return err
+	}
+	if err := os.MkdirAll(config.outputDir, 0o700); err != nil {
+		return fmt.Errorf("prepare output directory: %w", err)
+	}
+	if err := os.Remove(filepath.Join(config.outputDir, "network-failure.json")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("clear prior network failure evidence: %w", err)
 	}
 	appID := os.Getenv("TI_CLOUD_STORAGE_APP_ID")
 	accessKeyID := os.Getenv("TI_CLOUD_STORAGE_ACCESS_KEY_ID")
@@ -147,9 +191,6 @@ func run() error {
 	deviceID := os.Getenv("TI_CLOUD_STORAGE_DEVICE_ID")
 	if appID == "" || accessKeyID == "" || accessKeySecret == "" || deviceID == "" {
 		return errors.New("TI_CLOUD_STORAGE_APP_ID, TI_CLOUD_STORAGE_ACCESS_KEY_ID, TI_CLOUD_STORAGE_ACCESS_KEY_SECRET, and TI_CLOUD_STORAGE_DEVICE_ID are required")
-	}
-	if err := os.MkdirAll(config.outputDir, 0o700); err != nil {
-		return fmt.Errorf("prepare output directory: %w", err)
 	}
 	client, err := storage.NewClient(storage.ClientOptions{
 		AppID: appID, AccessKeyID: accessKeyID, AccessKeySecret: accessKeySecret,
@@ -161,8 +202,6 @@ func run() error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
-	defer cancel()
 
 	var replay *storage.Replay
 	var audio *storage.AudioOutput
@@ -223,7 +262,9 @@ func run() error {
 		cleaned = err == nil
 		return err
 	}
-	defer func() { _ = cleanup() }()
+	defer func() {
+		resultErr = finishNetworkFailure(config.outputDir, resultErr, cleanup())
+	}()
 
 	location, err := time.LoadLocation("Asia/Shanghai")
 	if err != nil {
@@ -231,12 +272,17 @@ func run() error {
 	}
 	startDate := config.startTime.In(location).Format(time.DateOnly)
 	endDate := config.endTime.In(location).Format(time.DateOnly)
-	if _, err := client.ListRecordingDays(ctx, deviceID, startDate, endDate); err != nil {
-		return fmt.Errorf("list recording days: %w", err)
-	}
-	ranges, err := client.ListRecordings(ctx, deviceID, config.startTime, config.endTime)
+	queryCtx, cancelQuery := context.WithTimeout(ctx, operationTimeout)
+	_, err = client.ListRecordingDays(queryCtx, deviceID, startDate, endDate)
+	cancelQuery()
 	if err != nil {
-		return fmt.Errorf("list recording ranges: %w", err)
+		return networkFailure("cloud.initial_query", fmt.Errorf("list recording days: %w", err))
+	}
+	queryCtx, cancelQuery = context.WithTimeout(ctx, operationTimeout)
+	ranges, err := client.ListRecordings(queryCtx, deviceID, config.startTime, config.endTime)
+	cancelQuery()
+	if err != nil {
+		return networkFailure("cloud.initial_query", fmt.Errorf("list recording ranges: %w", err))
 	}
 	ordered := newestFirstRecordingRanges(ranges)
 	if len(ordered) == 0 {
@@ -262,7 +308,7 @@ func run() error {
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("create replay: %w", err)
+		return networkFailure("cloud.open_start", fmt.Errorf("create replay: %w", err))
 	}
 	if config.audioChannelID != nil {
 		audio, encodedAudio, err = createAudioOutputs(audioFrames, failures)
@@ -293,7 +339,7 @@ func run() error {
 		}
 	}
 	if err := replay.Play(selected.StartTime, selected.EndTime); err != nil {
-		return fmt.Errorf("play replay: %w", err)
+		return networkFailure("cloud.open_start", fmt.Errorf("play replay: %w", err))
 	}
 	var rawDump *storage.RawDump
 	var rawDumpStarted time.Time
@@ -408,15 +454,51 @@ func run() error {
 	if err := callWhenIdle(ctx, replay.Resume); err != nil {
 		return fmt.Errorf("resume replay: %w", err)
 	}
-	for _, pair := range videos {
+	for index := range videos {
+		pair := &videos[index]
 		recording, startErr := replay.StartRecording(storage.StartRecordingOptions{
 			VideoChannelID: pair.channelID, AudioChannelID: config.audioChannelID,
 		})
 		if startErr != nil {
 			return fmt.Errorf("start replay recording channel %d: %w", pair.channelID, startErr)
 		}
-		baseline := pair.frames.snapshot()
-		if waitErr := waitVideoRecordingFramesAfter(ctx, pair.frames, baseline, failures); waitErr != nil {
+		// Output callbacks have their own asynchronous mailboxes. Replace the
+		// encoded observer after Start: only the new binding can prove that a
+		// source admission included this recording, even when old callbacks lag.
+		waitErr := observeRecordingVideo(ctx, pair.frames, failures, func(fresh *frameSignals) error {
+			closeCtx, cancelClose := context.WithTimeout(ctx, resourceCloseTimeout)
+			defer cancelClose()
+			if closeErr := closeEventually(closeCtx, pair.encoded.Close); closeErr != nil {
+				return closeErr
+			}
+			pair.encoded = nil
+			observer, createErr := createEncodedVideoOutput(fresh, failures, pair.channelID)
+			if createErr != nil {
+				return createErr
+			}
+			pair.frames, pair.encoded = fresh, observer
+			return callWhenIdle(ctx, func() error { return observer.Attach(replay, pair.channelID) })
+		})
+		if waitErr == nil && config.audioChannelID != nil {
+			// This binding begins after the observed video anchor. Runtime
+			// enqueues recording media before dispatching the Output callback.
+			waitErr = observeRecordingAudio(ctx, failures, func(fresh *frameSignal) error {
+				closeCtx, cancelClose := context.WithTimeout(ctx, resourceCloseTimeout)
+				defer cancelClose()
+				if closeErr := closeEventually(closeCtx, encodedAudio.Close); closeErr != nil {
+					return closeErr
+				}
+				encodedAudio = nil
+				audioFrames.encodedAudio = fresh
+				observer, createErr := createEncodedAudioOutput(audioFrames, failures)
+				if createErr != nil {
+					return createErr
+				}
+				encodedAudio = observer
+				return callWhenIdle(ctx, func() error { return observer.Attach(replay, *config.audioChannelID) })
+			})
+		}
+		if waitErr != nil {
 			file, stopErr := recording.Stop()
 			if file.Path != "" {
 				stopErr = errors.Join(stopErr, file.Delete())
@@ -528,7 +610,8 @@ func run() error {
 		if index > 0 && exportEnd.After(exportStart.Add(5*time.Second)) {
 			exportEnd = exportStart.Add(5 * time.Second)
 		}
-		exportTask, exportErr := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+		exportCtx, cancelExport := context.WithTimeout(ctx, operationTimeout)
+		exportTask, exportErr := client.ExportRecording(exportCtx, deviceID, storage.ExportOptions{
 			StartTime: exportStart, EndTime: exportEnd,
 			VideoChannelID: channelID, AudioChannelID: config.audioChannelID,
 			OnProgress: func(progress storage.ExportProgress) {
@@ -539,9 +622,11 @@ func run() error {
 			},
 		})
 		if exportErr != nil {
+			cancelExport()
 			return fmt.Errorf("start channel %d range export: %w", channelID, exportErr)
 		}
 		exported, waitErr := exportTask.Wait()
+		cancelExport()
 		fmt.Printf("export channel=%d report complete=%t termination=%d covered=%s gaps=%d unprocessed=%d cause=%v\n",
 			channelID, exported.Report.Complete, exported.Report.Termination, exported.Report.CoveredDuration,
 			len(exported.Report.Gaps), len(exported.Report.UnprocessedRanges), exported.Report.Cause)
@@ -590,14 +675,18 @@ func run() error {
 	mediaTail := selected
 	gapTail := selected
 	emptyStart, emptyEnd := gapTail.EndTime, gapTail.EndTime.Add(time.Minute)
-	following, err := client.ListRecordings(ctx, deviceID, emptyStart, emptyEnd)
+	queryCtx, cancelQuery = context.WithTimeout(ctx, operationTimeout)
+	following, err := client.ListRecordings(queryCtx, deviceID, emptyStart, emptyEnd)
+	cancelQuery()
 	if err != nil {
 		return fmt.Errorf("confirm empty window after recording tail: %w", err)
 	}
 	if len(following) > 0 {
 		gapTail = newestFirstRecordingRanges(following)[0]
 		emptyStart, emptyEnd = gapTail.EndTime, gapTail.EndTime.Add(time.Minute)
-		following, err = client.ListRecordings(ctx, deviceID, emptyStart, emptyEnd)
+		queryCtx, cancelQuery = context.WithTimeout(ctx, operationTimeout)
+		following, err = client.ListRecordings(queryCtx, deviceID, emptyStart, emptyEnd)
+		cancelQuery()
 		if err != nil {
 			return fmt.Errorf("confirm shifted empty window after recording tail: %w", err)
 		}
@@ -613,13 +702,16 @@ func run() error {
 		return errors.New("partial export fixture has no valid recorded tail")
 	}
 	partialChannel := videos[0].channelID
-	partialTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+	partialCtx, cancelPartial := context.WithTimeout(ctx, operationTimeout)
+	partialTask, err := client.ExportRecording(partialCtx, deviceID, storage.ExportOptions{
 		StartTime: partialStart, EndTime: emptyEnd, VideoChannelID: partialChannel,
 	})
 	if err != nil {
+		cancelPartial()
 		return fmt.Errorf("start partial export for channel %d: %w", partialChannel, err)
 	}
 	partial, err := partialTask.Wait()
+	cancelPartial()
 	if err != nil {
 		if partial.File != nil {
 			err = errors.Join(err, partial.File.Delete())
@@ -672,7 +764,9 @@ func run() error {
 	// Select at most five seconds confirmed by the public report, even for partial output.
 	// Collect this completed task only after Client.Close; check its own report again.
 	completed := make(chan struct{}, 1)
-	retainedTask, err := client.ExportRecording(ctx, deviceID, storage.ExportOptions{
+	retainedCtx, cancelRetained := context.WithTimeout(ctx, operationTimeout)
+	defer cancelRetained()
+	retainedTask, err := client.ExportRecording(retainedCtx, deviceID, storage.ExportOptions{
 		StartTime: retainedRange.StartTime, EndTime: retainedRange.EndTime,
 		VideoChannelID: videos[0].channelID, AudioChannelID: config.audioChannelID,
 		OnProgress: func(progress storage.ExportProgress) {
@@ -689,13 +783,13 @@ func run() error {
 	}
 	select {
 	case <-completed:
-	case <-ctx.Done():
+	case <-retainedCtx.Done():
 		cancelErr := retainedTask.Cancel()
 		partial, waitErr := retainedTask.Wait()
 		if partial.File != nil {
 			waitErr = errors.Join(waitErr, partial.File.Delete())
 		}
-		return fmt.Errorf("wait for retained export completion: %w", errors.Join(ctx.Err(), cancelErr, waitErr))
+		return fmt.Errorf("wait for retained export completion: %w", errors.Join(retainedCtx.Err(), cancelErr, waitErr))
 	}
 	if err := cleanup(); err != nil {
 		cancelErr := retainedTask.Cancel()
@@ -891,12 +985,19 @@ func createAudioOutputs(frames *frameSignals, failures chan<- error) (*storage.A
 	if err != nil {
 		return nil, nil, err
 	}
-	encodedAudio, err := storage.NewEncodedAudioOutput(storage.EncodedAudioOutputOptions{OnFrame: func(storage.EncodedAudioFrame) { frames.encodedAudio.notify() }, OnError: onError})
+	encodedAudio, err := createEncodedAudioOutput(frames, failures)
 	if err != nil {
 		_ = audio.Close()
 		return nil, nil, err
 	}
 	return audio, encodedAudio, nil
+}
+
+func createEncodedAudioOutput(frames *frameSignals, failures chan<- error) (*storage.EncodedAudioOutput, error) {
+	return storage.NewEncodedAudioOutput(storage.EncodedAudioOutputOptions{
+		OnFrame: func(storage.EncodedAudioFrame) { frames.encodedAudio.notify() },
+		OnError: func(err error) { notifyError(failures, err) },
+	})
 }
 
 func createVideoOutputs(channelID uint8, failures chan<- error) (videoOutputPair, error) {
@@ -906,17 +1007,66 @@ func createVideoOutputs(channelID uint8, failures chan<- error) (videoOutputPair
 	if err != nil {
 		return videoOutputPair{}, err
 	}
-	encodedVideo, err := storage.NewEncodedVideoOutput(storage.EncodedVideoOutputOptions{OnFrame: func(frame storage.EncodedVideoFrame) {
-		frames.encodedVideo.notify()
-		if frame.KeyFrame {
-			frames.encodedVideoKeyFrame.notify()
-		}
-	}, OnError: onError})
+	encodedVideo, err := createEncodedVideoOutput(frames, failures, channelID)
 	if err != nil {
 		_ = video.Close()
 		return videoOutputPair{}, err
 	}
 	return videoOutputPair{channelID: channelID, decoded: video, encoded: encodedVideo, frames: frames}, nil
+}
+
+func createEncodedVideoOutput(frames *frameSignals, failures chan<- error, channelID uint8) (*storage.EncodedVideoOutput, error) {
+	return storage.NewEncodedVideoOutput(storage.EncodedVideoOutputOptions{
+		OnFrame: func(frame storage.EncodedVideoFrame) {
+			frames.encodedVideo.notify()
+			if frame.KeyFrame {
+				frames.encodedVideoKeyFrame.notify()
+			}
+		},
+		OnError: func(err error) { notifyError(failures, fmt.Errorf("video channel %d: %w", channelID, err)) },
+	})
+}
+
+// Each replacement is retained by the caller's existing resource owner before
+// Attach. A failed replacement or wait therefore follows the same cleanup path.
+func observeRecordingVideo(ctx context.Context, previous *frameSignals, failures <-chan error,
+	replaceObserver func(*frameSignals) error) error {
+	fresh := newFrameSignals()
+	fresh.video = previous.video
+	baseline := fresh.snapshot()
+	if err := replaceObserver(fresh); err != nil {
+		return err
+	}
+	if err := waitVideoRecordingFramesAfter(ctx, fresh, baseline, failures); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-failures:
+		return err
+	default:
+		return nil
+	}
+}
+
+func observeRecordingAudio(ctx context.Context, failures <-chan error,
+	replaceObserver func(*frameSignal) error) error {
+	fresh := newFrameSignal()
+	if err := replaceObserver(fresh); err != nil {
+		return err
+	}
+	if err := waitFrameAfter(ctx, "recording audio after video anchor", fresh, 0, failures); err != nil {
+		return err
+	}
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-failures:
+		return err
+	default:
+		return nil
+	}
 }
 
 func waitSelectedEncodedFrames(ctx context.Context, audioFrames *frameSignals, receiveAudio bool, videos []videoOutputPair, failures <-chan error) error {
@@ -990,6 +1140,8 @@ func waitRecordingFramesAfter(ctx context.Context, frames *frameSignals, baselin
 }
 
 func waitFrameAfter(ctx context.Context, name string, signal *frameSignal, baseline uint64, failures <-chan error) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	for signal.count.Load() <= baseline {
 		select {
 		case <-signal.ready:
@@ -1008,6 +1160,8 @@ func takeSnapshotWhenReady(
 	videoFrames *frameSignal,
 	failures <-chan error,
 ) (storage.SnapshotFile, error) {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	for {
 		baseline := videoFrames.count.Load()
 		snapshot, err := take()
@@ -1021,6 +1175,8 @@ func takeSnapshotWhenReady(
 }
 
 func waitReplayTerminal(ctx context.Context, terminal <-chan error, failures <-chan error) error {
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
 	select {
 	case err := <-terminal:
 		if err != nil {

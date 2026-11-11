@@ -20,4 +20,4 @@ go tool tirtc-build build --output dist/bin/tirtc-client ./example/client
 
 保存过程拒绝 symlink、非普通文件和超过 512 MiB 的输入，并使用 exclusive create，避免覆盖已有业务文件。Runtime 临时源文件在保存成功后通过 `Delete()` 删除。
 
-测试判据与证据范围见 [Go TEST.html](https://gitlab.tange-ai.com/tirtc-nexus/tirtc/-/blob/develop/go/TEST.html)。
+测试判据与证据范围见 [Go TEST.html](https://gitlab.tange-ai.com/tirtc-nexus/tirtc/-/blob/main/go/TEST.html)。

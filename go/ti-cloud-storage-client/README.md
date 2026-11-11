@@ -20,4 +20,4 @@ go tool tirtc-build build --output dist/bin/ti-cloud-storage-client ./example/st
 
 两个目录必须是可写绝对路径，Channel ID 位于 `0..255` 且彼此不同。非默认环境可追加 `--endpoint`。Runtime 在每个操作内签发或刷新设备 Token，Example 不接收预签 Token，也不实现重试状态机。
 
-程序保存 Snapshot、Replay Recording、范围 Export 与部分覆盖 Export，打印对应覆盖报告。应用可在 Client 关闭后取得已经成功交付的文件，用标准文件 API 保存，并通过 `Delete()` 删除 Runtime 临时源。测试判据与证据范围见 [Go TEST.html](https://gitlab.tange-ai.com/tirtc-nexus/tirtc/-/blob/develop/go/TEST.html)。
+程序保存 Snapshot、Replay Recording、范围 Export 与部分覆盖 Export，打印对应覆盖报告。应用可在 Client 关闭后取得已经成功交付的文件，用标准文件 API 保存，并通过 `Delete()` 删除 Runtime 临时源。测试判据与证据范围见 [Go TEST.html](https://gitlab.tange-ai.com/tirtc-nexus/tirtc/-/blob/main/go/TEST.html)。
