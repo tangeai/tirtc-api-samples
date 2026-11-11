@@ -1,6 +1,6 @@
 {
-  "version": "2.6.2",
-  "url": "https://github.com/tangeai/tirtc-sdk-ohos/releases/download/v2.6.2/tirtc.har",
-  "size": 8305343,
-  "sha256": "90e2a90024bc5ee0f77e6a1312c2bf23af4f6e8ff99c9fd90a970ad2b8ad4c77"
+  "version": "2.6.4-alpha.1",
+  "url": "https://github.com/tangeai/tirtc-sdk-ohos/releases/download/v2.6.4-alpha.1/tirtc.har",
+  "size": 8318098,
+  "sha256": "fb0bd8291919213f4ffe5dd2bc3ca4ba44ccd282ae14a533212332d93ef7ff83"
 }
