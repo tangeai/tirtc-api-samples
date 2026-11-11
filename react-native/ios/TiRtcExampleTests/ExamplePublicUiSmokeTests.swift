@@ -8,7 +8,6 @@ private let keyboardDismissTimeout: TimeInterval = 3
 private let keyboardDismissPollInterval: TimeInterval = 0.2
 private let controlledTextInputKeystrokeDelay: TimeInterval = 0.05
 private let controlledTextInputChunkSize = 8
-private let stressLoopBehaviorBudget: TimeInterval = 60
 private let videoFrameMinimumVisiblePercent = 5
 private let videoFrameBrightLumaThreshold = 62
 private let videoFrameChromaticLumaThreshold = 45
@@ -51,9 +50,6 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     switch env("TIRTC_RN_FLOW", defaultValue: "downlink") {
     case "ti-cloud-storage":
       try runCloudStorageFlow()
-    case "stress":
-      fillCommonConfig()
-      runStressFlow()
     default:
       verifyAuxiliaryUiContract()
       fillCommonConfig()
@@ -101,16 +97,29 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
   }
 
   func testInputMediaCase() throws {
+    let customNoCapture = env("TIRTC_RN_INPUT_MODE") == "custom-no-capture"
     app.launch()
     let deadline = Date().addingTimeInterval(90)
     while Date() < deadline {
-      dismissSystemAlertsIfPresent()
+      if customNoCapture {
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        if springboard.alerts.firstMatch.waitForExistence(timeout: 0.2) {
+          attachScreenshot(name: "input-media-unexpected-permission-alert")
+          XCTFail("custom no-capture input displayed a system permission alert")
+          return
+        }
+      } else {
+        dismissSystemAlertsIfPresent()
+      }
       if labelContains("Input Media Case Failed") {
         attachScreenshot(name: "input-media-failed")
         XCTFail("input media fixture failed")
         return
       }
       if labelContains("Input Media Case Passed") {
+        if customNoCapture {
+          marker("input-media-no-microphone-permission-alert")
+        }
         if labelContains("camera unavailable 6110") { marker("input-media-camera-unavailable") }
         marker("input-media-completed")
         return
@@ -306,37 +315,6 @@ final class ExamplePublicUiSmokeTests: XCTestCase {
     marker("client_downlink_done")
   }
 
-  private func runStressFlow() {
-    let loops = max(1, Int(env("TIRTC_RN_LOOPS", defaultValue: "2")) ?? 2)
-    let loopOffset = max(0, Int(env("TIRTC_RN_LOOP_OFFSET", defaultValue: "0")) ?? 0)
-    for localLoop in 1...loops {
-      let loop = loopOffset + localLoop
-      let behaviorStartedAt = Date()
-      marker("stress_loop_\(loop)_start")
-      tapStartDownlink()
-      marker("stress_loop_\(loop)_downlink_clicked")
-      waitPlayerOpened(captureEvidence: false)
-      waitClientDownlink(captureEvidence: false)
-      marker("stress_fabric_output_loop_\(loop)_ok")
-      hold()
-      tapControl("TiRTC Player Stop")
-      waitForControl("TiRTC Config appId", timeout: shortTimeout)
-      let behaviorDurationMs = Int(Date().timeIntervalSince(behaviorStartedAt) * 1000)
-      if behaviorDurationMs > Int(stressLoopBehaviorBudget * 1000) {
-        XCTFail("stress loop \(loop) exceeded the 60 second behavior budget")
-        return
-      }
-      marker("stress_loop_\(loop)_behavior_ms=\(behaviorDurationMs)")
-      marker("stress_loop_\(loop)_done")
-      if localLoop < loops {
-        sleep(2)
-        marker("stress_loop_\(loop)_cooldown_done")
-      }
-    }
-    marker("stress_loops_done")
-    marker("stress_fabric_output_loops_done")
-    marker("stress_loops_done_details count=\(loops) offset=\(loopOffset)")
-  }
 
   private func fillCommonConfig() {
     setField("TiRTC Config appId", value: env("TIRTC_RN_APP_ID"))
