@@ -40,7 +40,12 @@ public final class RtcExample {
                  EncodedVideoOutput secondEncoded = secondaryId==videoId?null:new EncodedVideoOutput(connection,secondaryId,secondary.encodedVideo())) {
                 requireNoFrame(video); if(secondVideo!=null) requireNoFrame(secondVideo);
                 result.setProperty("zeroFrameSnapshot","true");
-                connection.connect(required(flags,"remote-id")).get(90,TimeUnit.SECONDS);
+                try { connection.connect(required(flags,"remote-id")).get(90,TimeUnit.SECONDS); }
+                catch (ExecutionException failure) {
+                    if (failure.getCause() instanceof TiRtcException) throw new ConnectFailure((TiRtcException)failure.getCause());
+                    throw failure;
+                }
+                catch (TiRtcException failure) { throw new ConnectFailure(failure); }
                 result.setProperty("connected","true");
                 connection.subscribeAudio(audioId); connection.subscribeVideo(videoId);
                 if(secondVideo!=null) connection.subscribeVideo(secondaryId);
@@ -94,9 +99,21 @@ public final class RtcExample {
                 connection.unsubscribeVideo(videoId); if(secondVideo!=null) connection.unsubscribeVideo(secondaryId); connection.unsubscribeAudio(audioId);
             }
             if(flags.containsKey("upload-logs")) { check(!client.uploadLogs().isEmpty(),"log upload returned identifier"); result.setProperty("uploadLogs","true"); }
+        } catch (ConnectFailure failure) {
+            // Suppressed close errors make the session unsafe to recreate.
+            if (failure.getSuppressed().length == 0) {
+                TiRtcException original = (TiRtcException)failure.getCause();
+                String json = "{\"schema\":\"tirtc.headless-network-failure/v1\",\"callsite\":\"rtc.client_connect\",\"public_error\":{\"code\":" + original.code() + ",\"source\":\"Connection.connect\",\"category\":\"" + original.category().name() + "\"},\"cleanup_complete\":true}\n";
+                Files.write(output.resolve("network-failure.json"), json.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            }
+            throw failure;
         }
         messages.write(result);
         result.setProperty("filesDeleted","true"); result.setProperty("closed","true"); write(output,result);
+    }
+    static final class ConnectFailure extends RuntimeException {
+        private static final long serialVersionUID = 1L;
+        ConnectFailure(TiRtcException failure) { super(failure); }
     }
     static void requireNoFrame(VideoOutput video) {
         try(SnapshotFile unexpected=video.takeSnapshot()) { throw new IllegalStateException("zero-frame snapshot accepted"); }
