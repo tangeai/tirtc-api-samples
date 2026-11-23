@@ -48,7 +48,7 @@ android {
 
 
 dependencies {
-    implementation("com.tange.ai:tirtc:2.6.4")
+    implementation("com.tange.ai:tirtc:2.6.5")
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.appcompat)
     implementation(libs.material)
